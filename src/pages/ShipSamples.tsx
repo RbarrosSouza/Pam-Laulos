@@ -6,7 +6,6 @@ import { fadeUp } from '@/lib/animations'
 import { cn, getSpeciesType } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
-import type { ExamItem } from '@/types/exam-card'
 
 export function ShipSamples() {
   const navigate = useNavigate()
