@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Clock, ShoppingBag, Mail, AlertTriangle, User, Stethoscope, Calendar, Cat, Dog } from 'lucide-react'
+import { Clock, ShoppingBag, Mail, AlertTriangle, User, Calendar, Cat, Dog } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { staggerItem } from '@/lib/animations'
 import { formatHours, cn, getSpeciesType } from '@/lib/utils'
@@ -37,9 +37,6 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
   const progress = card.items_total > 0
     ? Math.round((card.items_ready / card.items_total) * 100)
     : 0
-
-  // Derive lab from first item that has one
-  const labName = items.find((i) => i.lab_name)?.lab_name
 
   // Date: result_received_at (if ready) or created_at (sale date)
   const resultDate = items.find((i) => i.result_received_at)?.result_received_at
