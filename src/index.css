@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  :root {
+    /* === Surfaces === */
+    --background: 150 10% 97%;
+    --foreground: 200 25% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 200 25% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 200 25% 10%;
+
+    /* === Primary: Teal Clínico === */
+    --primary: 168 72% 36%;
+    --primary-foreground: 0 0% 100%;
+
+    /* === Secondary === */
+    --secondary: 200 10% 95%;
+    --secondary-foreground: 200 15% 15%;
+
+    /* === Muted === */
+    --muted: 180 5% 94%;
+    --muted-foreground: 200 10% 46%;
+
+    /* === Accent === */
+    --accent: 168 40% 95%;
+    --accent-foreground: 168 72% 28%;
+
+    /* === Semantic === */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* === Chrome === */
+    --border: 200 12% 89%;
+    --input: 200 12% 89%;
+    --ring: 168 72% 36%;
+    --radius: 0.625rem;
+
+    /* === Sidebar (escura constante, não muda com tema) === */
+    --sidebar-bg: 200 25% 12%;
+    --sidebar-foreground: 200 10% 70%;
+    --sidebar-accent: 168 72% 36%;
+    --sidebar-muted: 200 15% 20%;
+    --sidebar-border: 200 15% 18%;
+  }
+
+  .dark {
+    /* === Surfaces === */
+    --background: 200 25% 7%;
+    --foreground: 200 10% 94%;
+    --card: 200 20% 10%;
+    --card-foreground: 200 10% 94%;
+    --popover: 200 20% 10%;
+    --popover-foreground: 200 10% 94%;
+
+    /* === Primary === */
+    --primary: 168 60% 45%;
+    --primary-foreground: 0 0% 100%;
+
+    /* === Secondary === */
+    --secondary: 200 15% 16%;
+    --secondary-foreground: 200 10% 90%;
+
+    /* === Muted === */
+    --muted: 200 15% 16%;
+    --muted-foreground: 200 8% 56%;
+
+    /* === Accent === */
+    --accent: 168 30% 16%;
+    --accent-foreground: 168 60% 70%;
+
+    /* === Semantic === */
+    --destructive: 0 63% 35%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* === Chrome === */
+    --border: 200 15% 18%;
+    --input: 200 15% 18%;
+    --ring: 168 60% 45%;
+
+    /* === Sidebar === */
+    --sidebar-bg: 200 30% 6%;
+    --sidebar-foreground: 200 10% 70%;
+    --sidebar-accent: 168 60% 45%;
+    --sidebar-muted: 200 20% 12%;
+    --sidebar-border: 200 20% 10%;
+  }
+
+  * {
+    box-sizing: border-box;
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 2.5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+
+  /* Alert dot pulse animations */
+  @keyframes alert-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.35); }
+  }
+
+  .alert-dot-critical {
+    animation: alert-pulse 1.2s ease-in-out infinite;
+  }
+
+  .alert-dot-warning {
+    animation: alert-pulse 2s ease-in-out infinite;
+  }
+
+  /* Focus ring global — acessibilidade */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Skeleton shimmer */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--border)) 50%,
+      hsl(var(--muted)) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: var(--radius);
+  }
+}

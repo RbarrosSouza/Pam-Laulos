@@ -1,0 +1,20 @@
+{
+  "name": "PamVet — Monitor de Exames",
+  "short_name": "PamVet",
+  "description": "Monitor de exames veterinários",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0d9488",
+  "background_color": "#f5f7f5",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["medical", "business"]
+}

@@ -1,0 +1,623 @@
+{
+  "name": "PAM – Email Lab → Exam Tracking + Exam Card",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "forceReconnect": 0
+        }
+      },
+      "id": "7eae3175-7f93-4071-901f-da882d55c70d",
+      "name": "Gmail IMAP - Lab Emails",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [-1536, 96],
+      "credentials": {
+        "imap": {
+          "id": "1hFWIlvGPS81c5AU",
+          "name": "IMAP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-0",
+              "name": "SUPABASE_URL",
+              "value": "https://jvgquuahsxepphhxmshk.supabase.co",
+              "type": "string"
+            },
+            {
+              "id": "cfg-1",
+              "name": "SUPABASE_SERVICE_ROLE_KEY",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2Z3F1dWFoc3hlcHBoaHhtc2hrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTYwMTQzMSwiZXhwIjoyMDY3MTc3NDMxfQ.BuxiqSBLYGWoz2vLiU3uceLQEluFq5Own96wPzU8cxg",
+              "type": "string"
+            },
+            {
+              "id": "cfg-2",
+              "name": "CHATWOOT_BASE_URL",
+              "value": "http://72.60.143.202:3000",
+              "type": "string"
+            },
+            {
+              "id": "cfg-3",
+              "name": "CHATWOOT_ACCOUNT_ID",
+              "value": "4",
+              "type": "string"
+            },
+            {
+              "id": "cfg-4",
+              "name": "CHATWOOT_API_TOKEN",
+              "value": "CONFIGURE_AQUI",
+              "type": "string"
+            },
+            {
+              "id": "cfg-5",
+              "name": "PAMELA_PHONE",
+              "value": "+5516981195074",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "f969b842-5d88-49a0-aedc-6b170d0c5f7f",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-1312, 96]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.SUPABASE_URL }}/rest/v1/exam_tracking",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "email_message_id",
+              "value": "=eq.{{ encodeURIComponent($json.metadata['message-id'] || '') }}"
+            },
+            {
+              "name": "select",
+              "value": "id"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "33262c34-cf91-4c9c-9e74-f2ca2e678aa7",
+      "name": "Supabase - Check Duplicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1088, 96],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a8babbfb-6d92-48b1-bb78-40890f587a9d",
+      "name": "IF - Is New Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-864, 96]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "attachment_0",
+        "options": {}
+      },
+      "id": "extract-pdf-text-node",
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [-752, 96],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Você é um assistente que extrai informações de emails de laboratórios veterinários.\nOs resultados podem estar no corpo do email OU no PDF anexado (ou em ambos).\nPriorize as informações do PDF quando disponível, pois geralmente é mais completo.\nSe o email não for de um laboratório veterinário, retorne todos os campos como null.\nRetorne APENAS um objeto JSON válido, sem markdown, sem explicações.",
+              "role": "system"
+            },
+            {
+              "content": "=Extraia os seguintes dados deste email de laboratório veterinário:\n- pet_name: nome do animal\n- client_name: nome do tutor/proprietário/responsável\n- exam_type: tipo de exame (ex: Hemograma, Bioquímico, Urinálise, Ultrassom, Raio-X, Citologia, etc.)\n- lab_name: nome do laboratório\n\nAssunto: {{ $('Gmail IMAP - Lab Emails').item.json.subject }}\nDe: {{ $('Gmail IMAP - Lab Emails').item.json.from }}\n\nCorpo do email:\n{{ $('Gmail IMAP - Lab Emails').item.json.text || $('Gmail IMAP - Lab Emails').item.json.html || '' }}\n\nTexto extraído do PDF anexado:\n{{ $('Extract PDF Text').item.json.data || 'Nenhum PDF anexado' }}\n\nRetorne SOMENTE o JSON, exemplo: {\"pet_name\": \"Rex\", \"client_name\": \"Maria Silva\", \"exam_type\": \"Hemograma\", \"lab_name\": \"VetLab SP\"}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "d8966efd-3796-4cca-a8af-6f45439ca5a3",
+      "name": "OpenAI - Parse Email",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [-640, 96],
+      "credentials": {
+        "openAiApi": {
+          "id": "vKBno59QWhuUp1sz",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse JSON response from OpenAI\nconst emailData = $('Gmail IMAP - Lab Emails').item.json;\nconst openaiResponse = $input.item.json.message?.content || '{}';\n\nlet parsed;\ntry {\n  // Limpa possível markdown no response\n  const cleaned = openaiResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch(e) {\n  parsed = { pet_name: null, client_name: null, exam_type: null, lab_name: null };\n}\n\nreturn {\n  // Dados do email original\n  email_message_id: emailData.metadata?.['message-id'] || emailData.messageId || String(emailData.attributes?.uid),\n  email_subject: emailData.subject,\n  email_from: emailData.from,\n  // Dados parseados pelo LLM\n  pet_name_parsed: parsed.pet_name || null,\n  client_name_parsed: parsed.client_name || null,\n  exam_type: parsed.exam_type || null,\n  lab_name: parsed.lab_name || null,\n  // Timestamp\n  email_received_at: new Date().toISOString()\n};"
+      },
+      "id": "ceec7ad0-07a3-4284-a15e-78d52429152f",
+      "name": "Code - Extract Parsed Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-288, 96]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.SUPABASE_URL }}/rest/v1/rpc/receive_email_result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_pet_name: $json.pet_name_parsed, p_client_name: $json.client_name_parsed, p_exam_type: $json.exam_type, p_lab_name: $json.lab_name, p_received_at: $json.email_received_at }) }}",
+        "options": {
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenRetries": 2000
+          }
+        }
+      },
+      "id": "rpc-exam-card-update",
+      "name": "Supabase RPC - Update Exam Card",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-288, 320],
+      "notes": "Atualiza exam_card no dashboard PAM. Se há um card aguardando lab com esse pet/exame, marca como 'exame_pronto'. Se não houver match, cria card órfão para triagem manual."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.SUPABASE_URL }}/rest/v1/exam_tracking",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "=eq.aguardando_resultado"
+            },
+            {
+              "name": "origin",
+              "value": "=eq.venda"
+            },
+            {
+              "name": "select",
+              "value": "id,pet_id,client_code,exam_type,sale_product_name"
+            },
+            {
+              "name": "or",
+              "value": "=(sale_product_name.ilike.*{{ encodeURIComponent($json.exam_type || '') }}*,pet_name_parsed.ilike.*{{ encodeURIComponent($json.pet_name_parsed || '') }}*)"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            },
+            {
+              "name": "order",
+              "value": "created_at.desc"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "79533495-fedd-4be0-9d3e-4bd7eb265105",
+      "name": "Supabase - Match Existing Sale",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-64, 96]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "72788e2c-268c-4e68-862e-d9025443d57b",
+      "name": "IF - Sale Match Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [160, 96]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').item.json.SUPABASE_URL }}/rest/v1/exam_tracking?id=eq.{{ $json[0].id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "email_message_id",
+              "value": "={{ $('Code - Extract Parsed Data').item.json.email_message_id }}"
+            },
+            {
+              "name": "email_subject",
+              "value": "={{ $('Code - Extract Parsed Data').item.json.email_subject }}"
+            },
+            {
+              "name": "email_from",
+              "value": "={{ $('Code - Extract Parsed Data').item.json.email_from }}"
+            },
+            {
+              "name": "email_received_at",
+              "value": "={{ $('Code - Extract Parsed Data').item.json.email_received_at }}"
+            },
+            {
+              "name": "pet_name_parsed",
+              "value": "={{ $('Code - Extract Parsed Data').item.json.pet_name_parsed }}"
+            },
+            {
+              "name": "client_name_parsed",
+              "value": "={{ $('Code - Extract Parsed Data').item.json.client_name_parsed }}"
+            },
+            {
+              "name": "lab_name",
+              "value": "={{ $('Code - Extract Parsed Data').item.json.lab_name }}"
+            },
+            {
+              "name": "status",
+              "value": "recebido"
+            },
+            {
+              "name": "resolution_method",
+              "value": "sale_match"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f67ce379-7c41-4480-ba15-8f32a532280e",
+      "name": "Supabase - Update Sale Tracking",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [832, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Config').item.json.SUPABASE_URL }}/rest/v1/pets",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "=ilike.*{{ $('Code - Extract Parsed Data').item.json.pet_name_parsed || 'NOMATCH_XYZABC' }}*"
+            },
+            {
+              "name": "select",
+              "value": "id,name,client_code"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0ca5cb3e-948a-4b70-aaf5-9bc7fd3b3da6",
+      "name": "Supabase - Match Pet by Name",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [384, 192]
+    },
+    {
+      "parameters": {
+        "jsCode": "const parsed = $('Code - Extract Parsed Data').item.json;\nconst petData = $('Supabase - Match Pet by Name').item.json;\n\nconst hasPet = Array.isArray(petData) && petData.length > 0;\nconst pet = hasPet ? petData[0] : null;\n\nreturn {\n  email_message_id: parsed.email_message_id,\n  email_subject: parsed.email_subject,\n  email_from: parsed.email_from,\n  email_received_at: parsed.email_received_at,\n  exam_type: parsed.exam_type,\n  lab_name: parsed.lab_name,\n  pet_name_parsed: parsed.pet_name_parsed,\n  client_name_parsed: parsed.client_name_parsed,\n  origin: 'email',\n  // Pet match\n  pet_id: hasPet ? pet.id : null,\n  client_code: hasPet ? pet.client_code : null,\n  // Status: se achou pet → aguardando_contato, senão → recebido com warning\n  status: hasPet ? 'aguardando_contato' : 'recebido',\n  alert_level: hasPet ? 'normal' : 'warning'\n};"
+      },
+      "id": "51043570-2589-47b5-8b0e-69aad036e297",
+      "name": "Code - Prepare Insert Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [608, 192]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.SUPABASE_URL }}/rest/v1/exam_tracking",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "198ec2f6-ff21-4491-8c6e-943f3b802ccc",
+      "name": "Supabase - Insert New Tracking",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [832, 192]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resolve o ID do tracking (seja update ou insert)\nconst fromUpdate = $('Supabase - Update Sale Tracking').item?.json;\nconst fromInsert = $('Supabase - Insert New Tracking').item?.json;\n\nconst trackingData = fromUpdate?.[0] || fromInsert?.[0];\nconst trackingId = trackingData?.id;\n\nif (!trackingId) throw new Error('No tracking ID found');\n\nreturn {\n  tracking_id: trackingId,\n  was_sale_match: !!fromUpdate?.[0]\n};"
+      },
+      "id": "31b444ff-5d6c-4bbe-851d-bacc9f72ee79",
+      "name": "Code - Resolve Tracking ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1056, 96]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.SUPABASE_URL }}/rest/v1/exam_tracking_log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Config').item.json.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "exam_tracking_id",
+              "value": "={{ $json.tracking_id }}"
+            },
+            {
+              "name": "previous_status",
+              "value": "={{ $json.was_sale_match ? 'aguardando_resultado' : null }}"
+            },
+            {
+              "name": "new_status",
+              "value": "recebido"
+            },
+            {
+              "name": "changed_by",
+              "value": "system"
+            },
+            {
+              "name": "change_reason",
+              "value": "={{ $json.was_sale_match ? 'Email do laboratório recebido e casado com venda existente' : 'Email do laboratório recebido via IMAP' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7e085b15-bb83-4353-b2f9-fa693aa1bccc",
+      "name": "Supabase - Insert Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1280, 96]
+    }
+  ],
+  "connections": {
+    "Gmail IMAP - Lab Emails": {
+      "main": [
+        [{ "node": "Config", "type": "main", "index": 0 }]
+      ]
+    },
+    "Config": {
+      "main": [
+        [{ "node": "Supabase - Check Duplicate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Supabase - Check Duplicate": {
+      "main": [
+        [{ "node": "IF - Is New Email?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF - Is New Email?": {
+      "main": [
+        [{ "node": "Extract PDF Text", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract PDF Text": {
+      "main": [
+        [{ "node": "OpenAI - Parse Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI - Parse Email": {
+      "main": [
+        [{ "node": "Code - Extract Parsed Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code - Extract Parsed Data": {
+      "main": [
+        [
+          { "node": "Supabase RPC - Update Exam Card", "type": "main", "index": 0 },
+          { "node": "Supabase - Match Existing Sale", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Supabase - Match Existing Sale": {
+      "main": [
+        [{ "node": "IF - Sale Match Found?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF - Sale Match Found?": {
+      "main": [
+        [{ "node": "Supabase - Update Sale Tracking", "type": "main", "index": 0 }],
+        [{ "node": "Supabase - Match Pet by Name", "type": "main", "index": 0 }]
+      ]
+    },
+    "Supabase - Update Sale Tracking": {
+      "main": [
+        [{ "node": "Code - Resolve Tracking ID", "type": "main", "index": 0 }]
+      ]
+    },
+    "Supabase - Match Pet by Name": {
+      "main": [
+        [{ "node": "Code - Prepare Insert Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code - Prepare Insert Data": {
+      "main": [
+        [{ "node": "Supabase - Insert New Tracking", "type": "main", "index": 0 }]
+      ]
+    },
+    "Supabase - Insert New Tracking": {
+      "main": [
+        [{ "node": "Code - Resolve Tracking ID", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code - Resolve Tracking ID": {
+      "main": [
+        [{ "node": "Supabase - Insert Log", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "tags": ["pam", "exam-monitor", "labs"],
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0d9a9c0abf4197c3a6a0d07da99221ba39f5016890e60b2a11074995231676af"
+  }
+}
