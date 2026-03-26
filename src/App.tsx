@@ -4,6 +4,7 @@ import { AnimatePresence } from 'framer-motion'
 import { Shell } from '@/components/layout/Shell'
 import { Dashboard } from '@/pages/Dashboard'
 import { Tracking } from '@/pages/Tracking'
+import { Settings } from '@/pages/Settings'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,6 +20,7 @@ function AnimatedRoutes() {
         <Route element={<Shell />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/tracking" element={<Tracking />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
     </AnimatePresence>

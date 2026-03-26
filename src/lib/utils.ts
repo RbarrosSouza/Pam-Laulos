@@ -13,6 +13,14 @@ export function formatHours(hours: number): string {
   return remaining > 0 ? `${days}d ${remaining}h` : `${days}d`
 }
 
+export function getSpeciesType(species: string | null): 'cat' | 'dog' | null {
+  if (!species) return null
+  const s = species.toLowerCase()
+  if (s.includes('gato') || s.includes('felin')) return 'cat'
+  if (s.includes('cão') || s.includes('cao') || s.includes('canin')) return 'dog'
+  return null
+}
+
 export function formatDate(dateStr: string | null): string {
   if (!dateStr) return '—'
   return new Intl.DateTimeFormat('pt-BR', {

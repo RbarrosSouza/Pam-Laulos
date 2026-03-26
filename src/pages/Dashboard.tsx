@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   FlaskConical, FileCheck2, AlertTriangle, Phone, Clock,
-  ChevronRight, User, Stethoscope, Calendar
+  ChevronRight, User, Stethoscope, Calendar, Cat, Dog
 } from 'lucide-react'
 import { useExamCards } from '@/hooks/useExamCards'
 import { useExamCardStats } from '@/hooks/useExamCardStats'
 import { useRealtimeExams } from '@/hooks/useRealtimeExams'
 import { TrackingDetail } from '@/components/tracking/TrackingDetail'
 import { StatusChart } from '@/components/dashboard/StatusChart'
-import { formatHours, cn } from '@/lib/utils'
+import { formatHours, cn, getSpeciesType } from '@/lib/utils'
 import { fadeUp, staggerContainer, staggerItem } from '@/lib/animations'
 import type { ExamCard } from '@/types/exam-card'
 import { Link } from 'react-router-dom'
@@ -254,6 +254,8 @@ export function Dashboard() {
 /* ── Mobile Card Component ──────────────────────────────────── */
 function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) {
   const items = card.items ?? []
+  const speciesType = getSpeciesType(card.pet_species)
+  const SpeciesIcon = speciesType === 'cat' ? Cat : speciesType === 'dog' ? Dog : null
   const timeColor = card.alert_level === 'critical'
     ? 'text-red-500'
     : card.alert_level === 'warning'
@@ -293,7 +295,8 @@ function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) 
             {card.alert_level === 'warning' && (
               <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 alert-dot-warning" />
             )}
-            <p className="font-bold text-sm text-[hsl(var(--foreground))] truncate">
+            <p className="font-bold text-sm text-[hsl(var(--foreground))] truncate flex items-center gap-1">
+              {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/60 shrink-0" />}
               {card.pet_name ?? '—'}
             </p>
           </div>

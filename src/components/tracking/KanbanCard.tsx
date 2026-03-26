@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Clock, ShoppingBag, Mail, AlertTriangle, User, Stethoscope, Calendar } from 'lucide-react'
+import { Clock, ShoppingBag, Mail, AlertTriangle, User, Stethoscope, Calendar, Cat, Dog } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { staggerItem } from '@/lib/animations'
-import { formatHours, cn } from '@/lib/utils'
+import { formatHours, cn, getSpeciesType } from '@/lib/utils'
 import { ExamItemRow } from './ExamItemRow'
 import { ContactModal } from './ContactModal'
 import type { ExamCard, ExamItem } from '@/types/exam-card'
@@ -19,6 +19,8 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
   const [contactingItem, setContactingItem] = useState<ExamItem | null>(null)
 
   const petLabel = card.pet_name ?? '—'
+  const speciesType = getSpeciesType(card.pet_species)
+  const SpeciesIcon = speciesType === 'cat' ? Cat : speciesType === 'dog' ? Dog : null
   const timeColor =
     card.alert_level === 'critical'
       ? 'text-red-500 dark:text-red-400'
@@ -75,7 +77,8 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
               <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
             )}
             <div className="min-w-0">
-              <p className="font-bold text-sm text-[hsl(var(--foreground))] leading-tight truncate">
+              <p className="font-bold text-sm text-[hsl(var(--foreground))] leading-tight truncate flex items-center gap-1">
+                {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/60 shrink-0" />}
                 {petLabel}
               </p>
               {(card.client_name || card.vet_name) && (

@@ -14,9 +14,12 @@ import { BottomNav } from '@/components/layout/BottomNav'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 
+import { Settings } from 'lucide-react'
+
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { to: '/tracking', label: 'Rastreamento', icon: ListFilter },
+  { to: '/settings', label: 'Configurações', icon: Settings },
 ]
 
 export function Shell() {
