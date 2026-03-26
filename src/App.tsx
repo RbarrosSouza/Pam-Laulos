@@ -6,6 +6,7 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Tracking } from '@/pages/Tracking'
 import { Settings } from '@/pages/Settings'
 import { ShipSamples } from '@/pages/ShipSamples'
+import { LateExams } from '@/pages/LateExams'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,6 +23,7 @@ function AnimatedRoutes() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/tracking" element={<Tracking />} />
           <Route path="/ship" element={<ShipSamples />} />
+          <Route path="/late" element={<LateExams />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
