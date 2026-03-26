@@ -64,7 +64,7 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
             : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/40'
         )}
       >
-        {/* Row 1: pet name + alert + elapsed */}
+        {/* Row 1: pet name + vet avatar */}
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex items-center gap-1.5 min-w-0">
             {card.alert_level === 'critical' && (
@@ -81,32 +81,33 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
                 {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/60 shrink-0" />}
                 {petLabel}
               </p>
-              {(card.client_name || card.vet_name) && (
-                <div className="flex items-center gap-2 mt-0.5">
-                  {card.client_name && (
-                    <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))] truncate">
-                      <User className="w-2.5 h-2.5 shrink-0" />
-                      {card.client_name}
-                    </span>
-                  )}
-                  {card.vet_name && (
-                    <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]/70 truncate shrink-0">
-                      {card.vet_avatar_url ? (
-                        <img src={card.vet_avatar_url} alt="" className="w-4 h-4 rounded-full object-cover shrink-0" />
-                      ) : (
-                        <Stethoscope className="w-2.5 h-2.5 shrink-0" />
-                      )}
-                      {card.vet_name.split(' ')[0]}
-                    </span>
-                  )}
-                </div>
+              {card.client_name && (
+                <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))] truncate mt-0.5">
+                  <User className="w-2.5 h-2.5 shrink-0" />
+                  {card.client_name}
+                </span>
               )}
             </div>
           </div>
-          <div className={cn('flex items-center gap-1 shrink-0', timeColor)}>
-            <Clock className="w-3 h-3" />
-            <span className="text-xs font-semibold tabular-nums">{formatHours(card.hours_elapsed)}</span>
-          </div>
+
+          {/* Vet avatar (right side, larger) */}
+          {card.vet_avatar_url ? (
+            <img
+              src={card.vet_avatar_url}
+              alt={card.vet_name ?? ''}
+              title={card.vet_name ?? ''}
+              className="w-8 h-8 rounded-full object-cover shrink-0 ring-2 ring-[hsl(var(--border))]"
+            />
+          ) : card.vet_name ? (
+            <div
+              title={card.vet_name}
+              className="w-8 h-8 rounded-full bg-[hsl(var(--muted))] flex items-center justify-center shrink-0"
+            >
+              <span className="text-[10px] font-bold text-[hsl(var(--muted-foreground))]">
+                {card.vet_name.charAt(0).toUpperCase()}
+              </span>
+            </div>
+          ) : null}
         </div>
 
         {/* Items list */}
@@ -147,33 +148,35 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
             )}
           </div>
 
-          {/* Progress bar */}
-          {card.items_total > 0 && (
-            <div className="flex items-center gap-1.5 min-w-0">
-              <div className="w-16 h-1.5 rounded-full bg-[hsl(var(--border))] overflow-hidden">
-                <div
-                  className={cn(
-                    'h-full rounded-full transition-all duration-500',
-                    progress === 100
-                      ? 'bg-green-500'
-                      : progress > 50
-                      ? 'bg-[hsl(var(--primary))]'
-                      : 'bg-[hsl(var(--muted-foreground))]/40'
-                  )}
-                  style={{ width: `${progress}%` }}
-                />
+          <div className="flex items-center gap-2">
+            {/* Progress bar */}
+            {card.items_total > 0 && (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="w-12 h-1.5 rounded-full bg-[hsl(var(--border))] overflow-hidden">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-all duration-500',
+                      progress === 100
+                        ? 'bg-green-500'
+                        : progress > 50
+                        ? 'bg-[hsl(var(--primary))]'
+                        : 'bg-[hsl(var(--muted-foreground))]/40'
+                    )}
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-[hsl(var(--muted-foreground))] tabular-nums shrink-0">
+                  {card.items_ready}/{card.items_total}
+                </span>
               </div>
-              <span className="text-[10px] text-[hsl(var(--muted-foreground))] tabular-nums shrink-0">
-                {card.items_ready}/{card.items_total}
-              </span>
-            </div>
-          )}
+            )}
 
-          {labName && (
-            <span className="text-[10px] text-[hsl(var(--muted-foreground))]/60 truncate max-w-[80px]">
-              {labName}
-            </span>
-          )}
+            {/* Elapsed time */}
+            <div className={cn('flex items-center gap-0.5 shrink-0', timeColor)}>
+              <Clock className="w-2.5 h-2.5" />
+              <span className="text-[10px] font-semibold tabular-nums">{formatHours(card.hours_elapsed)}</span>
+            </div>
+          </div>
         </div>
       </motion.div>
 
