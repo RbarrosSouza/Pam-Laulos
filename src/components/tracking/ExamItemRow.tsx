@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Phone, CheckCircle2, FlaskConical, Pencil, Trash2, Check, X } from 'lucide-react'
+import { Phone, CheckCircle2, FlaskConical, Pencil, Trash2, Check, X, Package } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useUpdateItem, useDeleteItem } from '@/hooks/useExamCardMutations'
@@ -162,6 +162,13 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
             <Trash2 className="w-3 h-3 text-[hsl(var(--muted-foreground))] hover:text-red-500" />
           </button>
         </div>
+      )}
+
+      {/* Shipped icon */}
+      {item.sent_to_lab_at && (
+        <span title={`Enviado por ${item.sent_to_lab_by || '—'}`}>
+          <Package className="w-3.5 h-3.5 text-[hsl(var(--primary))]/60 shrink-0" />
+        </span>
       )}
 
       {/* Action icon (contact / ready / waiting) */}

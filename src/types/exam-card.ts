@@ -13,6 +13,19 @@ export interface ExamItem {
   contacted: boolean
   contacted_at: string | null
   contacted_by: string | null
+  sent_to_lab_at: string | null
+  sent_to_lab_by: string | null
+  shipment_id: string | null
+}
+
+export interface LabShipment {
+  id: string
+  lab_name: string | null
+  sent_by: string
+  sent_at: string
+  items_count: number
+  notes: string | null
+  created_at: string
 }
 
 export interface ExamCard {
