@@ -370,7 +370,7 @@ function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) 
       <div className="flex items-center justify-between pt-1.5 border-t border-[hsl(var(--border))]/50">
         <div className="flex items-center gap-1.5">
           {card.is_orphan && (
-            <ShoppingBag className="w-3 h-3 text-red-500 dark:text-red-400 no-sale-icon" title="Sem venda" />
+            <ShoppingBag className="w-3 h-3 text-red-500 dark:text-red-400 no-sale-icon" aria-label="Sem venda" />
           )}
           {formattedDate && (
             <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]">

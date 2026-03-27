@@ -130,7 +130,7 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
         <div className="flex items-center justify-between gap-2 border-t border-[hsl(var(--border))]/50 pt-2">
           <div className="flex items-center gap-1.5">
             {card.is_orphan ? (
-              <ShoppingBag className="w-3.5 h-3.5 text-red-500 dark:text-red-400 no-sale-icon" title="Sem venda" />
+              <ShoppingBag className="w-3.5 h-3.5 text-red-500 dark:text-red-400 no-sale-icon" aria-label="Sem venda" />
             ) : card.origin === 'venda' ? (
               <ShoppingBag className="w-3.5 h-3.5 text-[hsl(var(--primary))]" />
             ) : (
