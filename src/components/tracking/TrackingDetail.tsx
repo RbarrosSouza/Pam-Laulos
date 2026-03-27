@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Clock, User, Phone, Mail, Stethoscope, ShoppingBag, AlertTriangle, Pencil, Trash2, Plus, CheckCircle2 } from 'lucide-react'
+import { X, Clock, User, Phone, Mail, Stethoscope, ShoppingBag, AlertTriangle, Pencil, Trash2, Plus, CheckCircle2, GitMerge } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { useExamCardLogs, useMarkAllContacted } from '@/hooks/useExamCards'
@@ -10,6 +10,7 @@ import { ExamItemRow } from './ExamItemRow'
 import { ContactModal } from './ContactModal'
 import { EditCardModal } from './EditCardModal'
 import { ConfirmDialog } from './ConfirmDialog'
+import { MergeCardModal } from './MergeCardModal'
 import { formatDate, formatHours, cn } from '@/lib/utils'
 import { dialogVariants, overlayVariants } from '@/lib/animations'
 import type { ExamCard, ExamItem, ExamCardLog } from '@/types/exam-card'
@@ -64,6 +65,7 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteCard, setShowDeleteCard] = useState(false)
   const [showConclude, setShowConclude] = useState(false)
+  const [showMerge, setShowMerge] = useState(false)
   const [concludeVet, setConcludeVet] = useState(card.vet_name ?? '')
 
   const { data: logs } = useExamCardLogs(card.id)
@@ -152,6 +154,15 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
+              {(card.is_orphan || card.status === 'aguardando_lab') && (
+                <button
+                  onClick={() => setShowMerge(true)}
+                  title="Fundir cards"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 transition-all"
+                >
+                  <GitMerge className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
                 onClick={() => setShowDeleteCard(true)}
                 title="Excluir card"
@@ -342,6 +353,13 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
             loading={deleteCard.isPending}
             onConfirm={handleDeleteCard}
             onClose={() => setShowDeleteCard(false)}
+          />
+        )}
+        {showMerge && (
+          <MergeCardModal
+            card={card}
+            onClose={() => setShowMerge(false)}
+            onMerged={() => { setShowMerge(false); onClose() }}
           />
         )}
       </AnimatePresence>

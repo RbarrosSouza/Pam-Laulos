@@ -114,6 +114,37 @@ interface AddItemPayload {
   lab_name?: string | null
 }
 
+// ─── Merge Cards ─────────────────────────────────────────────────────────────
+
+export function useMergeCards() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      targetCardId,
+      sourceCardId,
+    }: {
+      targetCardId: string
+      sourceCardId: string
+    }) => {
+      const { data, error } = await supabase.rpc('merge_exam_cards', {
+        p_target_card_id: targetCardId,
+        p_source_card_id: sourceCardId,
+      })
+      if (error) throw error
+      if (!data?.success) throw new Error(data?.error || 'Falha ao fundir')
+      return data as { success: boolean; target_card_id: string; items_moved: number; new_status: string }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-logs'] })
+    },
+  })
+}
+
+// ─── Add Item ───────────────────────────────────────────────────────────────
+
 export function useAddItem() {
   const queryClient = useQueryClient()
 
