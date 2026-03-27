@@ -110,6 +110,51 @@ export function useMarkContact() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
       queryClient.invalidateQueries({ queryKey: ['exam-card-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-logs'] })
+    },
+  })
+}
+
+/** Mark all pending items on a card as contacted at once */
+export function useMarkAllContacted() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      cardId,
+      itemIds,
+      contactedBy,
+    }: {
+      cardId: string
+      itemIds: string[]
+      contactedBy: string
+    }) => {
+      const contactedAt = new Date().toISOString()
+
+      const { error: itemError } = await supabase
+        .from('exam_item')
+        .update({
+          contacted: true,
+          contacted_at: contactedAt,
+          contacted_by: contactedBy,
+        })
+        .in('id', itemIds)
+
+      if (itemError) throw itemError
+
+      const { error: logError } = await supabase.from('exam_card_log').insert({
+        exam_card_id: cardId,
+        new_status: 'contato_realizado',
+        changed_by: contactedBy,
+        change_reason: `Contato concluído por ${contactedBy}`,
+      })
+
+      if (logError) throw logError
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-logs'] })
     },
   })
 }

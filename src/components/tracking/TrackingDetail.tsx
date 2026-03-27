@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { X, Clock, User, Phone, Mail, Stethoscope, ShoppingBag, AlertTriangle, Pencil, Trash2, Plus } from 'lucide-react'
+import { X, Clock, User, Phone, Mail, Stethoscope, ShoppingBag, AlertTriangle, Pencil, Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
-import { useExamCardLogs } from '@/hooks/useExamCards'
+import { useExamCardLogs, useMarkAllContacted } from '@/hooks/useExamCards'
 import { useDeleteCard } from '@/hooks/useExamCardMutations'
+import { useVets } from '@/hooks/useVets'
 import { StatusBadge } from './StatusBadge'
 import { ExamItemRow } from './ExamItemRow'
 import { ContactModal } from './ContactModal'
@@ -62,12 +63,39 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
   const [contactingItem, setContactingItem] = useState<ExamItem | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteCard, setShowDeleteCard] = useState(false)
+  const [showConclude, setShowConclude] = useState(false)
+  const [concludeVet, setConcludeVet] = useState(card.vet_name ?? '')
 
   const { data: logs } = useExamCardLogs(card.id)
+  const { data: vets } = useVets()
   const deleteCard = useDeleteCard()
+  const markAllContacted = useMarkAllContacted()
 
   const petLabel = card.pet_name ?? '—'
   const clientLabel = card.client_name ?? '—'
+
+  // Items that still need contact
+  const pendingContactItems = (card.items ?? []).filter(
+    (i) => i.result_received && !i.contacted
+  )
+  const allContacted = (card.items ?? []).length > 0 && (card.items ?? []).every((i) => i.contacted)
+  const hasReadyItems = pendingContactItems.length > 0
+
+  async function handleConclude() {
+    if (!concludeVet.trim()) return toast.error('Selecione o veterinário')
+    try {
+      await markAllContacted.mutateAsync({
+        cardId: card.id,
+        itemIds: pendingContactItems.map((i) => i.id),
+        contactedBy: concludeVet.trim(),
+      })
+      toast.success('Contato concluído')
+      setShowConclude(false)
+      onClose()
+    } catch {
+      toast.error('Erro ao concluir')
+    }
+  }
 
   async function handleDeleteCard() {
     try {
@@ -168,6 +196,85 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                   <InfoItem icon={Stethoscope} label="Veterinário" value={card.vet_name} />
                 )}
               </div>
+
+              {/* Conclude contact — quick action */}
+              {allContacted && (
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/50">
+                  <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
+                  <span className="text-sm font-medium text-green-700 dark:text-green-300">Contato concluído</span>
+                </div>
+              )}
+
+              {hasReadyItems && !showConclude && (
+                <button
+                  onClick={() => setShowConclude(true)}
+                  className={cn(
+                    'w-full flex items-center justify-center gap-2 py-3 rounded-xl',
+                    'bg-green-600 dark:bg-green-600 text-white text-sm font-semibold',
+                    'shadow-sm shadow-green-600/20 hover:bg-green-700 active:scale-[0.98]',
+                    'transition-all duration-200'
+                  )}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Concluir contato ({pendingContactItems.length} exame{pendingContactItems.length !== 1 ? 's' : ''})
+                </button>
+              )}
+
+              {showConclude && hasReadyItems && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-4 rounded-xl border border-green-200 dark:border-green-800/50 bg-green-50/50 dark:bg-green-950/20 space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wider">
+                      Confirmar contato
+                    </span>
+                    <button
+                      onClick={() => setShowConclude(false)}
+                      className="w-6 h-6 flex items-center justify-center rounded-lg text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] transition-all"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-1.5 block">
+                      Veterinário responsável
+                    </label>
+                    <select
+                      value={concludeVet}
+                      onChange={(e) => setConcludeVet(e.target.value)}
+                      className={cn(
+                        'w-full h-10 px-3 text-sm rounded-xl border border-[hsl(var(--border))]',
+                        'bg-[hsl(var(--background))] text-[hsl(var(--foreground))]',
+                        'focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500',
+                        'transition-all'
+                      )}
+                    >
+                      <option value="">Selecionar…</option>
+                      {vets?.map((vet) => (
+                        <option key={vet.id} value={vet.nome}>{vet.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                  <button
+                    onClick={handleConclude}
+                    disabled={!concludeVet.trim() || markAllContacted.isPending}
+                    className={cn(
+                      'w-full h-11 rounded-xl text-sm font-bold flex items-center justify-center gap-2',
+                      'bg-green-600 text-white shadow-sm shadow-green-600/20',
+                      'hover:bg-green-700 active:scale-[0.98] disabled:opacity-50',
+                      'transition-all duration-200'
+                    )}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    {markAllContacted.isPending ? 'Concluindo…' : 'Confirmar'}
+                  </button>
+                </motion.div>
+              )}
 
               {/* Exam items */}
               <div>
