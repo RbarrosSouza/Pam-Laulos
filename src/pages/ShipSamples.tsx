@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Package, Plus, Check, X, User, Cat, Dog, Loader2, History } from 'lucide-react'
 import { usePendingSamples, useCreateShipment, useCreateManualSample } from '@/hooks/useShipment'
-import { useVets } from '@/hooks/useVets'
 import { fadeUp } from '@/lib/animations'
 import { cn, getSpeciesType } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -11,7 +10,6 @@ import { useNavigate, Link } from 'react-router-dom'
 export function ShipSamples() {
   const navigate = useNavigate()
   const { data: cards, isLoading } = usePendingSamples()
-  const { data: vets } = useVets()
   const shipMutation = useCreateShipment()
   const manualMutation = useCreateManualSample()
 
@@ -119,16 +117,13 @@ export function ShipSamples() {
       <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 space-y-3">
         <div>
           <label className="text-xs font-medium text-[hsl(var(--muted-foreground))] mb-1 block">Responsável pelo envio</label>
-          <select
+          <input
+            type="text"
             value={sentBy}
             onChange={(e) => setSentBy(e.target.value)}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]/40"
-          >
-            <option value="">Selecionar...</option>
-            {vets?.map((vet) => (
-              <option key={vet.id} value={vet.nome}>{vet.nome}</option>
-            ))}
-          </select>
+            placeholder="Nome de quem está enviando…"
+            className="w-full px-3 py-2 text-sm rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]/40"
+          />
         </div>
         <div>
           <label className="text-xs font-medium text-[hsl(var(--muted-foreground))] mb-1 block">Laboratório destino</label>
