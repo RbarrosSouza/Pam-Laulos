@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   FlaskConical, FileCheck2, AlertTriangle, Phone, Clock,
-  ChevronRight, User, Stethoscope, Calendar, Cat, Dog
+  ChevronRight, User, Stethoscope, Calendar, Cat, Dog, ShoppingBag
 } from 'lucide-react'
 import { useExamCards } from '@/hooks/useExamCards'
 import { useExamCardStats } from '@/hooks/useExamCardStats'
 import { useRealtimeExams } from '@/hooks/useRealtimeExams'
+import { useVets } from '@/hooks/useVets'
 import { TrackingDetail } from '@/components/tracking/TrackingDetail'
 import { StatusChart } from '@/components/dashboard/StatusChart'
 import { formatHours, cn, getSpeciesType } from '@/lib/utils'
@@ -22,13 +23,28 @@ export function Dashboard() {
 
   useRealtimeExams()
   const { data: stats } = useExamCardStats()
+  const { data: vets } = useVets()
   const { data: prontos } = useExamCards({ status: ['exame_pronto'] })
   const { data: atrasados } = useExamCards({ status: ['atrasado'] })
   const { data: aguardando } = useExamCards({ status: ['aguardando_lab'] })
 
-  const tabCards = activeTab === 'prontos' ? prontos
-    : activeTab === 'atrasados' ? atrasados
-    : aguardando
+  // Enrich cards with vet avatar
+  const enrichCards = useCallback((cards: ExamCard[] | undefined) => {
+    if (!cards || !vets) return cards
+    const vetMap = new Map(vets.map((v) => [v.nome, v.avatar_url]))
+    return cards.map((card) => ({
+      ...card,
+      vet_avatar_url: card.vet_avatar_url || (card.vet_name ? vetMap.get(card.vet_name) ?? null : null),
+    }))
+  }, [vets])
+
+  const enrichedProntos = useMemo(() => enrichCards(prontos), [prontos, enrichCards])
+  const enrichedAtrasados = useMemo(() => enrichCards(atrasados), [atrasados, enrichCards])
+  const enrichedAguardando = useMemo(() => enrichCards(aguardando), [aguardando, enrichCards])
+
+  const tabCards = activeTab === 'prontos' ? enrichedProntos
+    : activeTab === 'atrasados' ? enrichedAtrasados
+    : enrichedAguardando
 
   const tabs = [
     {
@@ -199,15 +215,15 @@ export function Dashboard() {
                 <AlertTriangle className="w-4 h-4 text-red-500" />
                 <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">
                   Precisam de Atenção
-                  {(atrasados?.length ?? 0) > 0 && (
+                  {(enrichedAtrasados?.length ?? 0) > 0 && (
                     <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-400 text-xs font-bold">
-                      {atrasados!.length}
+                      {enrichedAtrasados!.length}
                     </span>
                   )}
                 </h3>
               </div>
 
-              {!atrasados || atrasados.length === 0 ? (
+              {!enrichedAtrasados || enrichedAtrasados.length === 0 ? (
                 <div className="flex flex-col items-center py-12 text-[hsl(var(--muted-foreground))]">
                   <div className="w-10 h-10 rounded-full bg-green-50 dark:bg-green-950/30 flex items-center justify-center mb-3">
                     <span className="text-green-600 dark:text-green-400 font-bold text-sm">OK</span>
@@ -216,7 +232,7 @@ export function Dashboard() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {atrasados.slice(0, 8).map((card) => (
+                  {enrichedAtrasados.slice(0, 8).map((card) => (
                     <div
                       key={card.id}
                       className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-[hsl(var(--muted))]/50 hover:bg-[hsl(var(--muted))] transition-colors cursor-pointer"
@@ -279,9 +295,9 @@ function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) 
       className={cn(
         'rounded-xl border bg-[hsl(var(--card))] p-3 cursor-pointer transition-all active:scale-[0.98]',
         card.alert_level === 'critical'
-          ? 'border-red-200 dark:border-red-900/60'
+          ? 'border-red-200 dark:border-red-800/80'
           : card.alert_level === 'warning'
-          ? 'border-amber-200 dark:border-amber-900/60'
+          ? 'border-amber-200 dark:border-amber-800/80'
           : 'border-[hsl(var(--border))]'
       )}
     >
@@ -296,7 +312,7 @@ function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) 
               <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 alert-dot-warning" />
             )}
             <p className="font-bold text-sm text-[hsl(var(--foreground))] truncate flex items-center gap-1">
-              {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/60 shrink-0" />}
+              {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />}
               {card.pet_name ?? '—'}
             </p>
           </div>
@@ -308,7 +324,7 @@ function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) 
               </span>
             )}
             {card.vet_name && (
-              <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]/70 truncate">
+              <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))] truncate">
                 {card.vet_avatar_url ? (
                   <img src={card.vet_avatar_url} alt="" className="w-3.5 h-3.5 rounded-full object-cover" />
                 ) : (
@@ -336,14 +352,14 @@ function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) 
               )} />
               <span className="text-xs text-[hsl(var(--foreground))] truncate">{item.exam_type}</span>
               {item.lab_name && (
-                <span className="text-[10px] text-[hsl(var(--muted-foreground))]/60 truncate ml-auto">
+                <span className="text-[10px] text-[hsl(var(--muted-foreground))] truncate ml-auto">
                   {item.lab_name}
                 </span>
               )}
             </div>
           ))}
           {items.length > 3 && (
-            <p className="text-[10px] text-[hsl(var(--muted-foreground))]/50 pl-4">
+            <p className="text-[10px] text-[hsl(var(--muted-foreground))] pl-4">
               +{items.length - 3} mais
             </p>
           )}
@@ -351,13 +367,13 @@ function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) 
       )}
 
       {/* Footer */}
-      <div className="flex items-center justify-between pt-1.5 border-t border-[hsl(var(--border))]/30">
+      <div className="flex items-center justify-between pt-1.5 border-t border-[hsl(var(--border))]/50">
         <div className="flex items-center gap-1.5">
           {card.is_orphan && (
-            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">Sem venda</span>
+            <ShoppingBag className="w-3 h-3 text-red-500 dark:text-red-400 no-sale-icon" title="Sem venda" />
           )}
           {formattedDate && (
-            <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]/60">
+            <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]">
               <Calendar className="w-2.5 h-2.5" />
               {formattedDate}
             </span>

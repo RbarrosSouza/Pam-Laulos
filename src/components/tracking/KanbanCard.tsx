@@ -55,9 +55,9 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
           'rounded-xl border bg-[hsl(var(--card))] p-3.5 cursor-pointer shadow-sm',
           'hover:shadow-md transition-all duration-150',
           card.alert_level === 'critical'
-            ? 'border-red-200 dark:border-red-900/60 hover:border-red-300 dark:hover:border-red-800'
+            ? 'border-red-200 dark:border-red-800/80 hover:border-red-300 dark:hover:border-red-800'
             : card.alert_level === 'warning'
-            ? 'border-amber-200 dark:border-amber-900/60 hover:border-amber-300 dark:hover:border-amber-800'
+            ? 'border-amber-200 dark:border-amber-800/80 hover:border-amber-300 dark:hover:border-amber-800'
             : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/40'
         )}
       >
@@ -75,7 +75,7 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
             )}
             <div className="min-w-0">
               <p className="font-bold text-sm text-[hsl(var(--foreground))] leading-tight truncate flex items-center gap-1">
-                {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/60 shrink-0" />}
+                {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />}
                 {petLabel}
               </p>
               {card.client_name && (
@@ -119,7 +119,7 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
               />
             ))}
             {hasMore && (
-              <p className="text-[10px] text-[hsl(var(--muted-foreground))]/60 pl-6">
+              <p className="text-[10px] text-[hsl(var(--muted-foreground))] pl-6">
                 +{extraCount} mais
               </p>
             )}
@@ -129,16 +129,15 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 border-t border-[hsl(var(--border))]/50 pt-2">
           <div className="flex items-center gap-1.5">
-            {card.origin === 'venda' ? (
+            {card.is_orphan ? (
+              <ShoppingBag className="w-3.5 h-3.5 text-red-500 dark:text-red-400 no-sale-icon" title="Sem venda" />
+            ) : card.origin === 'venda' ? (
               <ShoppingBag className="w-3.5 h-3.5 text-[hsl(var(--primary))]" />
             ) : (
-              <Mail className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/60" />
-            )}
-            {card.is_orphan && (
-              <span className="text-[10px] text-amber-600 dark:text-amber-400">Sem venda</span>
+              <Mail className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
             )}
             {formattedDate && (
-              <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]/60">
+              <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]">
                 <Calendar className="w-2.5 h-2.5" />
                 {formattedDate}
               </span>

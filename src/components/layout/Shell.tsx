@@ -14,12 +14,13 @@ import { BottomNav } from '@/components/layout/BottomNav'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 
-import { Settings, Package } from 'lucide-react'
+import { Settings, Package, History } from 'lucide-react'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { to: '/tracking', label: 'Rastreamento', icon: ListFilter },
   { to: '/ship', label: 'Enviar Amostras', icon: Package },
+  { to: '/shipments', label: 'Histórico Envios', icon: History },
   { to: '/settings', label: 'Configurações', icon: Settings },
 ]
 

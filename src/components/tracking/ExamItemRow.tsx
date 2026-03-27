@@ -167,7 +167,7 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
       {/* Shipped icon */}
       {item.sent_to_lab_at && (
         <span title={`Enviado por ${item.sent_to_lab_by || '—'}`}>
-          <Package className="w-3.5 h-3.5 text-[hsl(var(--primary))]/60 shrink-0" />
+          <Package className="w-3.5 h-3.5 text-[hsl(var(--primary))] shrink-0" />
         </span>
       )}
 
@@ -184,18 +184,18 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
             className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-[hsl(var(--accent))] transition-colors group/phone shrink-0"
             aria-label="Registrar contato"
           >
-            <Phone className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/40 group-hover/phone:text-[hsl(var(--primary))] transition-colors" />
+            <Phone className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] group-hover/phone:text-[hsl(var(--primary))] transition-colors" />
           </button>
         ) : (
-          <Phone className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/40 shrink-0" />
+          <Phone className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
         )
       ) : (
-        <FlaskConical className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/30 shrink-0" />
+        <FlaskConical className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
       )}
 
       {/* Lab chip — only in non-compact mode */}
       {!compact && item.lab_name && (
-        <span className="text-[10px] text-[hsl(var(--muted-foreground))]/60 hidden sm:block truncate max-w-[72px]">
+        <span className="text-[10px] text-[hsl(var(--muted-foreground))] hidden sm:block truncate max-w-[72px]">
           {item.lab_name}
         </span>
       )}

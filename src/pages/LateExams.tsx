@@ -70,14 +70,14 @@ export function LateExams() {
                 animate="animate"
                 exit={{ opacity: 0, scale: 0.95 }}
                 onClick={() => setSelectedCard(card)}
-                className="rounded-xl border border-red-200 dark:border-red-900/60 bg-[hsl(var(--card))] p-3 cursor-pointer transition-all active:scale-[0.98]"
+                className="rounded-xl border border-red-200 dark:border-red-800/80 bg-[hsl(var(--card))] p-3 cursor-pointer transition-all active:scale-[0.98]"
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 alert-dot-critical" />
                       <p className="font-bold text-sm text-[hsl(var(--foreground))] truncate flex items-center gap-1">
-                        {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/60 shrink-0" />}
+                        {SpeciesIcon && <SpeciesIcon className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />}
                         {card.pet_name ?? '—'}
                       </p>
                     </div>
@@ -89,7 +89,7 @@ export function LateExams() {
                         </span>
                       )}
                       {card.vet_name && (
-                        <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]/70 truncate">
+                        <span className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))] truncate">
                           <Stethoscope className="w-2.5 h-2.5 shrink-0" />
                           {card.vet_name.split(' ')[0]}
                         </span>
@@ -117,7 +117,7 @@ export function LateExams() {
                 )}
 
                 {formattedDate && (
-                  <div className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))]/60 pt-1.5 border-t border-[hsl(var(--border))]/30">
+                  <div className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--muted-foreground))] pt-1.5 border-t border-[hsl(var(--border))]/30">
                     <Calendar className="w-2.5 h-2.5" />
                     {formattedDate}
                   </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { LayoutList, KanbanSquare, Search, X, SlidersHorizontal, ChevronDown, Filter } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { TrackingTable } from '@/components/tracking/TrackingTable'
@@ -42,6 +42,16 @@ export function Tracking() {
     )
   }
 
+  // Enrich cards with vet avatar from veterinarios table
+  const enrichedCards = useMemo(() => {
+    if (!allCards || !vets) return allCards || []
+    const vetMap = new Map(vets.map((v) => [v.nome, v.avatar_url]))
+    return allCards.map((card) => ({
+      ...card,
+      vet_avatar_url: card.vet_avatar_url || (card.vet_name ? vetMap.get(card.vet_name) ?? null : null),
+    }))
+  }, [allCards, vets])
+
   const isToday = dateFrom === new Date().toISOString().split('T')[0] && dateTo === dateFrom
   const hasFilters = search || selectedStatuses.length > 0 || selectedVet || dateFrom || dateTo
 
@@ -80,7 +90,7 @@ export function Tracking() {
               Exames
             </h1>
             <span className="text-xs text-[hsl(var(--muted-foreground))] tabular-nums">
-              {allCards?.length ?? 0}
+              {enrichedCards?.length ?? 0}
             </span>
           </div>
 
@@ -238,12 +248,12 @@ export function Tracking() {
         {/* Content */}
         {view === 'board' ? (
           <KanbanBoard
-            cards={allCards || []}
+            cards={enrichedCards}
             onSelectCard={setSelectedCard}
           />
         ) : (
           <TrackingTable
-            cards={allCards || []}
+            cards={enrichedCards}
             onSelectCard={setSelectedCard}
           />
         )}

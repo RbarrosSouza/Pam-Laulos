@@ -61,6 +61,17 @@ export interface ExamCardSummary {
   avg_contact_hours: number
 }
 
+export interface ShipmentItem {
+  id: string
+  exam_type: string
+  pet_name: string | null
+  client_name: string | null
+}
+
+export interface LabShipmentWithItems extends LabShipment {
+  items: ShipmentItem[]
+}
+
 export interface ExamCardLog {
   id: string
   exam_card_id: string

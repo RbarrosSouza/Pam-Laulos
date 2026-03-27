@@ -108,7 +108,10 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
               <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
                 {clientLabel}
                 {card.is_orphan && (
-                  <span className="ml-2 text-amber-600 dark:text-amber-400">· Sem venda vinculada</span>
+                  <>
+                    <ShoppingBag className="w-3 h-3 ml-2 text-red-500 dark:text-red-400 no-sale-icon inline" />
+                    <span className="ml-1 text-red-500 dark:text-red-400 text-xs">Sem venda</span>
+                  </>
                 )}
               </p>
             </div>
@@ -270,7 +273,7 @@ function AddItemRow({ cardId }: { cardId: string }) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-[hsl(var(--muted-foreground))]/60 hover:text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/5 transition-all"
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/5 transition-all"
       >
         <Plus className="w-3.5 h-3.5" />
         Adicionar exame

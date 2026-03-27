@@ -3,6 +3,7 @@ import { X, Save } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 import { useUpdateCard } from '@/hooks/useExamCardMutations'
+import { useVets } from '@/hooks/useVets'
 import { dialogVariants, overlayVariants } from '@/lib/animations'
 import { cn } from '@/lib/utils'
 import type { ExamCard, CardStatus } from '@/types/exam-card'
@@ -50,6 +51,7 @@ function Field({
 
 export function EditCardModal({ card, onClose }: EditCardModalProps) {
   const updateCard = useUpdateCard()
+  const { data: vets } = useVets()
 
   const [petName, setPetName] = useState(card.pet_name ?? '')
   const [petSpecies, setPetSpecies] = useState(card.pet_species ?? '')
@@ -151,7 +153,24 @@ export function EditCardModal({ card, onClose }: EditCardModalProps) {
           </div>
 
           {/* Vet */}
-          <Field label="Veterinário" value={vetName} onChange={setVetName} />
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Veterinário</label>
+            <select
+              value={vetName}
+              onChange={(e) => setVetName(e.target.value)}
+              className={cn(
+                'h-9 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))]',
+                'px-3 text-sm text-[hsl(var(--foreground))]',
+                'focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/40 focus:border-[hsl(var(--primary))]',
+                'transition-all'
+              )}
+            >
+              <option value="">Selecionar</option>
+              {vets?.map((vet) => (
+                <option key={vet.id} value={vet.nome}>{vet.nome}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Footer */}

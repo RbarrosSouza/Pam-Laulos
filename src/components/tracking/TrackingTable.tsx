@@ -113,7 +113,7 @@ export function TrackingTable({ cards, onSelectCard, isLoading }: TrackingTableP
                         {card.vet_avatar_url ? (
                           <img src={card.vet_avatar_url} alt="" className="w-5 h-5 rounded-full object-cover" />
                         ) : (
-                          <Stethoscope className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]/60" />
+                          <Stethoscope className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
                         )}
                         <span className="text-xs text-[hsl(var(--foreground))]">{vetFirst}</span>
                       </div>

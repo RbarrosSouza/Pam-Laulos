@@ -69,7 +69,7 @@
 
     /* === Muted === */
     --muted: 200 15% 16%;
-    --muted-foreground: 200 8% 56%;
+    --muted-foreground: 200 8% 65%;
 
     /* === Accent === */
     --accent: 168 30% 16%;
@@ -139,6 +139,15 @@
 
   .alert-dot-warning {
     animation: alert-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes no-sale-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .no-sale-icon {
+    animation: no-sale-pulse 2.5s ease-in-out infinite;
   }
 
   /* Focus ring global — acessibilidade */
