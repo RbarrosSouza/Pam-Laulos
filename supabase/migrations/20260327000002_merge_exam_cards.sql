@@ -15,6 +15,7 @@ DECLARE
   v_target_exists BOOLEAN;
   v_source_exists BOOLEAN;
   v_items_moved   INT;
+  v_items_deduped INT := 0;
   v_total         INT;
   v_ready         INT;
   v_contacted     INT;
@@ -45,19 +46,35 @@ BEGIN
 
   GET DIAGNOSTICS v_items_moved = ROW_COUNT;
 
-  -- 4. Calculate new status for target card
+  -- 4. Deduplicate: when target has item without result AND moved item has result
+  --    for the same exam_type, delete the one without result (keep the one with result)
+  DELETE FROM public.exam_item
+    WHERE id IN (
+      SELECT t.id
+      FROM public.exam_item t
+      WHERE t.exam_card_id = p_target_card_id
+        AND t.result_received = false
+        AND EXISTS (
+          SELECT 1 FROM public.exam_item s
+          WHERE s.exam_card_id = p_target_card_id
+            AND s.result_received = true
+            AND lower(trim(s.exam_type)) = lower(trim(t.exam_type))
+            AND s.id <> t.id
+        )
+    );
+
+  GET DIAGNOSTICS v_items_deduped = ROW_COUNT;
+
+  -- 5. Calculate new status for target card
   SELECT status INTO v_old_status FROM public.exam_card WHERE id = p_target_card_id;
 
-  SELECT
-    COUNT(*)                                          INTO v_total
+  SELECT COUNT(*) INTO v_total
     FROM public.exam_item WHERE exam_card_id = p_target_card_id;
 
-  SELECT
-    COUNT(*) FILTER (WHERE result_received = true)    INTO v_ready
+  SELECT COUNT(*) FILTER (WHERE result_received = true) INTO v_ready
     FROM public.exam_item WHERE exam_card_id = p_target_card_id;
 
-  SELECT
-    COUNT(*) FILTER (WHERE contacted = true)          INTO v_contacted
+  SELECT COUNT(*) FILTER (WHERE contacted = true) INTO v_contacted
     FROM public.exam_item WHERE exam_card_id = p_target_card_id;
 
   -- Apply same logic as handle_exam_item_update trigger
@@ -69,14 +86,14 @@ BEGIN
     v_new_status := v_old_status;
   END IF;
 
-  -- 5. Update target card
+  -- 6. Update target card
   UPDATE public.exam_card
     SET status     = v_new_status,
         is_orphan  = false,
         updated_at = now()
     WHERE id = p_target_card_id;
 
-  -- 6. Log the merge on target card
+  -- 7. Log the merge on target card
   INSERT INTO public.exam_card_log (exam_card_id, previous_status, new_status, changed_by, change_reason)
     VALUES (
       p_target_card_id,
@@ -86,14 +103,15 @@ BEGIN
       'Card fundido — ' || v_items_moved || ' exame(s) movido(s) do card órfão'
     );
 
-  -- 7. Delete the source card (items already moved, logs cascade-deleted)
+  -- 8. Delete the source card (items already moved, logs cascade-deleted)
   DELETE FROM public.exam_card WHERE id = p_source_card_id;
 
-  -- 8. Return result
+  -- 9. Return result
   RETURN json_build_object(
     'success',        true,
     'target_card_id', p_target_card_id,
     'items_moved',    v_items_moved,
+    'items_deduped',  v_items_deduped,
     'new_status',     v_new_status
   );
 END;
