@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { GitMerge, X, ArrowRight, ShoppingBag, Mail, AlertTriangle, Loader2, Check } from 'lucide-react'
+import { GitMerge, X, ArrowRight, ShoppingBag, Mail, AlertTriangle, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { useExamCards } from '@/hooks/useExamCards'
