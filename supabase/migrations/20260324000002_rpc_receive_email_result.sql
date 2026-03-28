@@ -27,6 +27,12 @@ DECLARE
   v_norm_pet    TEXT;
   v_norm_exam   TEXT;
   v_norm_lab    TEXT;
+  -- Phase 2 vars
+  v_card_candidate RECORD;
+  v_card_best_id   UUID;
+  v_card_best_score INT := 0;
+  v_card_total     INT := 0;
+  v_new_item_id    UUID;
 BEGIN
   -- Normaliza inputs (lowercase, sem acentos extras, trim)
   v_norm_pet  := LOWER(TRIM(COALESCE(p_pet_name, '')));
@@ -41,7 +47,9 @@ BEGIN
     );
   END IF;
 
-  -- Busca candidatos: cards em aguardando_lab com items pendentes
+  -- ═══════════════════════════════════════════════════════════
+  -- FASE 1: Match por ITEM (pet_name + exam_type + lab_name)
+  -- ═══════════════════════════════════════════════════════════
   FOR v_candidate IN
     SELECT
       i.id AS item_id,
@@ -119,8 +127,6 @@ BEGIN
       v_best_type := 'fuzzy';
     END IF;
 
-    -- O trigger handle_exam_item_update() cuida de mudar o status do card
-
     RETURN json_build_object(
       'success', true,
       'matched', true,
@@ -132,14 +138,94 @@ BEGIN
     );
   END IF;
 
-  -- Sem match → cria card órfão
+  -- ═══════════════════════════════════════════════════════════
+  -- FASE 2: Match por CARD (pet_name no nível do card)
+  -- Se o pet existe em algum card aguardando_lab, adiciona
+  -- o resultado como NOVO item nesse card
+  -- ═══════════════════════════════════════════════════════════
+  IF v_norm_pet <> '' THEN
+    FOR v_card_candidate IN
+      SELECT
+        c.id AS card_id,
+        LOWER(TRIM(COALESCE(c.pet_name, ''))) AS pet,
+        LOWER(TRIM(COALESCE(c.client_name, ''))) AS client
+      FROM public.exam_card c
+      WHERE c.status = 'aguardando_lab'
+      GROUP BY c.id
+    LOOP
+      v_card_total := v_card_total + 1;
+      v_score := 0;
+
+      -- Pet name match
+      IF v_card_candidate.pet <> '' THEN
+        IF v_norm_pet = v_card_candidate.pet THEN
+          v_score := v_score + 40;
+        ELSIF v_card_candidate.pet LIKE '%' || v_norm_pet || '%'
+           OR v_norm_pet LIKE '%' || v_card_candidate.pet || '%' THEN
+          v_score := v_score + 35;
+        END IF;
+      END IF;
+
+      IF v_score > v_card_best_score THEN
+        v_card_best_score := v_score;
+        v_card_best_id    := v_card_candidate.card_id;
+      END IF;
+    END LOOP;
+
+    -- Bônus: se só tem 1 card candidato, +10pts
+    IF v_card_total = 1 THEN
+      v_card_best_score := v_card_best_score + 10;
+    END IF;
+
+    -- Threshold para match por card: 35pts (pet_name parcial já basta)
+    IF v_card_best_score >= 35 AND v_card_best_id IS NOT NULL THEN
+      -- Criar NOVO item no card existente com resultado já recebido
+      INSERT INTO public.exam_item (
+        exam_card_id, exam_type, lab_name, arquivo_url,
+        result_received, result_received_at
+      ) VALUES (
+        v_card_best_id,
+        COALESCE(p_exam_type, 'Exame'),
+        p_lab_name,
+        p_arquivo_url,
+        true,
+        p_received_at
+      ) RETURNING id INTO v_new_item_id;
+
+      -- Atualizar status do card para exame_pronto se ainda está aguardando
+      UPDATE public.exam_card
+        SET status = 'exame_pronto', updated_at = now()
+        WHERE id = v_card_best_id AND status = 'aguardando_lab';
+
+      -- Log
+      INSERT INTO public.exam_card_log (
+        exam_card_id, previous_status, new_status, changed_by, change_reason
+      ) VALUES (
+        v_card_best_id, 'aguardando_lab', 'exame_pronto', 'system',
+        'Resultado de exame diferente associado ao mesmo pet (match por nome)'
+      );
+
+      RETURN json_build_object(
+        'success', true,
+        'matched', true,
+        'card_id', v_card_best_id,
+        'item_id', v_new_item_id,
+        'score', v_card_best_score,
+        'match_type', 'card_match',
+        'candidates_found', v_card_total
+      );
+    END IF;
+  END IF;
+
+  -- ═══════════════════════════════════════════════════════════
+  -- FASE 3: Sem match → cria card órfão
+  -- ═══════════════════════════════════════════════════════════
   INSERT INTO public.exam_card (
     status, alert_level, origin, is_orphan, pet_name
   ) VALUES (
     'aguardando_lab', 'warning', 'email', true, p_pet_name
   ) RETURNING id INTO v_orphan_card;
 
-  -- Cria exam_item para o órfão (já com resultado recebido)
   INSERT INTO public.exam_item (
     exam_card_id, exam_type, lab_name, arquivo_url,
     result_received, result_received_at
@@ -152,7 +238,6 @@ BEGIN
     p_received_at
   );
 
-  -- Log
   INSERT INTO public.exam_card_log (
     exam_card_id, previous_status, new_status, changed_by, change_reason
   ) VALUES (
@@ -175,4 +260,4 @@ $$;
 GRANT EXECUTE ON FUNCTION public.receive_email_result TO anon, authenticated;
 
 COMMENT ON FUNCTION public.receive_email_result IS
-  'Recebe resultado de exame via email (chamado pelo N8n). Faz matching fuzzy com cards existentes ou cria card órfão.';
+  'Recebe resultado de exame via email. Fase 1: match por item (pet+exam+lab). Fase 2: match por card (pet_name). Fase 3: cria card órfão.';

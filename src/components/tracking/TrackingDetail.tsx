@@ -154,7 +154,7 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              {(card.is_orphan || card.status === 'aguardando_lab') && (
+              {card.status !== 'contato_realizado' && (
                 <button
                   onClick={() => setShowMerge(true)}
                   title="Fundir cards"

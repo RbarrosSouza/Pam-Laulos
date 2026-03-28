@@ -20,32 +20,32 @@ export function MergeCardModal({ card, onClose, onMerged }: MergeCardModalProps)
 
   const mergeMutation = useMergeCards()
 
-  // Fetch candidates: if current card is orphan → show venda cards, and vice versa
-  const isOrphan = card.is_orphan || card.origin === 'email'
-  const { data: allCards, isLoading } = useExamCards(
-    isOrphan
-      ? { status: ['aguardando_lab'] }
-      : { status: ['aguardando_lab', 'exame_pronto'] }
-  )
+  // Fetch all active cards as candidates
+  const { data: allCards, isLoading } = useExamCards({
+    status: ['aguardando_lab', 'exame_pronto', 'atrasado'],
+  })
 
   const candidates = useMemo(() => {
     if (!allCards) return []
-    return allCards.filter((c) => {
-      if (c.id === card.id) return false
-      if (isOrphan) {
-        // Current is orphan → show sale cards (non-orphan)
-        return !c.is_orphan && c.origin === 'venda'
-      }
-      // Current is sale → show orphans
-      return c.is_orphan || c.origin === 'email'
-    })
-  }, [allCards, card.id, isOrphan])
+    return allCards.filter((c) => c.id !== card.id)
+  }, [allCards, card.id])
 
   const selectedCard = candidates.find((c) => c.id === selectedId) ?? null
 
   // Determine target (keeper) and source (absorbed)
-  const targetCard = isOrphan ? selectedCard : card
-  const sourceCard = isOrphan ? card : selectedCard
+  // The card with richer data (origin=venda, not orphan) is the target
+  function pickTarget(a: ExamCard, b: ExamCard): { target: ExamCard; source: ExamCard } {
+    if (a.origin === 'venda' && !a.is_orphan) return { target: a, source: b }
+    if (b.origin === 'venda' && !b.is_orphan) return { target: b, source: a }
+    // Neither is a sale card — pick the one with more data
+    const scoreA = (a.client_name ? 1 : 0) + (a.vet_name ? 1 : 0) + (a.client_phone ? 1 : 0)
+    const scoreB = (b.client_name ? 1 : 0) + (b.vet_name ? 1 : 0) + (b.client_phone ? 1 : 0)
+    return scoreA >= scoreB ? { target: a, source: b } : { target: b, source: a }
+  }
+
+  const { target: targetCard, source: sourceCard } = selectedCard
+    ? pickTarget(card, selectedCard)
+    : { target: null as ExamCard | null, source: null as ExamCard | null }
 
   async function handleMerge() {
     if (!targetCard || !sourceCard) return
