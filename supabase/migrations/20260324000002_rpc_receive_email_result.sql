@@ -4,6 +4,10 @@
 -- N8n chama via POST /rest/v1/rpc/receive_email_result
 -- =============================================================
 
+-- Dropar versões anteriores para evitar ambiguidade de assinatura
+DROP FUNCTION IF EXISTS public.receive_email_result(TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.receive_email_result();
+
 CREATE OR REPLACE FUNCTION public.receive_email_result(
   p_pet_name    TEXT DEFAULT NULL,
   p_exam_type   TEXT DEFAULT NULL,
