@@ -91,7 +91,7 @@ export function MergeCardModal({ card, onClose, onMerged }: MergeCardModalProps)
 
         {/* Current card summary */}
         <div className="px-5 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30">
-          <CardChip card={card} label={isOrphan ? 'Órfão (resultado)' : 'Venda (dados)'} />
+          <CardChip card={card} label={card.is_orphan ? 'Órfão (resultado)' : 'Venda (dados)'} />
         </div>
 
         {/* Body */}
@@ -107,7 +107,7 @@ export function MergeCardModal({ card, onClose, onMerged }: MergeCardModalProps)
                 {/* Candidate list header */}
                 <div className="px-5 py-2.5">
                   <p className="text-[11px] font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                    {isOrphan ? 'Cards de venda' : 'Cards órfãos'}
+                    {card.is_orphan ? 'Cards de venda' : 'Cards órfãos'}
                   </p>
                 </div>
 

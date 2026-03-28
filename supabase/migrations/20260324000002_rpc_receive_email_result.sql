@@ -6,14 +6,16 @@
 
 -- Dropar versões anteriores para evitar ambiguidade de assinatura
 DROP FUNCTION IF EXISTS public.receive_email_result(TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS public.receive_email_result(TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ);
 DROP FUNCTION IF EXISTS public.receive_email_result();
 
 CREATE OR REPLACE FUNCTION public.receive_email_result(
-  p_pet_name    TEXT DEFAULT NULL,
-  p_exam_type   TEXT DEFAULT NULL,
-  p_lab_name    TEXT DEFAULT NULL,
-  p_arquivo_url TEXT DEFAULT NULL,
-  p_received_at TIMESTAMPTZ DEFAULT now()
+  p_pet_name     TEXT DEFAULT NULL,
+  p_client_name  TEXT DEFAULT NULL,
+  p_exam_type    TEXT DEFAULT NULL,
+  p_lab_name     TEXT DEFAULT NULL,
+  p_arquivo_url  TEXT DEFAULT NULL,
+  p_received_at  TIMESTAMPTZ DEFAULT now()
 )
 RETURNS JSON
 LANGUAGE plpgsql
@@ -29,6 +31,7 @@ DECLARE
   v_score       INT;
   v_orphan_card UUID;
   v_norm_pet    TEXT;
+  v_norm_client TEXT;
   v_norm_exam   TEXT;
   v_norm_lab    TEXT;
   -- Phase 2 vars
@@ -39,9 +42,10 @@ DECLARE
   v_new_item_id    UUID;
 BEGIN
   -- Normaliza inputs (lowercase, sem acentos extras, trim)
-  v_norm_pet  := LOWER(TRIM(COALESCE(p_pet_name, '')));
-  v_norm_exam := LOWER(TRIM(COALESCE(p_exam_type, '')));
-  v_norm_lab  := LOWER(TRIM(COALESCE(p_lab_name, '')));
+  v_norm_pet    := LOWER(TRIM(COALESCE(p_pet_name, '')));
+  v_norm_client := LOWER(TRIM(COALESCE(p_client_name, '')));
+  v_norm_exam   := LOWER(TRIM(COALESCE(p_exam_type, '')));
+  v_norm_lab    := LOWER(TRIM(COALESCE(p_lab_name, '')));
 
   -- Valida que pelo menos um campo foi enviado
   IF v_norm_pet = '' AND v_norm_exam = '' AND v_norm_lab = '' THEN
@@ -58,9 +62,10 @@ BEGIN
     SELECT
       i.id AS item_id,
       c.id AS card_id,
-      LOWER(TRIM(COALESCE(c.pet_name, ''))) AS pet,
-      LOWER(TRIM(COALESCE(i.exam_type, ''))) AS exam,
-      LOWER(TRIM(COALESCE(i.lab_name, ''))) AS lab
+      LOWER(TRIM(COALESCE(c.pet_name, '')))    AS pet,
+      LOWER(TRIM(COALESCE(c.client_name, ''))) AS client,
+      LOWER(TRIM(COALESCE(i.exam_type, '')))   AS exam,
+      LOWER(TRIM(COALESCE(i.lab_name, '')))    AS lab
     FROM public.exam_item i
     JOIN public.exam_card c ON c.id = i.exam_card_id
     WHERE c.status = 'aguardando_lab'
@@ -76,6 +81,16 @@ BEGIN
       ELSIF v_candidate.pet LIKE '%' || v_norm_pet || '%'
          OR v_norm_pet LIKE '%' || v_candidate.pet || '%' THEN
         v_score := v_score + 35;
+      END IF;
+    END IF;
+
+    -- Client/tutor name match (+40pts) — desempata pets com mesmo nome
+    IF v_norm_client <> '' AND v_candidate.client <> '' THEN
+      IF v_norm_client = v_candidate.client THEN
+        v_score := v_score + 40;
+      ELSIF v_candidate.client LIKE '%' || v_norm_client || '%'
+         OR v_norm_client LIKE '%' || v_candidate.client || '%' THEN
+        v_score := v_score + 30;
       END IF;
     END IF;
 
@@ -151,7 +166,7 @@ BEGIN
     FOR v_card_candidate IN
       SELECT
         c.id AS card_id,
-        LOWER(TRIM(COALESCE(c.pet_name, ''))) AS pet,
+        LOWER(TRIM(COALESCE(c.pet_name, '')))    AS pet,
         LOWER(TRIM(COALESCE(c.client_name, ''))) AS client
       FROM public.exam_card c
       WHERE c.status = 'aguardando_lab'
@@ -160,13 +175,23 @@ BEGIN
       v_card_total := v_card_total + 1;
       v_score := 0;
 
-      -- Pet name match
+      -- Pet name match (+40pts)
       IF v_card_candidate.pet <> '' THEN
         IF v_norm_pet = v_card_candidate.pet THEN
           v_score := v_score + 40;
         ELSIF v_card_candidate.pet LIKE '%' || v_norm_pet || '%'
            OR v_norm_pet LIKE '%' || v_card_candidate.pet || '%' THEN
           v_score := v_score + 35;
+        END IF;
+      END IF;
+
+      -- Client/tutor name match (+40pts) — obrigatório para evitar falso positivo
+      IF v_norm_client <> '' AND v_card_candidate.client <> '' THEN
+        IF v_norm_client = v_card_candidate.client THEN
+          v_score := v_score + 40;
+        ELSIF v_card_candidate.client LIKE '%' || v_norm_client || '%'
+           OR v_norm_client LIKE '%' || v_card_candidate.client || '%' THEN
+          v_score := v_score + 30;
         END IF;
       END IF;
 
@@ -181,8 +206,8 @@ BEGIN
       v_card_best_score := v_card_best_score + 10;
     END IF;
 
-    -- Threshold para match por card: 35pts (pet_name parcial já basta)
-    IF v_card_best_score >= 35 AND v_card_best_id IS NOT NULL THEN
+    -- Threshold para match por card: 70pts (pet + tutor ambos devem fazer match)
+    IF v_card_best_score >= 70 AND v_card_best_id IS NOT NULL THEN
       -- Criar NOVO item no card existente com resultado já recebido
       INSERT INTO public.exam_item (
         exam_card_id, exam_type, lab_name, arquivo_url,
@@ -261,7 +286,7 @@ END;
 $$;
 
 -- Permissões: anon e authenticated podem chamar
-GRANT EXECUTE ON FUNCTION public.receive_email_result TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.receive_email_result(TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ) TO anon, authenticated;
 
 COMMENT ON FUNCTION public.receive_email_result IS
-  'Recebe resultado de exame via email. Fase 1: match por item (pet+exam+lab). Fase 2: match por card (pet_name). Fase 3: cria card órfão.';
+  'Recebe resultado de exame via email. Fase 1: match por item (pet+client+exam+lab). Fase 2: match por card (pet+tutor, threshold 70pts). Fase 3: cria card órfão.';
