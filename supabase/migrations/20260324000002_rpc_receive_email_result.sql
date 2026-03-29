@@ -207,8 +207,13 @@ BEGIN
       v_card_best_score := v_card_best_score + 10;
     END IF;
 
-    -- Threshold para match por card: 70pts (pet + tutor ambos devem fazer match)
-    IF v_card_best_score >= 70 AND v_card_best_id IS NOT NULL THEN
+    -- Threshold adaptativo:
+    -- Com client_name: 70pts (pet+tutor obrigatório)
+    -- Sem client_name: 40pts (pet_name exato basta)
+    IF v_card_best_id IS NOT NULL AND (
+      (v_norm_client <> '' AND v_card_best_score >= 70) OR
+      (v_norm_client = '' AND v_card_best_score >= 40)
+    ) THEN
 
       -- Idempotência: verificar se item idêntico já existe no card
       SELECT id INTO v_new_item_id
@@ -277,12 +282,40 @@ BEGIN
   END IF;
 
   -- ═══════════════════════════════════════════════════════════
-  -- FASE 3: Sem match → cria card órfão
+  -- FASE 3: Sem match → cria card órfão (com dedup)
   -- ═══════════════════════════════════════════════════════════
+
+  -- Verificar se já existe card órfão com mesmo pet+exam (evita duplicata)
+  SELECT c.id INTO v_orphan_card
+  FROM public.exam_card c
+  JOIN public.exam_item i ON i.exam_card_id = c.id
+  WHERE c.is_orphan = true
+    AND c.origin = 'email'
+    AND LOWER(TRIM(COALESCE(c.pet_name,''))) = v_norm_pet
+    AND LOWER(TRIM(COALESCE(i.exam_type,''))) = v_norm_exam
+    AND i.result_received = true
+  LIMIT 1;
+
+  IF v_orphan_card IS NOT NULL THEN
+    -- Órfão idêntico já existe → retorna sem duplicar
+    SELECT id INTO v_new_item_id FROM public.exam_item
+      WHERE exam_card_id = v_orphan_card AND result_received = true LIMIT 1;
+    RETURN json_build_object(
+      'success', true,
+      'matched', true,
+      'card_id', v_orphan_card,
+      'item_id', v_new_item_id,
+      'score', 0,
+      'match_type', 'orphan_dedup',
+      'candidates_found', 0
+    );
+  END IF;
+
+  -- Criar novo card órfão
   INSERT INTO public.exam_card (
-    status, alert_level, origin, is_orphan, pet_name
+    status, alert_level, origin, is_orphan, pet_name, client_name
   ) VALUES (
-    'exame_pronto', 'warning', 'email', true, p_pet_name
+    'exame_pronto', 'warning', 'email', true, p_pet_name, p_client_name
   ) RETURNING id INTO v_orphan_card;
 
   INSERT INTO public.exam_item (
