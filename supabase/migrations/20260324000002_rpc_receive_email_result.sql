@@ -40,6 +40,7 @@ DECLARE
   v_card_best_score INT := 0;
   v_card_total     INT := 0;
   v_new_item_id    UUID;
+  v_card_old_status TEXT;
 BEGIN
   -- Normaliza inputs (lowercase, sem acentos extras, trim)
   v_norm_pet    := LOWER(TRIM(COALESCE(p_pet_name, '')));
@@ -68,7 +69,7 @@ BEGIN
       LOWER(TRIM(COALESCE(i.lab_name, '')))    AS lab
     FROM public.exam_item i
     JOIN public.exam_card c ON c.id = i.exam_card_id
-    WHERE c.status = 'aguardando_lab'
+    WHERE c.status IN ('aguardando_lab', 'exame_pronto', 'atrasado')
       AND i.result_received = false
   LOOP
     v_total := v_total + 1;
@@ -158,8 +159,8 @@ BEGIN
   END IF;
 
   -- ═══════════════════════════════════════════════════════════
-  -- FASE 2: Match por CARD (pet_name no nível do card)
-  -- Se o pet existe em algum card aguardando_lab, adiciona
+  -- FASE 2: Match por CARD (pet_name + client_name)
+  -- Se o pet+tutor existe em algum card ativo, adiciona
   -- o resultado como NOVO item nesse card
   -- ═══════════════════════════════════════════════════════════
   IF v_norm_pet <> '' THEN
@@ -169,7 +170,7 @@ BEGIN
         LOWER(TRIM(COALESCE(c.pet_name, '')))    AS pet,
         LOWER(TRIM(COALESCE(c.client_name, ''))) AS client
       FROM public.exam_card c
-      WHERE c.status = 'aguardando_lab'
+      WHERE c.status IN ('aguardando_lab', 'exame_pronto', 'atrasado')
       GROUP BY c.id
     LOOP
       v_card_total := v_card_total + 1;
@@ -208,6 +209,29 @@ BEGIN
 
     -- Threshold para match por card: 70pts (pet + tutor ambos devem fazer match)
     IF v_card_best_score >= 70 AND v_card_best_id IS NOT NULL THEN
+
+      -- Idempotência: verificar se item idêntico já existe no card
+      SELECT id INTO v_new_item_id
+        FROM public.exam_item
+        WHERE exam_card_id = v_card_best_id
+          AND LOWER(TRIM(COALESCE(exam_type,''))) = v_norm_exam
+          AND LOWER(TRIM(COALESCE(lab_name,'')))  = v_norm_lab
+          AND result_received = true
+        LIMIT 1;
+
+      IF v_new_item_id IS NOT NULL THEN
+        -- Item já existe → retorna sucesso sem duplicar
+        RETURN json_build_object(
+          'success', true,
+          'matched', true,
+          'card_id', v_card_best_id,
+          'item_id', v_new_item_id,
+          'score', v_card_best_score,
+          'match_type', 'card_match_dedup',
+          'candidates_found', v_card_total
+        );
+      END IF;
+
       -- Criar NOVO item no card existente com resultado já recebido
       INSERT INTO public.exam_item (
         exam_card_id, exam_type, lab_name, arquivo_url,
@@ -221,17 +245,23 @@ BEGIN
         p_received_at
       ) RETURNING id INTO v_new_item_id;
 
-      -- Atualizar status do card para exame_pronto se ainda está aguardando
+      -- Buscar status atual do card
+      SELECT status INTO v_card_old_status FROM public.exam_card WHERE id = v_card_best_id;
+
+      -- Atualizar para exame_pronto apenas se ainda está em aguardando_lab
       UPDATE public.exam_card
         SET status = 'exame_pronto', updated_at = now()
         WHERE id = v_card_best_id AND status = 'aguardando_lab';
 
-      -- Log
+      -- Log com status real
       INSERT INTO public.exam_card_log (
         exam_card_id, previous_status, new_status, changed_by, change_reason
       ) VALUES (
-        v_card_best_id, 'aguardando_lab', 'exame_pronto', 'system',
-        'Resultado de exame diferente associado ao mesmo pet (match por nome)'
+        v_card_best_id,
+        v_card_old_status,
+        CASE WHEN v_card_old_status = 'aguardando_lab' THEN 'exame_pronto' ELSE v_card_old_status END,
+        'system',
+        'Novo resultado de exame associado ao pet (match por nome)'
       );
 
       RETURN json_build_object(
@@ -252,7 +282,7 @@ BEGIN
   INSERT INTO public.exam_card (
     status, alert_level, origin, is_orphan, pet_name
   ) VALUES (
-    'aguardando_lab', 'warning', 'email', true, p_pet_name
+    'exame_pronto', 'warning', 'email', true, p_pet_name
   ) RETURNING id INTO v_orphan_card;
 
   INSERT INTO public.exam_item (
@@ -270,7 +300,7 @@ BEGIN
   INSERT INTO public.exam_card_log (
     exam_card_id, previous_status, new_status, changed_by, change_reason
   ) VALUES (
-    v_orphan_card, NULL, 'aguardando_lab', 'webhook',
+    v_orphan_card, NULL, 'exame_pronto', 'webhook',
     'Email sem match — card órfão para triagem manual'
   );
 
