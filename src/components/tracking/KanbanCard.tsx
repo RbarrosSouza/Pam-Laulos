@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Clock, ShoppingBag, Mail, AlertTriangle, User, Calendar, Cat, Dog } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useDraggable } from '@dnd-kit/core'
 import { staggerItem } from '@/lib/animations'
 import { formatHours, cn, getSpeciesType } from '@/lib/utils'
 import { ExamItemRow } from './ExamItemRow'
@@ -13,10 +14,16 @@ const TRUNCATE_AT = 3
 interface KanbanCardProps {
   card: ExamCard
   onClick: () => void
+  isDragging?: boolean
 }
 
-export function KanbanCard({ card, onClick }: KanbanCardProps) {
+export function KanbanCard({ card, onClick, isDragging = false }: KanbanCardProps) {
   const [contactingItem, setContactingItem] = useState<ExamItem | null>(null)
+
+  const { attributes, listeners, setNodeRef, isDragging: isActiveDrag } = useDraggable({
+    id: card.id,
+    data: { card },
+  })
 
   const petLabel = card.pet_name ?? '—'
   const speciesType = getSpeciesType(card.pet_species)
@@ -45,21 +52,27 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
     ? new Date(displayDate).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
     : null
 
+  const dragging = isActiveDrag || isDragging
+
   return (
     <>
       <motion.div
+        ref={setNodeRef}
         variants={staggerItem}
-        whileHover={{ y: -2, scale: 1.01, transition: { duration: 0.15 } }}
-        onClick={onClick}
+        whileHover={dragging ? undefined : { y: -2, scale: 1.01, transition: { duration: 0.15 } }}
+        onClick={dragging ? undefined : onClick}
         className={cn(
-          'rounded-xl border bg-[hsl(var(--card))] p-3.5 cursor-pointer shadow-sm',
+          'rounded-xl border bg-[hsl(var(--card))] p-3.5 cursor-grab active:cursor-grabbing shadow-sm',
           'hover:shadow-md transition-all duration-150',
+          dragging ? 'opacity-40' : '',
           card.alert_level === 'critical'
             ? 'border-red-200 dark:border-red-800/80 hover:border-red-300 dark:hover:border-red-800'
             : card.alert_level === 'warning'
             ? 'border-amber-200 dark:border-amber-800/80 hover:border-amber-300 dark:hover:border-amber-800'
             : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/40'
         )}
+        {...attributes}
+        {...listeners}
       >
         {/* Row 1: pet name + vet avatar */}
         <div className="flex items-start justify-between gap-2 mb-2">

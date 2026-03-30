@@ -143,6 +143,38 @@ export function useMergeCards() {
   })
 }
 
+// ─── Move Card (Drag and Drop) ───────────────────────────────────────────────
+
+interface MoveCardPayload {
+  cardId: string
+  fromStatus: string
+  toStatus: string
+  contactedBy?: string
+}
+
+export function useMoveCard() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ cardId, fromStatus, toStatus, contactedBy }: MoveCardPayload) => {
+      const { data, error } = await supabase.rpc('move_exam_card', {
+        p_card_id: cardId,
+        p_from_status: fromStatus,
+        p_to_status: toStatus,
+        p_contacted_by: contactedBy ?? null,
+      })
+      if (error) throw error
+      if (!data?.success) throw new Error(data?.error || 'Falha ao mover card')
+      return data as { success: boolean; card_id: string; from_status: string; to_status: string }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-logs'] })
+    },
+  })
+}
+
 // ─── Add Item ───────────────────────────────────────────────────────────────
 
 export function useAddItem() {
