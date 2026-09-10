@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { LayoutList, KanbanSquare, Search, X, SlidersHorizontal, ChevronDown, Filter, Check, Trash2, ArrowRight, Loader2 } from 'lucide-react'
+import { LayoutList, KanbanSquare, Search, X, SlidersHorizontal, ChevronDown, Filter, Check, Trash2, ArrowRight, Loader2, ArrowUpDown } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { TrackingTable } from '@/components/tracking/TrackingTable'
@@ -18,6 +18,7 @@ import { STATUS_FILTER_OPTIONS } from '@/lib/card-constants'
 import type { ExamCard, CardStatus } from '@/types/exam-card'
 
 type ViewMode = 'board' | 'table'
+type SortOrder = 'newest' | 'oldest'
 
 const NEXT_STATUS: Partial<Record<CardStatus, CardStatus>> = {
   aguardando_lab: 'exame_pronto',
@@ -37,6 +38,7 @@ export function Tracking() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showBulkDelete, setShowBulkDelete] = useState(false)
   const [showBulkVet, setShowBulkVet] = useState(false)
+  const [sortOrder, setSortOrder] = useState<SortOrder>('newest')
 
   useRealtimeExams()
   const { data: vets } = useVets()
@@ -66,6 +68,15 @@ export function Tracking() {
       vet_avatar_url: card.vet_avatar_url || (card.vet_name ? vetMap.get(card.vet_name) ?? null : null),
     }))
   }, [allCards, vets])
+
+  const sortedCards = useMemo(() => [...enrichedCards].sort((a, b) => {
+    const elapsedDifference = a.hours_elapsed - b.hours_elapsed
+    if (elapsedDifference !== 0) {
+      return sortOrder === 'newest' ? elapsedDifference : -elapsedDifference
+    }
+    const dateDifference = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    return sortOrder === 'newest' ? dateDifference : -dateDifference
+  }), [enrichedCards, sortOrder])
 
   const selectedCards = enrichedCards.filter((card) => selectedIds.has(card.id))
   const activeSelectedIds = new Set(selectedCards.map((card) => card.id))
@@ -317,6 +328,25 @@ export function Tracking() {
               <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] pointer-events-none" />
             </div>
 
+            {/* Time sorting */}
+            <div className="relative">
+              <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] pointer-events-none" />
+              <select
+                aria-label="Ordenar por tempo"
+                value={sortOrder}
+                onChange={(event) => setSortOrder(event.target.value as SortOrder)}
+                className={cn(
+                  'appearance-none pl-8 pr-8 py-2 text-sm rounded-lg border bg-[hsl(var(--card))]',
+                  'border-[hsl(var(--border))] text-[hsl(var(--foreground))] cursor-pointer transition-all',
+                  'focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]/40 focus:border-[hsl(var(--primary))]'
+                )}
+              >
+                <option value="newest">Mais recentes</option>
+                <option value="oldest">Mais antigos</option>
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] pointer-events-none" />
+            </div>
+
             {/* Today button */}
             <button
               onClick={toggleToday}
@@ -373,14 +403,14 @@ export function Tracking() {
         {/* Content */}
         {view === 'board' ? (
           <KanbanBoard
-            cards={enrichedCards}
+            cards={sortedCards}
             onSelectCard={setSelectedCard}
             selectedIds={activeSelectedIds}
             onToggleSelection={toggleSelection}
           />
         ) : (
           <TrackingTable
-            cards={enrichedCards}
+            cards={sortedCards}
             onSelectCard={setSelectedCard}
             selectedIds={activeSelectedIds}
             onToggleSelection={toggleSelection}
