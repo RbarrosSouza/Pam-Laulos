@@ -1,11 +1,15 @@
 import { useState, useMemo } from 'react'
-import { LayoutList, KanbanSquare, Search, X, SlidersHorizontal, ChevronDown, Filter } from 'lucide-react'
+import { LayoutList, KanbanSquare, Search, X, SlidersHorizontal, ChevronDown, Filter, Check, Trash2, ArrowRight, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { toast } from 'sonner'
 import { TrackingTable } from '@/components/tracking/TrackingTable'
 import { KanbanBoard } from '@/components/tracking/KanbanBoard'
 import { TrackingDetail } from '@/components/tracking/TrackingDetail'
 import { DateRangePicker } from '@/components/tracking/DateRangePicker'
+import { ConfirmDialog } from '@/components/tracking/ConfirmDialog'
+import { VetPickerModal } from '@/components/tracking/VetPickerModal'
 import { useExamCards } from '@/hooks/useExamCards'
+import { useBulkDeleteCards, useBulkMoveCards } from '@/hooks/useExamCardMutations'
 import { useVets } from '@/hooks/useVets'
 import { useRealtimeExams } from '@/hooks/useRealtimeExams'
 import { fadeUp } from '@/lib/animations'
@@ -14,6 +18,12 @@ import { STATUS_FILTER_OPTIONS } from '@/lib/card-constants'
 import type { ExamCard, CardStatus } from '@/types/exam-card'
 
 type ViewMode = 'board' | 'table'
+
+const NEXT_STATUS: Partial<Record<CardStatus, CardStatus>> = {
+  aguardando_lab: 'exame_pronto',
+  atrasado: 'exame_pronto',
+  exame_pronto: 'contato_realizado',
+}
 
 export function Tracking() {
   const [view, setView] = useState<ViewMode>('board')
@@ -24,9 +34,14 @@ export function Tracking() {
   const [dateTo, setDateTo] = useState('')
   const [selectedCard, setSelectedCard] = useState<ExamCard | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showBulkDelete, setShowBulkDelete] = useState(false)
+  const [showBulkVet, setShowBulkVet] = useState(false)
 
   useRealtimeExams()
   const { data: vets } = useVets()
+  const bulkDelete = useBulkDeleteCards()
+  const bulkMove = useBulkMoveCards()
 
   const { data: allCards } = useExamCards({
     search: search || undefined,
@@ -51,6 +66,63 @@ export function Tracking() {
       vet_avatar_url: card.vet_avatar_url || (card.vet_name ? vetMap.get(card.vet_name) ?? null : null),
     }))
   }, [allCards, vets])
+
+  const selectedCards = enrichedCards.filter((card) => selectedIds.has(card.id))
+  const activeSelectedIds = new Set(selectedCards.map((card) => card.id))
+  const advanceableCards = selectedCards.filter((card) => NEXT_STATUS[card.status])
+  const allVisibleSelected = enrichedCards.length > 0 && selectedCards.length === enrichedCards.length
+
+  const toggleSelection = (cardId: string) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous)
+      if (next.has(cardId)) next.delete(cardId)
+      else next.add(cardId)
+      return next
+    })
+  }
+
+  const toggleAllVisible = () => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous)
+      enrichedCards.forEach((card) => allVisibleSelected ? next.delete(card.id) : next.add(card.id))
+      return next
+    })
+  }
+
+  const executeAdvance = async (contactedBy?: string) => {
+    try {
+      await bulkMove.mutateAsync(advanceableCards.map((card) => ({
+        cardId: card.id,
+        fromStatus: card.status,
+        toStatus: NEXT_STATUS[card.status]!,
+        contactedBy: NEXT_STATUS[card.status] === 'contato_realizado' ? contactedBy : undefined,
+      })))
+      toast.success(`${advanceableCards.length} exame${advanceableCards.length === 1 ? '' : 's'} avançado${advanceableCards.length === 1 ? '' : 's'}`)
+      setSelectedIds(new Set())
+      setShowBulkVet(false)
+    } catch (error: unknown) {
+      toast.error('Erro ao avançar exames: ' + (error instanceof Error ? error.message : 'Tente novamente'))
+    }
+  }
+
+  const handleAdvance = () => {
+    if (advanceableCards.some((card) => NEXT_STATUS[card.status] === 'contato_realizado')) {
+      setShowBulkVet(true)
+    } else {
+      executeAdvance()
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    try {
+      await bulkDelete.mutateAsync([...activeSelectedIds])
+      toast.success(`${selectedCards.length} exame${selectedCards.length === 1 ? '' : 's'} excluído${selectedCards.length === 1 ? '' : 's'}`)
+      setSelectedIds(new Set())
+      setShowBulkDelete(false)
+    } catch (error: unknown) {
+      toast.error('Erro ao excluir exames: ' + (error instanceof Error ? error.message : 'Tente novamente'))
+    }
+  }
 
   const isToday = dateFrom === new Date().toISOString().split('T')[0] && dateTo === dateFrom
   const hasFilters = search || selectedStatuses.length > 0 || selectedVet || dateFrom || dateTo
@@ -138,6 +210,59 @@ export function Tracking() {
                 <span className="hidden md:inline">Tabela</span>
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* Bulk actions */}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2.5 shadow-sm">
+          <button
+            type="button"
+            onClick={toggleAllVisible}
+            disabled={enrichedCards.length === 0}
+            className="flex items-center gap-2 text-xs font-semibold text-[hsl(var(--foreground))] disabled:opacity-40"
+          >
+            <span className={cn(
+              'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all',
+              allVisibleSelected
+                ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]'
+                : 'border-[hsl(var(--border))]'
+            )}>
+              {allVisibleSelected && <Check className="w-3 h-3 text-white" />}
+            </span>
+            Selecionar todos
+          </button>
+
+          <span className="text-xs text-[hsl(var(--muted-foreground))]">
+            {selectedCards.length} selecionado{selectedCards.length === 1 ? '' : 's'}
+          </span>
+
+          <div className="ml-auto flex items-center gap-2">
+            {selectedCards.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="h-8 px-2.5 rounded-lg text-xs font-medium text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"
+              >
+                Limpar
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleAdvance}
+              disabled={advanceableCards.length === 0 || bulkMove.isPending}
+              className="h-8 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 bg-[hsl(var(--primary))] text-white disabled:opacity-40"
+            >
+              {bulkMove.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRight className="w-3.5 h-3.5" />}
+              Avançar ({advanceableCards.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowBulkDelete(true)}
+              disabled={selectedCards.length === 0 || bulkDelete.isPending}
+              className="h-8 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 bg-red-500 text-white hover:bg-red-600 disabled:opacity-40"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Excluir
+            </button>
           </div>
         </div>
 
@@ -250,16 +375,39 @@ export function Tracking() {
           <KanbanBoard
             cards={enrichedCards}
             onSelectCard={setSelectedCard}
+            selectedIds={activeSelectedIds}
+            onToggleSelection={toggleSelection}
           />
         ) : (
           <TrackingTable
             cards={enrichedCards}
             onSelectCard={setSelectedCard}
+            selectedIds={activeSelectedIds}
+            onToggleSelection={toggleSelection}
           />
         )}
       </motion.div>
 
       <AnimatePresence>
+        {showBulkDelete && (
+          <ConfirmDialog
+            title={`Excluir ${selectedCards.length} exame${selectedCards.length === 1 ? '' : 's'}?`}
+            description="Os exames selecionados e seus itens serão excluídos permanentemente."
+            confirmLabel="Excluir selecionados"
+            loading={bulkDelete.isPending}
+            onConfirm={handleBulkDelete}
+            onClose={() => setShowBulkDelete(false)}
+          />
+        )}
+        {showBulkVet && selectedCards[0] && (
+          <VetPickerModal
+            card={selectedCards[0]}
+            title="Quem realizou os contatos?"
+            subtitle={`${advanceableCards.length} exame${advanceableCards.length === 1 ? '' : 's'} será${advanceableCards.length === 1 ? '' : 'ão'} avançado${advanceableCards.length === 1 ? '' : 's'}`}
+            onConfirm={executeAdvance}
+            onCancel={() => setShowBulkVet(false)}
+          />
+        )}
         {selectedCard && (
           <TrackingDetail card={selectedCard} onClose={() => setSelectedCard(null)} />
         )}

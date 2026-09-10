@@ -54,6 +54,20 @@ export function useDeleteCard() {
   })
 }
 
+export function useBulkDeleteCards() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (cardIds: string[]) => {
+      const { error } = await supabase.from('exam_card').delete().in('id', cardIds)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-stats'] })
+    },
+  })
+}
+
 // ─── Update Item ────────────────────────────────────────────────────────────
 
 interface UpdateItemPayload {
@@ -166,6 +180,31 @@ export function useMoveCard() {
       if (error) throw error
       if (!data?.success) throw new Error(data?.error || 'Falha ao mover card')
       return data as { success: boolean; card_id: string; from_status: string; to_status: string }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-logs'] })
+    },
+  })
+}
+
+export function useBulkMoveCards() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (moves: MoveCardPayload[]) => {
+      for (let index = 0; index < moves.length; index += 10) {
+        await Promise.all(moves.slice(index, index + 10).map(async ({ cardId, fromStatus, toStatus, contactedBy }) => {
+          const { data, error } = await supabase.rpc('move_exam_card', {
+            p_card_id: cardId,
+            p_from_status: fromStatus,
+            p_to_status: toStatus,
+            p_contacted_by: contactedBy ?? null,
+          })
+          if (error) throw error
+          if (!data?.success) throw new Error(data?.error || 'Falha ao mover card')
+        }))
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam-cards'] })

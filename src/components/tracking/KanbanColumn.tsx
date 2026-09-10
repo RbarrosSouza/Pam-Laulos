@@ -11,9 +11,11 @@ interface KanbanColumnProps {
   status: CardStatus
   cards: ExamCard[]
   onSelectCard: (card: ExamCard) => void
+  selectedIds: Set<string>
+  onToggleSelection: (cardId: string) => void
 }
 
-export function KanbanColumn({ status, cards, onSelectCard }: KanbanColumnProps) {
+export function KanbanColumn({ status, cards, onSelectCard, selectedIds, onToggleSelection }: KanbanColumnProps) {
   const config = STATUS_CONFIG[status]
   const { setNodeRef, isOver } = useDroppable({ id: status })
 
@@ -65,6 +67,8 @@ export function KanbanColumn({ status, cards, onSelectCard }: KanbanColumnProps)
                   key={card.id}
                   card={card}
                   onClick={() => onSelectCard(card)}
+                  selected={selectedIds.has(card.id)}
+                  onToggleSelection={() => onToggleSelection(card.id)}
                 />
               ))}
             </motion.div>

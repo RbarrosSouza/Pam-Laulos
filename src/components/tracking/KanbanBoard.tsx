@@ -22,6 +22,8 @@ import type { ExamCard, CardStatus } from '@/types/exam-card'
 interface KanbanBoardProps {
   cards: ExamCard[]
   onSelectCard: (card: ExamCard) => void
+  selectedIds: Set<string>
+  onToggleSelection: (cardId: string) => void
 }
 
 interface PendingDrop {
@@ -30,7 +32,7 @@ interface PendingDrop {
   toStatus: CardStatus
 }
 
-export function KanbanBoard({ cards, onSelectCard }: KanbanBoardProps) {
+export function KanbanBoard({ cards, onSelectCard, selectedIds, onToggleSelection }: KanbanBoardProps) {
   const [activeCard, setActiveCard] = useState<ExamCard | null>(null)
   const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null)
 
@@ -73,8 +75,8 @@ export function KanbanBoard({ cards, onSelectCard }: KanbanBoardProps) {
     moveMutation.mutate(
       { cardId: card.id, fromStatus, toStatus },
       {
-        onError: (err: any) => {
-          toast.error('Erro ao mover card: ' + (err.message || 'Falha desconhecida'))
+        onError: (err: unknown) => {
+          toast.error('Erro ao mover card: ' + (err instanceof Error ? err.message : 'Falha desconhecida'))
         },
       }
     )
@@ -88,8 +90,8 @@ export function KanbanBoard({ cards, onSelectCard }: KanbanBoardProps) {
     moveMutation.mutate(
       { cardId: card.id, fromStatus, toStatus, contactedBy },
       {
-        onError: (err: any) => {
-          toast.error('Erro ao mover card: ' + (err.message || 'Falha desconhecida'))
+        onError: (err: unknown) => {
+          toast.error('Erro ao mover card: ' + (err instanceof Error ? err.message : 'Falha desconhecida'))
         },
       }
     )
@@ -110,6 +112,8 @@ export function KanbanBoard({ cards, onSelectCard }: KanbanBoardProps) {
               status={status}
               cards={colCards}
               onSelectCard={onSelectCard}
+              selectedIds={selectedIds}
+              onToggleSelection={onToggleSelection}
             />
           ))}
         </div>

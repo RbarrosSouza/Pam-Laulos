@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Clock, ShoppingBag, Mail, AlertTriangle, User, Calendar, Cat, Dog } from 'lucide-react'
+import { Clock, ShoppingBag, Mail, AlertTriangle, User, Calendar, Cat, Dog, Check } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDraggable } from '@dnd-kit/core'
 import { staggerItem } from '@/lib/animations'
@@ -15,9 +15,11 @@ interface KanbanCardProps {
   card: ExamCard
   onClick: () => void
   isDragging?: boolean
+  selected?: boolean
+  onToggleSelection?: () => void
 }
 
-export function KanbanCard({ card, onClick, isDragging = false }: KanbanCardProps) {
+export function KanbanCard({ card, onClick, isDragging = false, selected = false, onToggleSelection }: KanbanCardProps) {
   const [contactingItem, setContactingItem] = useState<ExamItem | null>(null)
 
   const { attributes, listeners, setNodeRef, isDragging: isActiveDrag } = useDraggable({
@@ -62,9 +64,10 @@ export function KanbanCard({ card, onClick, isDragging = false }: KanbanCardProp
         whileHover={dragging ? undefined : { y: -2, scale: 1.01, transition: { duration: 0.15 } }}
         onClick={dragging ? undefined : onClick}
         className={cn(
-          'rounded-xl border bg-[hsl(var(--card))] p-3.5 cursor-grab active:cursor-grabbing shadow-sm',
+          'relative rounded-xl border bg-[hsl(var(--card))] p-3.5 cursor-grab active:cursor-grabbing shadow-sm',
           'hover:shadow-md transition-all duration-150',
           dragging ? 'opacity-40' : '',
+          selected && 'ring-2 ring-[hsl(var(--primary))] border-[hsl(var(--primary))]',
           card.alert_level === 'critical'
             ? 'border-red-200 dark:border-red-800/80 hover:border-red-300 dark:hover:border-red-800'
             : card.alert_level === 'warning'
@@ -74,8 +77,23 @@ export function KanbanCard({ card, onClick, isDragging = false }: KanbanCardProp
         {...attributes}
         {...listeners}
       >
+        {onToggleSelection && (
+          <button
+            type="button"
+            aria-label={`Selecionar ${petLabel}`}
+            aria-pressed={selected}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); onToggleSelection() }}
+            className={cn(
+              'absolute top-3 right-3 z-10 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all',
+              selected ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]' : 'bg-[hsl(var(--card))] border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]'
+            )}
+          >
+            {selected && <Check className="w-3 h-3 text-white" />}
+          </button>
+        )}
         {/* Row 1: pet name + vet avatar */}
-        <div className="flex items-start justify-between gap-2 mb-2">
+        <div className={cn('flex items-start justify-between gap-2 mb-2', onToggleSelection && 'pr-7')}>
           <div className="flex items-center gap-1.5 min-w-0">
             {card.alert_level === 'critical' && (
               <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 alert-dot-critical" />

@@ -8,11 +8,13 @@ import type { ExamCard } from '@/types/exam-card'
 
 interface VetPickerModalProps {
   card: ExamCard
+  title?: string
+  subtitle?: string
   onConfirm: (contactedBy: string) => void
   onCancel: () => void
 }
 
-export function VetPickerModal({ card, onConfirm, onCancel }: VetPickerModalProps) {
+export function VetPickerModal({ card, title = 'Quem realizou o contato?', subtitle, onConfirm, onCancel }: VetPickerModalProps) {
   const [selected, setSelected] = useState<string>(card.vet_name ?? '')
   const [custom, setCustom] = useState('')
 
@@ -43,7 +45,7 @@ export function VetPickerModal({ card, onConfirm, onCancel }: VetPickerModalProp
         <div className="px-5 py-4 border-b border-[hsl(var(--border))] flex items-center justify-between">
           <div className="flex items-center gap-2">
             <UserCheck className="w-4 h-4 text-[hsl(var(--primary))]" />
-            <h2 className="text-base font-bold text-[hsl(var(--foreground))]">Quem realizou o contato?</h2>
+            <h2 className="text-base font-bold text-[hsl(var(--foreground))]">{title}</h2>
           </div>
           <button
             onClick={onCancel}
@@ -56,8 +58,7 @@ export function VetPickerModal({ card, onConfirm, onCancel }: VetPickerModalProp
         {/* Subtitle */}
         <div className="px-5 pt-3 pb-1">
           <p className="text-xs text-[hsl(var(--muted-foreground))]">
-            <span className="font-semibold text-[hsl(var(--foreground))]">{card.pet_name ?? 'Card'}</span>
-            {card.client_name ? ` · ${card.client_name}` : ''}
+            {subtitle ?? <><span className="font-semibold text-[hsl(var(--foreground))]">{card.pet_name ?? 'Card'}</span>{card.client_name ? ` · ${card.client_name}` : ''}</>}
           </p>
         </div>
 

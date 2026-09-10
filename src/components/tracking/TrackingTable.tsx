@@ -1,4 +1,4 @@
-import { Search, AlertTriangle, Eye, Stethoscope } from 'lucide-react'
+import { Search, AlertTriangle, Eye, Stethoscope, Check } from 'lucide-react'
 import { StatusBadge } from './StatusBadge'
 import { formatHours, formatDate, cn } from '@/lib/utils'
 import type { ExamCard } from '@/types/exam-card'
@@ -6,7 +6,7 @@ import type { ExamCard } from '@/types/exam-card'
 function SkeletonRow() {
   return (
     <tr className="border-b border-[hsl(var(--border))]">
-      {[...Array(8)].map((_, i) => (
+      {[...Array(9)].map((_, i) => (
         <td key={i} className="px-4 py-3">
           <div className="h-4 bg-[hsl(var(--muted))] rounded animate-pulse" style={{ width: `${60 + i * 10}%` }} />
         </td>
@@ -19,15 +19,18 @@ interface TrackingTableProps {
   cards?: ExamCard[]
   onSelectCard: (card: ExamCard) => void
   isLoading?: boolean
+  selectedIds: Set<string>
+  onToggleSelection: (cardId: string) => void
 }
 
-export function TrackingTable({ cards, onSelectCard, isLoading }: TrackingTableProps) {
+export function TrackingTable({ cards, onSelectCard, isLoading, selectedIds, onToggleSelection }: TrackingTableProps) {
   return (
     <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40">
+              <th className="px-4 py-3 w-10" />
               <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Status</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Pet / Tutor</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide hidden md:table-cell">Exames</th>
@@ -51,7 +54,7 @@ export function TrackingTable({ cards, onSelectCard, isLoading }: TrackingTableP
 
             {!isLoading && cards?.length === 0 && (
               <tr>
-                <td colSpan={9} className="text-center py-16 text-[hsl(var(--muted-foreground))]">
+                <td colSpan={10} className="text-center py-16 text-[hsl(var(--muted-foreground))]">
                   <Search className="w-8 h-8 mx-auto mb-2 opacity-30" />
                   <p className="text-sm">Nenhum card encontrado</p>
                 </td>
@@ -68,10 +71,27 @@ export function TrackingTable({ cards, onSelectCard, isLoading }: TrackingTableP
                   className={cn(
                     'border-b border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]/40 cursor-pointer transition-colors group',
                     card.alert_level === 'critical' && 'bg-red-50/50 dark:bg-red-950/20',
-                    card.alert_level === 'warning' && 'bg-amber-50/50 dark:bg-amber-950/20'
+                    card.alert_level === 'warning' && 'bg-amber-50/50 dark:bg-amber-950/20',
+                    selectedIds.has(card.id) && 'ring-2 ring-inset ring-[hsl(var(--primary))]'
                   )}
                   onClick={() => onSelectCard(card)}
                 >
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      aria-label={`Selecionar ${card.pet_name ?? 'card'}`}
+                      aria-pressed={selectedIds.has(card.id)}
+                      onClick={(event) => { event.stopPropagation(); onToggleSelection(card.id) }}
+                      className={cn(
+                        'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all',
+                        selectedIds.has(card.id)
+                          ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]'
+                          : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]'
+                      )}
+                    >
+                      {selectedIds.has(card.id) && <Check className="w-3 h-3 text-white" />}
+                    </button>
+                  </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={card.status} alertLevel={card.alert_level} />
                   </td>
