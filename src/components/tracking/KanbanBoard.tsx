@@ -24,6 +24,7 @@ interface KanbanBoardProps {
   onSelectCard: (card: ExamCard) => void
   selectedIds: Set<string>
   onToggleSelection: (cardId: string) => void
+  onToggleGroupSelection: (cardIds: string[]) => void
 }
 
 interface PendingDrop {
@@ -32,7 +33,7 @@ interface PendingDrop {
   toStatus: CardStatus
 }
 
-export function KanbanBoard({ cards, onSelectCard, selectedIds, onToggleSelection }: KanbanBoardProps) {
+export function KanbanBoard({ cards, onSelectCard, selectedIds, onToggleSelection, onToggleGroupSelection }: KanbanBoardProps) {
   const [activeCard, setActiveCard] = useState<ExamCard | null>(null)
   const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null)
 
@@ -114,6 +115,7 @@ export function KanbanBoard({ cards, onSelectCard, selectedIds, onToggleSelectio
               onSelectCard={onSelectCard}
               selectedIds={selectedIds}
               onToggleSelection={onToggleSelection}
+              onToggleAll={() => onToggleGroupSelection(colCards.map((card) => card.id))}
             />
           ))}
         </div>

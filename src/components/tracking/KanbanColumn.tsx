@@ -1,4 +1,4 @@
-import { Inbox } from 'lucide-react'
+import { Check, Inbox, Minus } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDroppable } from '@dnd-kit/core'
 import { KanbanCard } from './KanbanCard'
@@ -13,11 +13,15 @@ interface KanbanColumnProps {
   onSelectCard: (card: ExamCard) => void
   selectedIds: Set<string>
   onToggleSelection: (cardId: string) => void
+  onToggleAll: () => void
 }
 
-export function KanbanColumn({ status, cards, onSelectCard, selectedIds, onToggleSelection }: KanbanColumnProps) {
+export function KanbanColumn({ status, cards, onSelectCard, selectedIds, onToggleSelection, onToggleAll }: KanbanColumnProps) {
   const config = STATUS_CONFIG[status]
   const { setNodeRef, isOver } = useDroppable({ id: status })
+  const selectedCount = cards.filter((card) => selectedIds.has(card.id)).length
+  const allSelected = cards.length > 0 && selectedCount === cards.length
+  const someSelected = selectedCount > 0 && !allSelected
 
   return (
     <div
@@ -35,12 +39,31 @@ export function KanbanColumn({ status, cards, onSelectCard, selectedIds, onToggl
           <span className={cn('w-2 h-2 rounded-full shrink-0', config.dotColor)} />
           <span className={cn('text-sm font-semibold', config.headerText)}>{config.label}</span>
         </div>
-        <span className={cn(
-          'text-xs font-bold px-2 py-0.5 rounded-full min-w-[22px] text-center',
-          config.badgeBg, config.badgeText
-        )}>
-          {cards.length}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleAll}
+            disabled={cards.length === 0}
+            aria-label={`Selecionar todos em ${config.label}`}
+            aria-pressed={allSelected}
+            title={`Selecionar todos em ${config.label}`}
+            className={cn(
+              'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all disabled:opacity-30',
+              allSelected || someSelected
+                ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]'
+                : 'border-current opacity-60 hover:opacity-100'
+            )}
+          >
+            {allSelected && <Check className="w-3 h-3 text-white" />}
+            {someSelected && <Minus className="w-3 h-3 text-white" />}
+          </button>
+          <span className={cn(
+            'text-xs font-bold px-2 py-0.5 rounded-full min-w-[22px] text-center',
+            config.badgeBg, config.badgeText
+          )}>
+            {cards.length}
+          </span>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto max-h-[calc(100vh-120px)] p-2.5 space-y-2">

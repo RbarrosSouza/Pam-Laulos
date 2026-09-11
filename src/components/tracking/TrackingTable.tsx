@@ -21,16 +21,38 @@ interface TrackingTableProps {
   isLoading?: boolean
   selectedIds: Set<string>
   onToggleSelection: (cardId: string) => void
+  onToggleAllSelection: () => void
 }
 
-export function TrackingTable({ cards, onSelectCard, isLoading, selectedIds, onToggleSelection }: TrackingTableProps) {
+export function TrackingTable({ cards, onSelectCard, isLoading, selectedIds, onToggleSelection, onToggleAllSelection }: TrackingTableProps) {
+  const selectedCount = cards?.filter((card) => selectedIds.has(card.id)).length ?? 0
+  const allSelected = Boolean(cards?.length) && selectedCount === cards?.length
+  const someSelected = selectedCount > 0 && !allSelected
+
   return (
     <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40">
-              <th className="px-4 py-3 w-10" />
+              <th className="px-4 py-3 w-10">
+                <button
+                  type="button"
+                  onClick={onToggleAllSelection}
+                  disabled={!cards?.length}
+                  aria-label="Selecionar todos os exames da tabela"
+                  aria-pressed={allSelected}
+                  className={cn(
+                    'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all disabled:opacity-30',
+                    allSelected || someSelected
+                      ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]'
+                      : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]'
+                  )}
+                >
+                  {allSelected && <Check className="w-3 h-3 text-white" />}
+                  {someSelected && <span className="w-2 h-0.5 rounded bg-white" />}
+                </button>
+              </th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Status</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Pet / Tutor</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide hidden md:table-cell">Exames</th>

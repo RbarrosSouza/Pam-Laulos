@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { LayoutList, KanbanSquare, Search, X, SlidersHorizontal, ChevronDown, Filter, Check, Trash2, ArrowRight, Loader2, ArrowUpDown } from 'lucide-react'
+import { LayoutList, KanbanSquare, Search, X, SlidersHorizontal, ChevronDown, Filter, Trash2, ArrowRight, Loader2, ArrowUpDown } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { TrackingTable } from '@/components/tracking/TrackingTable'
@@ -81,7 +81,6 @@ export function Tracking() {
   const selectedCards = enrichedCards.filter((card) => selectedIds.has(card.id))
   const activeSelectedIds = new Set(selectedCards.map((card) => card.id))
   const advanceableCards = selectedCards.filter((card) => NEXT_STATUS[card.status])
-  const allVisibleSelected = enrichedCards.length > 0 && selectedCards.length === enrichedCards.length
 
   const toggleSelection = (cardId: string) => {
     setSelectedIds((previous) => {
@@ -92,10 +91,11 @@ export function Tracking() {
     })
   }
 
-  const toggleAllVisible = () => {
+  const toggleGroupSelection = (cardIds: string[]) => {
     setSelectedIds((previous) => {
       const next = new Set(previous)
-      enrichedCards.forEach((card) => allVisibleSelected ? next.delete(card.id) : next.add(card.id))
+      const allSelected = cardIds.length > 0 && cardIds.every((cardId) => next.has(cardId))
+      cardIds.forEach((cardId) => allSelected ? next.delete(cardId) : next.add(cardId))
       return next
     })
   }
@@ -226,23 +226,6 @@ export function Tracking() {
 
         {/* Bulk actions */}
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2.5 shadow-sm">
-          <button
-            type="button"
-            onClick={toggleAllVisible}
-            disabled={enrichedCards.length === 0}
-            className="flex items-center gap-2 text-xs font-semibold text-[hsl(var(--foreground))] disabled:opacity-40"
-          >
-            <span className={cn(
-              'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all',
-              allVisibleSelected
-                ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]'
-                : 'border-[hsl(var(--border))]'
-            )}>
-              {allVisibleSelected && <Check className="w-3 h-3 text-white" />}
-            </span>
-            Selecionar todos
-          </button>
-
           <span className="text-xs text-[hsl(var(--muted-foreground))]">
             {selectedCards.length} selecionado{selectedCards.length === 1 ? '' : 's'}
           </span>
@@ -407,6 +390,7 @@ export function Tracking() {
             onSelectCard={setSelectedCard}
             selectedIds={activeSelectedIds}
             onToggleSelection={toggleSelection}
+            onToggleGroupSelection={toggleGroupSelection}
           />
         ) : (
           <TrackingTable
@@ -414,6 +398,7 @@ export function Tracking() {
             onSelectCard={setSelectedCard}
             selectedIds={activeSelectedIds}
             onToggleSelection={toggleSelection}
+            onToggleAllSelection={() => toggleGroupSelection(sortedCards.map((card) => card.id))}
           />
         )}
       </motion.div>

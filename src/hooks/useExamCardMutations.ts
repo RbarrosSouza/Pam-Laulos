@@ -41,11 +41,11 @@ export function useDeleteCard() {
 
   return useMutation({
     mutationFn: async (cardId: string) => {
-      const { error } = await supabase
-        .from('exam_card')
-        .delete()
-        .eq('id', cardId)
+      const { data, error } = await supabase.rpc('delete_exam_cards', {
+        p_card_ids: [cardId],
+      })
       if (error) throw error
+      if (!data?.success) throw new Error(data?.error || 'Falha ao excluir exame')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
@@ -58,8 +58,12 @@ export function useBulkDeleteCards() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (cardIds: string[]) => {
-      const { error } = await supabase.from('exam_card').delete().in('id', cardIds)
+      if (cardIds.length === 0) return
+      const { data, error } = await supabase.rpc('delete_exam_cards', {
+        p_card_ids: cardIds,
+      })
       if (error) throw error
+      if (!data?.success) throw new Error(data?.error || 'Falha ao excluir exames')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
