@@ -1,3 +1,5 @@
+BEGIN;
+
 -- The old "atrasado" column did not record when a result was shared.
 -- Keep those cards ready for review; do not invent a group timestamp.
 ALTER TABLE public.exam_card ADD COLUMN IF NOT EXISTS group_sent_at timestamptz;
@@ -115,3 +117,5 @@ BEGIN
   EXECUTE replace(v_function, '''atrasado''', '''no_grupo''');
 END;
 $$;
+
+COMMIT;
