@@ -1,6 +1,7 @@
 import { Search, AlertTriangle, Eye, Stethoscope, Check } from 'lucide-react'
 import { StatusBadge } from './StatusBadge'
 import { formatHours, formatDate, cn } from '@/lib/utils'
+import { elapsedHoursForDisplay } from '@/lib/group-time'
 import type { ExamCard } from '@/types/exam-card'
 
 function SkeletonRow() {
@@ -190,7 +191,9 @@ export function TrackingTable({ cards, onSelectCard, isLoading, selectedIds, onT
                       card.alert_level === 'warning' ? 'text-amber-600 dark:text-amber-400' :
                       'text-[hsl(var(--muted-foreground))]'
                     )}>
-                      {formatHours(card.hours_elapsed)}
+                      <span title={card.status === 'no_grupo' && card.group_sent_at ? `No grupo desde ${formatDate(card.group_sent_at)}` : undefined}>
+                        {formatHours(elapsedHoursForDisplay(card))}
+                      </span>
                     </span>
                   </td>
                   <td className="px-4 py-3">

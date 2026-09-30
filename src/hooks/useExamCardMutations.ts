@@ -14,13 +14,24 @@ interface UpdateCardPayload {
   client_email?: string | null
   vet_name?: string | null
   status?: CardStatus
+  fromStatus?: CardStatus
 }
 
 export function useUpdateCard() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ id, ...fields }: UpdateCardPayload) => {
+    mutationFn: async ({ id, status, fromStatus, ...fields }: UpdateCardPayload) => {
+      if (status && fromStatus && status !== fromStatus) {
+        const { data, error } = await supabase.rpc('move_exam_card', {
+          p_card_id: id,
+          p_from_status: fromStatus,
+          p_to_status: status,
+          p_contacted_by: status === 'contato_realizado' ? fields.vet_name ?? null : null,
+        })
+        if (error) throw error
+        if (!data?.success) throw new Error(data?.error || 'Falha ao mudar o status')
+      }
       const { error } = await supabase
         .from('exam_card')
         .update({ ...fields, updated_at: new Date().toISOString() })
@@ -30,6 +41,7 @@ export function useUpdateCard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
       queryClient.invalidateQueries({ queryKey: ['exam-card-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card-logs'] })
     },
   })
 }

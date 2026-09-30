@@ -5,6 +5,7 @@ import { useExamCards } from '@/hooks/useExamCards'
 import { useRealtimeExams } from '@/hooks/useRealtimeExams'
 import { TrackingDetail } from '@/components/tracking/TrackingDetail'
 import { formatHours, cn, getSpeciesType } from '@/lib/utils'
+import { elapsedHoursForDisplay } from '@/lib/group-time'
 import { fadeUp, staggerItem } from '@/lib/animations'
 import type { ExamCard } from '@/types/exam-card'
 
@@ -12,7 +13,8 @@ export function LateExams() {
   const [selectedCard, setSelectedCard] = useState<ExamCard | null>(null)
   useRealtimeExams()
 
-  const { data: cards, isLoading } = useExamCards({ status: ['atrasado'] })
+  const { data: groupCards, isLoading } = useExamCards({ status: ['no_grupo'] })
+  const cards = groupCards?.filter((card) => card.alert_level === 'critical')
 
   return (
     <>
@@ -25,7 +27,7 @@ export function LateExams() {
       >
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-5 h-5 text-red-500" />
-          <h1 className="text-lg font-bold text-[hsl(var(--foreground))]">Atrasados</h1>
+          <h1 className="text-lg font-bold text-[hsl(var(--foreground))]">Há mais de 24h no grupo</h1>
           {cards && cards.length > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-400 text-xs font-bold">
               {cards.length}
@@ -46,7 +48,7 @@ export function LateExams() {
             <div className="w-12 h-12 rounded-full bg-green-50 dark:bg-green-950/30 flex items-center justify-center mb-3">
               <span className="text-green-600 dark:text-green-400 font-bold">OK</span>
             </div>
-            <p className="text-sm font-medium text-green-600 dark:text-green-400">Nenhum exame atrasado</p>
+            <p className="text-sm font-medium text-green-600 dark:text-green-400">Nenhum exame há mais de 24h no grupo</p>
           </div>
         )}
 
@@ -98,7 +100,7 @@ export function LateExams() {
                   </div>
                   <div className="flex items-center gap-1 shrink-0 text-red-500">
                     <Clock className="w-3.5 h-3.5" />
-                    <span className="text-sm font-bold tabular-nums">{formatHours(card.hours_elapsed)}</span>
+                    <span className="text-sm font-bold tabular-nums">{formatHours(elapsedHoursForDisplay(card))}</span>
                   </div>
                 </div>
 

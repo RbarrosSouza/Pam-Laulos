@@ -3,7 +3,8 @@ import { Clock, ShoppingBag, Mail, AlertTriangle, User, Calendar, Cat, Dog, Chec
 import { motion, AnimatePresence } from 'framer-motion'
 import { useDraggable } from '@dnd-kit/core'
 import { staggerItem } from '@/lib/animations'
-import { formatHours, cn, getSpeciesType } from '@/lib/utils'
+import { formatHours, formatDate, cn, getSpeciesType } from '@/lib/utils'
+import { elapsedHoursForDisplay } from '@/lib/group-time'
 import { ExamItemRow } from './ExamItemRow'
 import { ContactModal } from './ContactModal'
 import type { ExamCard, ExamItem } from '@/types/exam-card'
@@ -53,6 +54,7 @@ export function KanbanCard({ card, onClick, isDragging = false, selected = false
   const formattedDate = displayDate
     ? new Date(displayDate).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
     : null
+  const groupDate = card.group_sent_at ? formatDate(card.group_sent_at) : null
 
   const dragging = isActiveDrag || isDragging
 
@@ -69,7 +71,7 @@ export function KanbanCard({ card, onClick, isDragging = false, selected = false
           dragging ? 'opacity-40' : '',
           selected && 'ring-2 ring-[hsl(var(--primary))] border-[hsl(var(--primary))]',
           card.alert_level === 'critical'
-            ? 'border-red-200 dark:border-red-800/80 hover:border-red-300 dark:hover:border-red-800'
+            ? 'border-red-300 bg-red-50/60 dark:bg-red-950/30 dark:border-red-800/80 hover:border-red-400 dark:hover:border-red-700'
             : card.alert_level === 'warning'
             ? 'border-amber-200 dark:border-amber-800/80 hover:border-amber-300 dark:hover:border-amber-800'
             : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/40'
@@ -157,6 +159,11 @@ export function KanbanCard({ card, onClick, isDragging = false, selected = false
           </div>
         )}
 
+        {card.status === 'no_grupo' && groupDate && (
+          <p className={cn('mb-2 text-[11px] font-medium', card.alert_level === 'critical' ? 'text-red-600 dark:text-red-400' : 'text-purple-700 dark:text-purple-400')}>
+            No grupo desde {groupDate}
+          </p>
+        )}
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 border-t border-[hsl(var(--border))]/50 pt-2">
           <div className="flex items-center gap-1.5">
@@ -201,7 +208,7 @@ export function KanbanCard({ card, onClick, isDragging = false, selected = false
             {/* Elapsed time */}
             <div className={cn('flex items-center gap-0.5 shrink-0', timeColor)}>
               <Clock className="w-2.5 h-2.5" />
-              <span className="text-[10px] font-semibold tabular-nums">{formatHours(card.hours_elapsed)}</span>
+              <span className="text-[10px] font-semibold tabular-nums">{formatHours(elapsedHoursForDisplay(card))}</span>
             </div>
           </div>
         </div>

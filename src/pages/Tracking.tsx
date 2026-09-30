@@ -14,6 +14,7 @@ import { useVets } from '@/hooks/useVets'
 import { useRealtimeExams } from '@/hooks/useRealtimeExams'
 import { fadeUp } from '@/lib/animations'
 import { cn } from '@/lib/utils'
+import { elapsedHoursForDisplay } from '@/lib/group-time'
 import { STATUS_FILTER_OPTIONS } from '@/lib/card-constants'
 import type { ExamCard, CardStatus } from '@/types/exam-card'
 
@@ -22,8 +23,8 @@ type SortOrder = 'newest' | 'oldest'
 
 const NEXT_STATUS: Partial<Record<CardStatus, CardStatus>> = {
   aguardando_lab: 'exame_pronto',
-  atrasado: 'exame_pronto',
-  exame_pronto: 'contato_realizado',
+  exame_pronto: 'no_grupo',
+  no_grupo: 'contato_realizado',
 }
 
 export function Tracking() {
@@ -70,7 +71,7 @@ export function Tracking() {
   }, [allCards, vets])
 
   const sortedCards = useMemo(() => [...enrichedCards].sort((a, b) => {
-    const elapsedDifference = a.hours_elapsed - b.hours_elapsed
+    const elapsedDifference = elapsedHoursForDisplay(a) - elapsedHoursForDisplay(b)
     if (elapsedDifference !== 0) {
       return sortOrder === 'newest' ? elapsedDifference : -elapsedDifference
     }

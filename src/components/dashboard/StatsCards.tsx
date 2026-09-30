@@ -115,7 +115,7 @@ export function StatsCards() {
       <KpiCard
         label="Atrasados"
         value={stats.total_atrasado}
-        sublabel="Acima do prazo"
+        sublabel="Mais de 24h no grupo"
         icon={AlertTriangle}
         iconBg={stats.total_atrasado > 0 ? 'bg-red-50 dark:bg-red-950/50' : 'bg-[hsl(var(--muted))]'}
         iconColor={stats.total_atrasado > 0 ? 'text-red-600 dark:text-red-400' : 'text-[hsl(var(--muted-foreground))]'}

@@ -12,6 +12,7 @@ import { EditCardModal } from './EditCardModal'
 import { ConfirmDialog } from './ConfirmDialog'
 import { MergeCardModal } from './MergeCardModal'
 import { formatDate, formatHours, cn } from '@/lib/utils'
+import { elapsedHoursForDisplay } from '@/lib/group-time'
 import { dialogVariants, overlayVariants } from '@/lib/animations'
 import type { ExamCard, ExamItem, ExamCardLog } from '@/types/exam-card'
 
@@ -194,6 +195,12 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                   label="Tempo decorrido"
                   value={formatHours(card.hours_elapsed)}
                 />
+                {card.group_sent_at && (
+                  <InfoItem icon={Clock} label="Colocado no grupo em" value={formatDate(card.group_sent_at)} />
+                )}
+                {card.status === 'no_grupo' && (
+                  <InfoItem icon={Clock} label="Tempo no grupo" value={formatHours(elapsedHoursForDisplay(card))} />
+                )}
                 <InfoItem icon={Clock} label="Criado em" value={formatDate(card.created_at)} />
                 <InfoItem icon={User} label="Pet" value={petLabel} />
                 <InfoItem icon={User} label="Tutor" value={clientLabel} />

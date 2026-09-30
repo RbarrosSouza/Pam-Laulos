@@ -11,11 +11,12 @@ import { useVets } from '@/hooks/useVets'
 import { TrackingDetail } from '@/components/tracking/TrackingDetail'
 import { StatusChart } from '@/components/dashboard/StatusChart'
 import { formatHours, cn, getSpeciesType } from '@/lib/utils'
+import { elapsedHoursForDisplay } from '@/lib/group-time'
 import { fadeUp, staggerContainer, staggerItem } from '@/lib/animations'
 import type { ExamCard } from '@/types/exam-card'
 import { Link } from 'react-router-dom'
 
-type MobileTab = 'prontos' | 'atrasados' | 'aguardando'
+type MobileTab = 'prontos' | 'grupo' | 'aguardando'
 
 export function Dashboard() {
   const [selectedCard, setSelectedCard] = useState<ExamCard | null>(null)
@@ -25,7 +26,7 @@ export function Dashboard() {
   const { data: stats } = useExamCardStats()
   const { data: vets } = useVets()
   const { data: prontos } = useExamCards({ status: ['exame_pronto'] })
-  const { data: atrasados } = useExamCards({ status: ['atrasado'] })
+  const { data: noGrupo } = useExamCards({ status: ['no_grupo'] })
   const { data: aguardando } = useExamCards({ status: ['aguardando_lab'] })
 
   // Enrich cards with vet avatar
@@ -39,11 +40,12 @@ export function Dashboard() {
   }, [vets])
 
   const enrichedProntos = useMemo(() => enrichCards(prontos), [prontos, enrichCards])
-  const enrichedAtrasados = useMemo(() => enrichCards(atrasados), [atrasados, enrichCards])
+  const enrichedNoGrupo = useMemo(() => enrichCards(noGrupo), [noGrupo, enrichCards])
+  const enrichedAtrasados = useMemo(() => enrichedNoGrupo?.filter((card) => card.alert_level === 'critical'), [enrichedNoGrupo])
   const enrichedAguardando = useMemo(() => enrichCards(aguardando), [aguardando, enrichCards])
 
   const tabCards = activeTab === 'prontos' ? enrichedProntos
-    : activeTab === 'atrasados' ? enrichedAtrasados
+    : activeTab === 'grupo' ? enrichedNoGrupo
     : enrichedAguardando
 
   const tabs = [
@@ -56,12 +58,12 @@ export function Dashboard() {
       label: 'Prontos',
     },
     {
-      id: 'atrasados' as MobileTab,
+      id: 'grupo' as MobileTab,
       icon: AlertTriangle,
-      count: stats?.total_atrasado ?? 0,
-      color: 'text-red-600 dark:text-red-400',
-      bg: 'bg-red-50 dark:bg-red-950/40',
-      label: 'Atrasados',
+      count: stats?.total_no_grupo ?? 0,
+      color: 'text-purple-600 dark:text-purple-400',
+      bg: 'bg-purple-50 dark:bg-purple-950/40',
+      label: 'Exames no Grupo',
     },
     {
       id: 'aguardando' as MobileTab,
@@ -247,7 +249,7 @@ export function Dashboard() {
                         </p>
                       </div>
                       <span className="text-sm font-semibold text-red-600 dark:text-red-400 ml-3 shrink-0">
-                        {formatHours(card.hours_elapsed)}
+                        {formatHours(elapsedHoursForDisplay(card))}
                       </span>
                     </div>
                   ))}
@@ -337,7 +339,7 @@ function MobileCard({ card, onClick }: { card: ExamCard; onClick: () => void }) 
         </div>
         <div className={cn('flex items-center gap-1 shrink-0', timeColor)}>
           <Clock className="w-3 h-3" />
-          <span className="text-xs font-semibold tabular-nums">{formatHours(card.hours_elapsed)}</span>
+          <span className="text-xs font-semibold tabular-nums">{formatHours(elapsedHoursForDisplay(card))}</span>
         </div>
       </div>
 

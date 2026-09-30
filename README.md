@@ -13,7 +13,7 @@ Sistema de monitoramento de exames laboratoriais veterinários para a clínica P
 ## Funcionalidades
 
 ### Dashboard
-- Visão geral com contadores por status (aguardando, pronto, atrasado, contatado)
+- Visão geral com contadores por status (aguardando laboratório, exame pronto, exames no grupo, contato realizado); o alerta de atraso aparece após 24 horas no grupo
 - Cards com avatar do veterinário responsável
 - Filtros por período, veterinário e busca textual
 

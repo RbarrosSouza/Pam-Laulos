@@ -22,7 +22,7 @@ export function MergeCardModal({ card, onClose, onMerged }: MergeCardModalProps)
 
   // Fetch all active cards as candidates
   const { data: allCards, isLoading } = useExamCards({
-    status: ['aguardando_lab', 'exame_pronto', 'atrasado'],
+    status: ['aguardando_lab', 'exame_pronto', 'no_grupo'],
   })
 
   const candidates = useMemo(() => {
@@ -56,8 +56,8 @@ export function MergeCardModal({ card, onClose, onMerged }: MergeCardModalProps)
       })
       toast.success(`Cards fundidos — ${result.items_moved} exame(s) movido(s)`)
       onMerged()
-    } catch (err: any) {
-      toast.error('Erro: ' + (err.message || 'Falha ao fundir'))
+    } catch (err: unknown) {
+      toast.error('Erro: ' + (err instanceof Error ? err.message : 'Falha ao fundir'))
     }
   }
 

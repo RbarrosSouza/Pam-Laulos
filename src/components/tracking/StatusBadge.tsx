@@ -10,12 +10,15 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status, alertLevel = 'normal', className }: StatusBadgeProps) {
   const { label, Icon, classes } = STATUS_CONFIG[status]
+  const overdueInGroup = status === 'no_grupo' && alertLevel === 'critical'
 
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border',
-        classes,
+        overdueInGroup
+          ? 'bg-red-50 text-red-700 border-red-300 dark:bg-red-950/50 dark:text-red-400 dark:border-red-800'
+          : classes,
         className
       )}
     >

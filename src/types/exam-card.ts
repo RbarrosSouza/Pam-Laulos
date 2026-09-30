@@ -1,4 +1,4 @@
-export type CardStatus = 'aguardando_lab' | 'exame_pronto' | 'contato_realizado' | 'atrasado'
+export type CardStatus = 'aguardando_lab' | 'exame_pronto' | 'no_grupo' | 'contato_realizado'
 export type AlertLevel = 'normal' | 'warning' | 'critical'
 export type CardOrigin = 'venda' | 'email'
 
@@ -48,6 +48,7 @@ export interface ExamCard {
   items_ready: number
   items_total: number
   hours_elapsed: number
+  group_sent_at: string | null
   created_at: string
   updated_at: string
 }
@@ -55,6 +56,7 @@ export interface ExamCard {
 export interface ExamCardSummary {
   total_aguardando_lab: number
   total_exame_pronto: number
+  total_no_grupo: number
   total_atrasado: number
   total_contato_realizado: number
   total_orphans: number

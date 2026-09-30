@@ -12,7 +12,7 @@ const STATUS_LABELS: Record<CardStatus, string> = {
   aguardando_lab: 'Aguardando Lab',
   exame_pronto: 'Exame Pronto',
   contato_realizado: 'Contato Realizado',
-  atrasado: 'Atrasado',
+  no_grupo: 'Exames no Grupo',
 }
 
 interface EditCardModalProps {
@@ -74,6 +74,7 @@ export function EditCardModal({ card, onClose }: EditCardModalProps) {
         client_email: clientEmail || null,
         vet_name: vetName || null,
         status,
+        fromStatus: card.status,
       })
       toast.success('Card atualizado')
       onClose()

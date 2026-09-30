@@ -18,12 +18,12 @@ export function AlertBanner() {
           transition={{ duration: 0.25 }}
         >
           <Link
-            to="/tracking"
+            to="/late"
             className="flex items-center gap-3 bg-red-600 text-white px-4 sm:px-6 py-2.5 hover:bg-red-700 transition-colors group"
           >
             <AlertTriangle className="w-4 h-4 shrink-0 animate-pulse" />
             <span className="text-sm font-semibold">
-              {count} card{count > 1 ? 's' : ''} atrasado{count > 1 ? 's' : ''} — exames prontos sem contato com o tutor
+              {count} card{count > 1 ? 's' : ''} há mais de 24h no grupo, sem contato registrado
             </span>
             <ChevronRight className="w-4 h-4 ml-auto opacity-70 group-hover:translate-x-0.5 transition-transform" />
           </Link>

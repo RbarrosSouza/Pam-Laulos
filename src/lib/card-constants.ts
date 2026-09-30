@@ -1,4 +1,4 @@
-import { FlaskConical, FileCheck2, Phone, AlertTriangle } from 'lucide-react'
+import { FlaskConical, FileCheck2, Phone, Users } from 'lucide-react'
 import type { CardStatus } from '@/types/exam-card'
 
 export interface StatusConfig {
@@ -50,24 +50,24 @@ export const STATUS_CONFIG: Record<CardStatus, StatusConfig> = {
     badgeText: 'text-green-700 dark:text-green-300',
     color: '#22c55e',
   },
-  atrasado: {
-    label: 'Atrasado',
-    Icon: AlertTriangle,
+  no_grupo: {
+    label: 'Exames no Grupo',
+    Icon: Users,
     classes:
-      'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-400 dark:border-red-900',
-    headerBg: 'bg-red-50 dark:bg-red-950/40',
-    headerText: 'text-red-700 dark:text-red-400',
-    dotColor: 'bg-red-500',
-    badgeBg: 'bg-red-100 dark:bg-red-900/50',
-    badgeText: 'text-red-700 dark:text-red-300',
-    color: '#ef4444',
+      'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/50 dark:text-purple-400 dark:border-purple-900',
+    headerBg: 'bg-purple-50 dark:bg-purple-950/40',
+    headerText: 'text-purple-700 dark:text-purple-400',
+    dotColor: 'bg-purple-500',
+    badgeBg: 'bg-purple-100 dark:bg-purple-900/50',
+    badgeText: 'text-purple-700 dark:text-purple-300',
+    color: '#a855f7',
   },
 }
 
 export const CARD_STATUSES: CardStatus[] = [
   'aguardando_lab',
   'exame_pronto',
-  'atrasado',
+  'no_grupo',
   'contato_realizado',
 ]
 
