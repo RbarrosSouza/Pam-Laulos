@@ -1,0 +1,865 @@
+{
+  "name": "EXAMES-06 — Receber WhatsApp",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "ETAPA FINAL — DESATIVADO. Webhook exige credencial Header Auth separada; configurar assinatura/proxy antes do piloto. Somente message_created INCOMING, caixa/remetente allowlist, PDF. Exclui grupo destino, privados, correlação EXAM e URLs fora da allowlist. Mesmo hash e reserva Drive do e-mail.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "b95ea5eb-dcd6-5b57-8cfb-473e7ec9ffa2",
+      "name": "Webhook Chatwoot autenticado",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pamvet-exames-chatwoot-v1",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "a16618ce-6e97-5d13-95fc-23c6340ff479",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Configure IDs only. Select credentials in HTTP nodes; never paste secrets here.\nconst cfg = {\n enabled: false,\n serviceUrl: '', // https://PROJECT.supabase.co/functions/v1/exam-document-service\n driveFolders: {}, // {'2026-10':'VERIFIED_MONTH_FOLDER_ID'}; year/month folders under the exam root\n notificationCutoff: '', // ISO timestamp agreed for the pilot\n maxBytes: 20 * 1024 * 1024,\n worker: 'n8n-exames',\n};\nif (!cfg.enabled) throw new Error('EXAMES pausado: habilite somente após configurar e validar o piloto.');\nif (!/^https:\\/\\/[^/]+\\/functions\\/v1\\/exam-document-service$/.test(cfg.serviceUrl)) throw new Error('serviceUrl inválida.');\ncfg.worker += ':' + $execution.id;\nObject.assign(cfg,{accountId:null,inboxId:null,allowedConversationIds:[],allowedSenderIds:[],destinationConversationId:null,allowedDownloadOrigins:[],sourceChannel:'whatsapp'});\nif(!cfg.accountId||!cfg.inboxId||(!cfg.allowedConversationIds.length&&!cfg.allowedSenderIds.length)||!cfg.destinationConversationId||!cfg.allowedDownloadOrigins.length)throw new Error('Allowlist WhatsApp incompleta.');\nreturn [{json:cfg}];\n"
+      }
+    },
+    {
+      "id": "6de0e0c8-e1f1-5560-9046-4b8b40a96001",
+      "name": "Validar evento e todos os PDFs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;const body=$('Webhook Chatwoot autenticado').first().json.body;\nif(!body||body.event!=='message_created'||body.private===true||!(body.message_type==='incoming'||body.message_type===0))return [];\nconst conversationId=Number(body.conversation?.id||body.conversation_id);\nconst inboxId=Number(body.inbox?.id||body.inbox_id||body.conversation?.inbox_id);\nconst accountId=Number(body.account?.id||body.account_id);\nconst senderId=Number(body.sender?.id);\nif(accountId!==Number(cfg.accountId)||inboxId!==Number(cfg.inboxId)||conversationId===Number(cfg.destinationConversationId)||(!cfg.allowedConversationIds.map(Number).includes(conversationId)&&!cfg.allowedSenderIds.map(Number).includes(senderId))||String(body.content||'').includes('[EXAM:'))return [];\nif(!body.id)throw new Error('Mensagem sem ID de origem.');\nconst attachments=(body.attachments||[]).filter(a=>a.file_type==='file'&&(!a.content_type||a.content_type==='application/pdf'||/\\.pdf$/i.test(a.file_name||'')));\nif(!attachments.length)return [{json:{messageId:String(body.id),attachmentId:'missing-pdf',originalName:'PDF ausente',receivedAt:(typeof body.created_at==='number'?new Date(body.created_at*1000).toISOString():body.created_at)||new Date().toISOString(),conversationId,senderId,missing:true}}];\nreturn attachments.map(a=>{\n const url=new URL(a.data_url);if(!cfg.allowedDownloadOrigins.includes(url.origin))throw new Error('Host de anexo não permitido.');\n if(!a.id)throw new Error('Anexo sem ID de origem.');\n return {json:{messageId:String(body.id),attachmentId:String(a.id),originalName:a.file_name||('exame-'+a.id+'.pdf'),downloadUrl:url.toString(),receivedAt:(typeof body.created_at==='number'?new Date(body.created_at*1000).toISOString():body.created_at)||new Date().toISOString(),conversationId,senderId}};\n});\n"
+      }
+    },
+    {
+      "id": "5f473c8b-76c8-5e06-87a9-69ad716383b6",
+      "name": "Um PDF WhatsApp por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "b9c38207-cc05-5a3c-bb6c-e507db3b8764",
+      "name": "Reservar origem WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reserve_source\",payload:{source:{channel:'whatsapp',account_id:String($('Configuração').first().json.accountId),message_id:$json.messageId,attachment_id:$json.attachmentId,original_name:$json.originalName,mime_type:'application/pdf',received_at:$json.receivedAt,metadata:{conversation_id:$json.conversationId,sender_id:$json.senderId,missing_attachment:!!$json.missing}}}}) }}"
+      }
+    },
+    {
+      "id": "a121d592-189a-55c9-8521-bdad4bed9e61",
+      "name": "Original ainda não salvo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$('Um PDF WhatsApp por vez').item.json.missing && $json.document?.file_status !== 'saved' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a81048c4-f20c-5ea9-ac0f-ad42c29ff2d8",
+      "name": "Baixar PDF WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Um PDF WhatsApp por vez').item.json.downloadUrl }}",
+        "authentication": "none",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "9c126060-f046-5573-9f64-d9c5c824d16c",
+      "name": "Validar PDF WhatsApp e pasta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst origin=$('Um PDF WhatsApp por vez').item.json;\nconst folderId=$('Configuração').first().json.driveFolders[origin.receivedAt.slice(0,7)];\nif(!folderId)throw new Error('Pasta Drive não configurada para o recebimento.');\nreturn [{json:{origin,documentId:$('Reservar origem WhatsApp').item.json.document_id,sha256,sizeBytes:bytes.length,folderId},binary:$input.first().binary}];\n"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "f977672d-1330-58b1-acc3-84acbe718c62",
+      "name": "Drive - gerar ID WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "f78869d2-20ff-5822-98f4-33d95bd26d9a",
+      "name": "Reservar upload WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"stage_file\",payload:{document_id:$('Validar PDF WhatsApp e pasta').item.json.documentId,file:{sha256:$('Validar PDF WhatsApp e pasta').item.json.sha256,size_bytes:$('Validar PDF WhatsApp e pasta').item.json.sizeBytes,drive_folder_id:$('Validar PDF WhatsApp e pasta').item.json.folderId,drive_file_id:$json.ids[0]},worker:$('Configuração').first().json.worker}}) }}"
+      }
+    },
+    {
+      "id": "518dc23c-601c-57ff-86a8-9024ab10a216",
+      "name": "Upload WhatsApp reservado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.claimed === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8b25e10a-1f51-5f77-828c-e86a1360b5c5",
+      "name": "Drive - consultar ID WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?fields=id,size,name' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "afd84fa2-3487-5dc8-9576-97b5dab553e5",
+      "name": "Estado do original WhatsApp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "jsCode": "if(![200,404].includes($json.statusCode))throw new Error('Consulta Drive falhou.');return [{json:{...$('Reservar upload WhatsApp').item.json,exists:$json.statusCode===200,hasBytes:$json.statusCode===200&&Number($json.body.size)>0,driveName:$json.body?.name||('Recebido - '+$('Reservar upload WhatsApp').item.json.document_id.slice(0,8)+' - '+$('Reservar upload WhatsApp').item.json.document.original_name)}}];\n"
+      }
+    },
+    {
+      "id": "d0f4dec5-c24a-5763-8df1-7893bb8480f7",
+      "name": "Criar objeto WhatsApp",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0996be45-4086-5a99-a5bd-b46b1c42cb75",
+      "name": "Drive - metadados WhatsApp com ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files?fields=id,name",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({id:$json.drive_file_id,name:$json.driveName,mimeType:'application/pdf',parents:[$json.document.drive_folder_id||$('Validar PDF WhatsApp e pasta').item.json.folderId],appProperties:{exam_document_id:$json.document_id,sha256:$('Validar PDF WhatsApp e pasta').item.json.sha256}}) }}"
+      }
+    },
+    {
+      "id": "f2e76061-438a-52cf-95b0-0994f94ac570",
+      "name": "Restaurar binário WhatsApp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Estado do original WhatsApp').item.json,binary:$('Validar PDF WhatsApp e pasta').item.binary}];"
+      }
+    },
+    {
+      "id": "1186d1ea-3ab6-5903-ae1c-d0aa19a22c3f",
+      "name": "Original WhatsApp tem bytes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.hasBytes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "244ebed9-16ff-5413-8e18-02bcdad3f1bf",
+      "name": "Drive - gravar WhatsApp no ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3600,
+        160
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?uploadType=media&fields=id,size' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data"
+      }
+    },
+    {
+      "id": "c070e0c6-d7c4-5aed-9c7b-a865f1732176",
+      "name": "Drive - conferir WhatsApp salvo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3840,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($('Reservar upload WhatsApp').item.json.drive_file_id)+'?alt=media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "dc1fc648-c86e-52f6-b1c4-d01d4d31ba97",
+      "name": "Comparar bytes WhatsApp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst src=$('Validar PDF WhatsApp e pasta').item.json;if(sha256!==src.sha256||bytes.length!==src.sizeBytes)throw new Error('Bytes divergentes; não sobrescrever original.');return [{json:{src,stage:$('Reservar upload WhatsApp').item.json}}];\n"
+      }
+    },
+    {
+      "id": "d06b8931-e9c2-526b-a6cd-1dd07fd5f146",
+      "name": "Confirmar arquivo WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4320,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"confirm_file\",payload:{document_id:$json.stage.document_id,lease_token:$json.stage.lease_token,file:{sha256:$json.src.sha256,size_bytes:$json.src.sizeBytes,drive_file_id:$json.stage.drive_file_id,drive_folder_id:$json.stage.document.drive_folder_id||$json.src.folderId,drive_name:$('Estado do original WhatsApp').item.json.driveName}}}) }}"
+      }
+    },
+    {
+      "id": "47a40fc6-57f5-56ff-b32c-e37aa6f7b422",
+      "name": "Original WhatsApp válido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        -180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$json.sha256 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd1e6ec9-ecab-5322-93fb-7d5b69e09696",
+      "name": "Registrar falha WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        -360
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"source_error\",payload:{document_id:$('Reservar origem WhatsApp').item.json.document_id,error:'Original WhatsApp indisponível ou inválido',review_reason:'Conferir PDF, limite, URL assinada e autenticação/redirect do anexo'}}) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Chatwoot autenticado": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Validar evento e todos os PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar evento e todos os PDFs": {
+      "main": [
+        [
+          {
+            "node": "Um PDF WhatsApp por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Um PDF WhatsApp por vez": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Reservar origem WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar origem WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Original ainda não salvo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Original ainda não salvo": {
+      "main": [
+        [
+          {
+            "node": "Baixar PDF WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Um PDF WhatsApp por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar PDF WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Validar PDF WhatsApp e pasta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar PDF WhatsApp e pasta": {
+      "main": [
+        [
+          {
+            "node": "Original WhatsApp válido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gerar ID WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Reservar upload WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar upload WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Upload WhatsApp reservado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload WhatsApp reservado": {
+      "main": [
+        [
+          {
+            "node": "Drive - consultar ID WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Um PDF WhatsApp por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - consultar ID WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Estado do original WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estado do original WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Criar objeto WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar objeto WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Drive - metadados WhatsApp com ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Restaurar binário WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - metadados WhatsApp com ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Restaurar binário WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar binário WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Original WhatsApp tem bytes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Original WhatsApp tem bytes": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir WhatsApp salvo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drive - gravar WhatsApp no ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gravar WhatsApp no ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir WhatsApp salvo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - conferir WhatsApp salvo": {
+      "main": [
+        [
+          {
+            "node": "Comparar bytes WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comparar bytes WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Confirmar arquivo WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar arquivo WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Um PDF WhatsApp por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Original WhatsApp válido": {
+      "main": [
+        [
+          {
+            "node": "Drive - gerar ID WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar falha WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Um PDF WhatsApp por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "tags": []
+}

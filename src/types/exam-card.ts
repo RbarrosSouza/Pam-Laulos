@@ -1,6 +1,6 @@
 export type CardStatus = 'aguardando_lab' | 'exame_pronto' | 'no_grupo' | 'contato_realizado'
 export type AlertLevel = 'normal' | 'warning' | 'critical'
-export type CardOrigin = 'venda' | 'email'
+export type CardOrigin = 'venda' | 'email' | 'whatsapp' | 'manual'
 
 export interface ExamItem {
   id: string
@@ -16,6 +16,11 @@ export interface ExamItem {
   sent_to_lab_at: string | null
   sent_to_lab_by: string | null
   shipment_id: string | null
+  document_ids?: string[]
+}
+
+export function isManagedExamItem(item: ExamItem): boolean {
+  return (item.document_ids?.length ?? 0) > 0
 }
 
 export interface LabShipment {

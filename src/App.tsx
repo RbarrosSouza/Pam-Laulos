@@ -8,6 +8,11 @@ import { Settings } from '@/pages/Settings'
 import { ShipSamples } from '@/pages/ShipSamples'
 import { LateExams } from '@/pages/LateExams'
 import { ShipmentHistory } from '@/pages/ShipmentHistory'
+import { NewExams } from '@/pages/NewExams'
+import { ExamDocumentDetail } from '@/pages/ExamDocumentDetail'
+import { SignIn } from '@/pages/SignIn'
+import { ExamAuthProvider } from '@/contexts/ExamAuthProvider'
+import { RequireExamAccess } from '@/components/documents/RequireExamAccess'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,7 +25,10 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
-        <Route element={<Shell />}>
+        <Route path="/entrar" element={<SignIn />} />
+        <Route element={<RequireExamAccess><Shell /></RequireExamAccess>}>
+          <Route path="/novos-exames" element={<NewExams />} />
+          <Route path="/novos-exames/:documentId" element={<ExamDocumentDetail />} />
           <Route path="/" element={<Dashboard />} />
           <Route path="/tracking" element={<Tracking />} />
           <Route path="/ship" element={<ShipSamples />} />
@@ -36,9 +44,9 @@ function AnimatedRoutes() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <ExamAuthProvider><BrowserRouter>
         <AnimatedRoutes />
-      </BrowserRouter>
+      </BrowserRouter></ExamAuthProvider>
     </QueryClientProvider>
   )
 }
