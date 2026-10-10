@@ -1,0 +1,178 @@
+{
+  "name": "EXAMES-04 — Anexar no Nexus",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "DESATIVADO. Backend autentica lease, pet confirmado e data clínica; baixa original, compara hash, copia ao bucket privado determinístico, lê novamente e grava/recupera exames pela origem única. Não depende do contato nem do grupo. SEM upload clínico por inferência.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "b7cb2327-bd51-56ea-8261-f2c861d8f69d",
+      "name": "A cada 2 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a16618ce-6e97-5d13-95fc-23c6340ff479",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Configure IDs only. Select credentials in HTTP nodes; never paste secrets here.\nconst cfg = {\n enabled: false,\n serviceUrl: '', // https://PROJECT.supabase.co/functions/v1/exam-document-service\n driveFolders: {}, // {'2026-10':'VERIFIED_MONTH_FOLDER_ID'}; year/month folders under the exam root\n notificationCutoff: '', // ISO timestamp agreed for the pilot\n maxBytes: 20 * 1024 * 1024,\n worker: 'n8n-exames',\n};\nif (!cfg.enabled) throw new Error('EXAMES pausado: habilite somente após configurar e validar o piloto.');\nif (!/^https:\\/\\/[^/]+\\/functions\\/v1\\/exam-document-service$/.test(cfg.serviceUrl)) throw new Error('serviceUrl inválida.');\ncfg.worker += ':' + $execution.id;\n\nreturn [{json:cfg}];"
+      }
+    },
+    {
+      "id": "9ad151fe-beb6-54ad-a070-084e39ef40db",
+      "name": "Reservar tarefa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reserve_tasks\",payload:{destination:\"nexus\",worker:$('Configuração').first().json.worker,limit:1}}) }}"
+      }
+    },
+    {
+      "id": "a1f50d00-0e6b-511e-abfe-eeaf7596e75a",
+      "name": "Tarefa disponível",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "if(!$json.tasks?.length)return [];return $json.tasks.map(t=>({json:t}));"
+      }
+    },
+    {
+      "id": "25d3f400-244f-55e0-add8-9d2da3827f8c",
+      "name": "Anexar e verificar no backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"attach_nexus\",payload:{delivery_id:$json.id,lease_token:$json.lease_token}}) }}"
+      }
+    }
+  ],
+  "connections": {
+    "A cada 2 minutos": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Reservar tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar tarefa": {
+      "main": [
+        [
+          {
+            "node": "Tarefa disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tarefa disponível": {
+      "main": [
+        [
+          {
+            "node": "Anexar e verificar no backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "tags": []
+}

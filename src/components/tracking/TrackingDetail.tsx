@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { X, Clock, User, Phone, Mail, Stethoscope, ShoppingBag, AlertTriangle, Pencil, Trash2, Plus, CheckCircle2, GitMerge } from 'lucide-react'
+import { X, Clock, User, Phone, Mail, Stethoscope, ShoppingBag, AlertTriangle, Pencil, Trash2, Plus, CheckCircle2, GitMerge, Archive, FileText, MessageCircle } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { useExamCardLogs, useMarkAllContacted } from '@/hooks/useExamCards'
@@ -14,7 +15,7 @@ import { MergeCardModal } from './MergeCardModal'
 import { formatDate, formatHours, cn } from '@/lib/utils'
 import { elapsedHoursForDisplay } from '@/lib/group-time'
 import { dialogVariants, overlayVariants } from '@/lib/animations'
-import type { ExamCard, ExamItem, ExamCardLog } from '@/types/exam-card'
+import { isManagedExamItem, type ExamCard, type ExamItem, type ExamCardLog } from '@/types/exam-card'
 
 interface TrackingDetailProps {
   card: ExamCard
@@ -68,6 +69,7 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
   const [showConclude, setShowConclude] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
   const [concludeVet, setConcludeVet] = useState(card.vet_name ?? '')
+  const [selectedLegacyItemIds, setSelectedLegacyItemIds] = useState<string[]>([])
 
   const { data: logs } = useExamCardLogs(card.id)
   const { data: vets } = useVets()
@@ -77,23 +79,32 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
   const petLabel = card.pet_name ?? '—'
   const clientLabel = card.client_name ?? '—'
 
-  // Items that still need contact
-  const pendingContactItems = (card.items ?? []).filter(
-    (i) => i.result_received && !i.contacted
+  const documentIds = [...new Set((card.items ?? []).flatMap((item) => item.document_ids ?? []))]
+  const hasManagedItems = documentIds.length > 0
+  const pendingLegacyContactItems = (card.items ?? []).filter(
+    (item) => item.result_received && !item.contacted && !isManagedExamItem(item)
   )
   const allContacted = (card.items ?? []).length > 0 && (card.items ?? []).every((i) => i.contacted)
-  const hasReadyItems = pendingContactItems.length > 0
+  const selectedLegacyItems = pendingLegacyContactItems.filter((item) => selectedLegacyItemIds.includes(item.id))
+  const itemsToContact = hasManagedItems ? selectedLegacyItems : pendingLegacyContactItems
+  const hasReadyLegacyItems = pendingLegacyContactItems.length > 0
+  const activeContactItem = contactingItem && (card.items ?? []).find((item) => item.id === contactingItem.id)
+  const originLabel = { venda: 'Venda', email: 'Email', whatsapp: 'WhatsApp', manual: 'Envio manual' }[card.origin]
+  const OriginIcon = card.origin === 'venda' ? ShoppingBag : card.origin === 'whatsapp' ? MessageCircle : card.origin === 'manual' ? FileText : Mail
 
   async function handleConclude() {
+    if (markAllContacted.isPending) return
     if (!concludeVet.trim()) return toast.error('Selecione o veterinário')
+    if (itemsToContact.length === 0) return toast.error('Selecione os exames sem documento que tiveram contato')
     try {
       await markAllContacted.mutateAsync({
         cardId: card.id,
-        itemIds: pendingContactItems.map((i) => i.id),
+        itemIds: itemsToContact.map((item) => item.id),
         contactedBy: concludeVet.trim(),
       })
-      toast.success('Contato concluído')
+      toast.success(hasManagedItems ? `Contato registrado para ${itemsToContact.length} exame(s) sem documento` : 'Contato registrado')
       setShowConclude(false)
+      setSelectedLegacyItemIds([])
       onClose()
     } catch {
       toast.error('Erro ao concluir')
@@ -101,12 +112,13 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
   }
 
   async function handleDeleteCard() {
+    if (deleteCard.isPending) return
     try {
       await deleteCard.mutateAsync(card.id)
-      toast.success('Card excluído')
+      toast.success(hasManagedItems ? 'Card arquivado; documentos e histórico preservados' : 'Card excluído')
       onClose()
     } catch {
-      toast.error('Erro ao excluir card')
+      toast.error(hasManagedItems ? 'Erro ao arquivar card' : 'Erro ao excluir card')
     }
   }
 
@@ -166,10 +178,10 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
               )}
               <button
                 onClick={() => setShowDeleteCard(true)}
-                title="Excluir card"
+                title={hasManagedItems ? 'Arquivar card' : 'Excluir card'}
                 className="w-7 h-7 flex items-center justify-center rounded-lg text-[hsl(var(--muted-foreground))] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                {hasManagedItems ? <Archive className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
               </button>
               <button
                 onClick={onClose}
@@ -186,9 +198,9 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
               {/* Info grid */}
               <div className="grid grid-cols-2 gap-4">
                 <InfoItem
-                  icon={card.origin === 'venda' ? ShoppingBag : Mail}
+                  icon={OriginIcon}
                   label="Origem"
-                  value={card.origin === 'venda' ? 'Venda' : 'Email'}
+                  value={originLabel}
                 />
                 <InfoItem
                   icon={Clock}
@@ -223,9 +235,25 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                 </div>
               )}
 
-              {hasReadyItems && !showConclude && (
+              {hasManagedItems && (
+                <div className="space-y-2">
+                  <Link
+                    to={documentIds.length === 1 ? `/novos-exames/${documentIds[0]}` : '/novos-exames'}
+                    onClick={onClose}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-3 rounded-xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-sm font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    <FileText className="w-4 h-4 shrink-0" />
+                    {allContacted ? 'Ver documentos em Novos exames' : 'Registrar contato em Novos exames'}
+                  </Link>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    Abra cada documento nos links dos exames para registrar contato e revisar o resultado.
+                  </p>
+                </div>
+              )}
+
+              {hasReadyLegacyItems && !showConclude && (
                 <button
-                  onClick={() => setShowConclude(true)}
+                  onClick={() => { setSelectedLegacyItemIds([]); setShowConclude(true) }}
                   className={cn(
                     'w-full flex items-center justify-center gap-2 py-3 rounded-xl',
                     'bg-green-600 dark:bg-green-600 text-white text-sm font-semibold',
@@ -234,11 +262,11 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                   )}
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  Concluir contato ({pendingContactItems.length} exame{pendingContactItems.length !== 1 ? 's' : ''})
+                  {hasManagedItems ? 'Registrar contato dos itens sem documento' : 'Concluir contato'} ({pendingLegacyContactItems.length} exame{pendingLegacyContactItems.length !== 1 ? 's' : ''})
                 </button>
               )}
 
-              {showConclude && hasReadyItems && (
+              {showConclude && hasReadyLegacyItems && (
                 <motion.div
                   initial={{ opacity: 0, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -246,7 +274,7 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wider">
-                      Confirmar contato
+                      {hasManagedItems ? 'Contato dos itens sem documento' : 'Confirmar contato'}
                     </span>
                     <button
                       onClick={() => setShowConclude(false)}
@@ -255,12 +283,32 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
+                  {hasManagedItems && (
+                    <fieldset className="space-y-2">
+                      <legend className="text-xs text-[hsl(var(--muted-foreground))] mb-2">
+                        Selecione somente os exames abaixo para os quais houve contato com o tutor.
+                      </legend>
+                      {pendingLegacyContactItems.map((item) => (
+                        <label key={item.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedLegacyItemIds.includes(item.id)}
+                            disabled={markAllContacted.isPending}
+                            onChange={(event) => setSelectedLegacyItemIds((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))}
+                            className="accent-green-600"
+                          />
+                          {item.exam_type}
+                        </label>
+                      ))}
+                    </fieldset>
+                  )}
                   <div>
                     <label className="text-[11px] font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-1.5 block">
                       Veterinário responsável
                     </label>
                     <select
                       value={concludeVet}
+                      disabled={markAllContacted.isPending}
                       onChange={(e) => setConcludeVet(e.target.value)}
                       className={cn(
                         'w-full h-10 px-3 text-sm rounded-xl border border-[hsl(var(--border))]',
@@ -280,7 +328,7 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                   </p>
                   <button
                     onClick={handleConclude}
-                    disabled={!concludeVet.trim() || markAllContacted.isPending}
+                    disabled={!concludeVet.trim() || itemsToContact.length === 0 || markAllContacted.isPending}
                     className={cn(
                       'w-full h-11 rounded-xl text-sm font-bold flex items-center justify-center gap-2',
                       'bg-green-600 text-white shadow-sm shadow-green-600/20',
@@ -289,7 +337,7 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                     )}
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    {markAllContacted.isPending ? 'Concluindo…' : 'Confirmar'}
+                    {markAllContacted.isPending ? 'Registrando…' : hasManagedItems ? `Confirmar ${itemsToContact.length} exame(s)` : 'Confirmar'}
                   </button>
                 </motion.div>
               )}
@@ -312,7 +360,7 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                       <ExamItemRow
                         item={item}
                         cardId={card.id}
-                        onContactClick={setContactingItem}
+                        onContactClick={(selectedItem) => { if (!isManagedExamItem(selectedItem)) setContactingItem(selectedItem) }}
                       />
                     </div>
                   ))}
@@ -340,9 +388,9 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
       </motion.div>
 
       <AnimatePresence>
-        {contactingItem && (
+        {activeContactItem && !isManagedExamItem(activeContactItem) && (
           <ContactModal
-            item={contactingItem}
+            item={activeContactItem}
             card={card}
             onClose={() => setContactingItem(null)}
           />
@@ -355,8 +403,10 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
         )}
         {showDeleteCard && (
           <ConfirmDialog
-            title="Excluir card"
-            description={`Isso vai excluir permanentemente o card de ${petLabel} e todos os seus exames. Esta ação não pode ser desfeita.`}
+            title={hasManagedItems ? 'Arquivar card' : 'Excluir card'}
+            description={hasManagedItems ? `O card de ${petLabel} será retirado do acompanhamento. Os documentos, contatos e o histórico serão preservados.` : `Isso vai excluir permanentemente o card de ${petLabel} e todos os seus exames. Esta ação não pode ser desfeita.`}
+            confirmLabel={hasManagedItems ? 'Arquivar' : 'Excluir'}
+            loadingLabel={hasManagedItems ? 'Arquivando…' : 'Excluindo…'}
             loading={deleteCard.isPending}
             onConfirm={handleDeleteCard}
             onClose={() => setShowDeleteCard(false)}

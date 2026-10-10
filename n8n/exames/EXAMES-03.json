@@ -1,0 +1,517 @@
+{
+  "name": "EXAMES-03 — Avisar grupo",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "DESATIVADO. UM PDF por POST multipart. Header api_access_token em credencial dedicada. GET prévio confere inbox e @g.us. Retorno HTTP é submitted, jamais sent. Timeout/5xx ficam uncertain, SEM retry cego. Correlação document/delivery/attempt na legenda. Confirmação vem por EXAMES-05.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "b7cb2327-bd51-56ea-8261-f2c861d8f69d",
+      "name": "A cada 2 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a16618ce-6e97-5d13-95fc-23c6340ff479",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Configure IDs only. Select credentials in HTTP nodes; never paste secrets here.\nconst cfg = {\n enabled: false,\n serviceUrl: '', // https://PROJECT.supabase.co/functions/v1/exam-document-service\n driveFolders: {}, // {'2026-10':'VERIFIED_MONTH_FOLDER_ID'}; year/month folders under the exam root\n notificationCutoff: '', // ISO timestamp agreed for the pilot\n maxBytes: 20 * 1024 * 1024,\n worker: 'n8n-exames',\n};\nif (!cfg.enabled) throw new Error('EXAMES pausado: habilite somente após configurar e validar o piloto.');\nif (!/^https:\\/\\/[^/]+\\/functions\\/v1\\/exam-document-service$/.test(cfg.serviceUrl)) throw new Error('serviceUrl inválida.');\ncfg.worker += ':' + $execution.id;\nObject.assign(cfg,{chatwootBaseUrl:'',accountId:null,inboxId:null,conversationId:null,groupJid:'',pamLaudosBaseUrl:'',allowHttpChatwoot:false});\nif(!cfg.notificationCutoff||!Number.isFinite(Date.parse(cfg.notificationCutoff))||!cfg.groupJid.endsWith('@g.us')||!cfg.accountId||!cfg.inboxId||!cfg.conversationId||!/^https:\\/\\//.test(cfg.pamLaudosBaseUrl)||!(/^https:\\/\\//.test(cfg.chatwootBaseUrl)||(cfg.allowHttpChatwoot&&/^http:\\/\\//.test(cfg.chatwootBaseUrl))))throw new Error('Destino de grupo/painel/marco não configurado.');\n\nreturn [{json:cfg}];"
+      }
+    },
+    {
+      "id": "9ad151fe-beb6-54ad-a070-084e39ef40db",
+      "name": "Reservar tarefa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reserve_tasks\",payload:{destination:\"group\",worker:$('Configuração').first().json.worker,limit:1}}) }}"
+      }
+    },
+    {
+      "id": "a1f50d00-0e6b-511e-abfe-eeaf7596e75a",
+      "name": "Tarefa disponível",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "if(!$json.tasks?.length)return [];\nconst cfg=$('Configuração').first().json;\nconst expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;\nreturn $json.tasks.map(t=>({json:{...t,destinationVerified:t.configured_destination===expected}}));"
+      }
+    },
+    {
+      "id": "6682eaae-e454-551e-bb3d-5cb3e20f3f75",
+      "name": "Chatwoot - conferir conversa destino",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.conversationId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "aca0be46-5551-542c-9013-74f8ce9bbaac",
+      "name": "Validar grupo e caixa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;\nconst contact=$json.meta?.sender||$json.contact||{};\nconst identifier=contact.identifier||$json.contact_inbox?.source_id||$json.meta?.sender?.additional_attributes?.jid;\nif(Number($json.inbox_id)!==Number(cfg.inboxId)||Number($json.id)!==Number(cfg.conversationId)||identifier!==cfg.groupJid)throw new Error('Conversa não confere com inbox/JID verificados.');\nreturn [{json:cfg}];\n"
+      }
+    },
+    {
+      "id": "9f4b1c65-bcfc-5da3-b123-2ee449eedc82",
+      "name": "Drive - baixar PDF para grupo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.document.drive_file_id)+'?alt=media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "9aae44ab-0cae-5bf8-b797-d2e00e02ccc5",
+      "name": "Preparar PDF e correlação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst task=$('Tarefa disponível').item.json;const doc=task.document;const cfg=$('Configuração').first().json;\nif(sha256!==doc.sha256||bytes.length!==Number(doc.size_bytes))throw new Error('PDF para grupo sem integridade comprovada.');\nconst f=Object.keys(doc.confirmed_data||{}).length?doc.confirmed_data:(doc.extracted_data||{});\nconst correlation='[EXAM:'+doc.id+':DELIVERY:'+task.id+']';\nconst content='🧪 Novo exame recebido\\nPet: '+(f.pet_name||'—')+' | Tutor: '+(f.client_name||'—')+'\\nExame: '+(f.exam_type||'—')+' | Data: '+(f.exam_date||'—')+'\\n'+(doc.pet_id?'':'Cadastro a conferir\\n')+'Acompanhar e assumir: '+cfg.pamLaudosBaseUrl.replace(/\\/$/,'')+'/novos-exames/'+doc.id+'\\n'+(!doc.assigned_to?'Aguardando responsável\\n':'')+correlation;\nconst binary=$input.first().binary;binary.data.fileName=doc.drive_name||doc.original_name||'exame.pdf';binary.data.mimeType='application/pdf';\nreturn [{json:{task,correlation,content,verified:true},binary}];\n"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "04c53870-76bf-5661-8f1f-16ab2a96b89a",
+      "name": "Chatwoot - enviar PDF único",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.conversationId+'/messages' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.content }}",
+              "parameterType": "formData"
+            },
+            {
+              "name": "message_type",
+              "value": "outgoing",
+              "parameterType": "formData"
+            },
+            {
+              "name": "private",
+              "value": "false",
+              "parameterType": "formData"
+            },
+            {
+              "name": "attachments[]",
+              "inputDataFieldName": "data",
+              "parameterType": "formBinaryData"
+            }
+          ]
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "301af542-9a47-5e8e-8bdc-e66f61f337e7",
+      "name": "Classificar submissão sem reenvio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const context=$('Preparar PDF e correlação').item.json;\nconst response=$json;const status=Number(response.statusCode||0);const id=response.body?.id;\nlet outcome;\nif(status>=200&&status<300&&id)outcome={status:'submitted',external_id:String(id),external_status:String(response.body.status||'api_created')};\nelse if(status>=400&&status<500&&![408,409,429].includes(status))outcome={status:'failed',error:'Chatwoot rejeitou a submissão HTTP '+status,external_status:'rejected'};\nelse outcome={status:'uncertain',error:'Resposta de envio inconclusiva; reconciliar antes de qualquer novo POST',external_status:'response_unknown'};\noutcome.correlation=context.correlation;\nreturn [{json:{task:context.task,outcome}}];\n"
+      }
+    },
+    {
+      "id": "d65cd48b-790c-56da-8de3-ab8cd87eae56",
+      "name": "Persistir tentativa de grupo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"task_result\",payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token,outcome:$json.outcome}}) }}"
+      }
+    },
+    {
+      "id": "28ff9c5c-b3bb-526a-97c1-426d958e4378",
+      "name": "Destino da tarefa confere",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        840,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.destinationVerified===true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "79e0b342-73b7-52c7-8369-76127239e8bd",
+      "name": "PDF íntegro para enviar",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.verified===true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c0b8310e-6130-59c0-ae41-e194f8748e3e",
+      "name": "Falha confirmada antes do POST",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        360
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"task_result\",payload:{delivery_id:$('Tarefa disponível').item.json.id,lease_token:$('Tarefa disponível').item.json.lease_token,outcome:{status:'failed',external_status:'preflight_failed',error:'Nenhum POST de mensagem realizado: conferir destino, acesso ao Drive e integridade do PDF'}}}) }}"
+      }
+    }
+  ],
+  "connections": {
+    "A cada 2 minutos": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - conferir conversa destino",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar tarefa": {
+      "main": [
+        [
+          {
+            "node": "Tarefa disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - conferir conversa destino": {
+      "main": [
+        [
+          {
+            "node": "Validar grupo e caixa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar grupo e caixa": {
+      "main": [
+        [
+          {
+            "node": "Reservar tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tarefa disponível": {
+      "main": [
+        [
+          {
+            "node": "Destino da tarefa confere",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Destino da tarefa confere": {
+      "main": [
+        [
+          {
+            "node": "Drive - baixar PDF para grupo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha confirmada antes do POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - baixar PDF para grupo": {
+      "main": [
+        [
+          {
+            "node": "Preparar PDF e correlação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar PDF e correlação": {
+      "main": [
+        [
+          {
+            "node": "PDF íntegro para enviar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF íntegro para enviar": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - enviar PDF único",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha confirmada antes do POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - enviar PDF único": {
+      "main": [
+        [
+          {
+            "node": "Classificar submissão sem reenvio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classificar submissão sem reenvio": {
+      "main": [
+        [
+          {
+            "node": "Persistir tentativa de grupo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "tags": []
+}

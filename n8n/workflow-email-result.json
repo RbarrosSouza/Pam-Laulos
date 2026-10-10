@@ -3,6 +3,21 @@
   "nodes": [
     {
       "parameters": {
+        "content": "LEGADO DESATIVADO — referência histórica. Segredos removidos. Não reativar em paralelo com EXAMES-01..06. A associação por nomes é substituída por confirmação assistida.",
+        "height": 180,
+        "width": 480
+      },
+      "id": "legacy-warning",
+      "name": "Legado - não ativar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1536,
+        -200
+      ]
+    },
+    {
+      "parameters": {
         "options": {
           "forceReconnect": 0
         }
@@ -11,7 +26,10 @@
       "name": "Gmail IMAP - Lab Emails",
       "type": "n8n-nodes-base.emailReadImap",
       "typeVersion": 2,
-      "position": [-1536, 96],
+      "position": [
+        -1536,
+        96
+      ],
       "credentials": {
         "imap": {
           "id": "1hFWIlvGPS81c5AU",
@@ -32,7 +50,7 @@
             {
               "id": "cfg-1",
               "name": "SUPABASE_SERVICE_ROLE_KEY",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2Z3F1dWFoc3hlcHBoaHhtc2hrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTYwMTQzMSwiZXhwIjoyMDY3MTc3NDMxfQ.BuxiqSBLYGWoz2vLiU3uceLQEluFq5Own96wPzU8cxg",
+              "value": "",
               "type": "string"
             },
             {
@@ -50,7 +68,7 @@
             {
               "id": "cfg-4",
               "name": "CHATWOOT_API_TOKEN",
-              "value": "CONFIGURE_AQUI",
+              "value": "",
               "type": "string"
             },
             {
@@ -68,7 +86,10 @@
       "name": "Config",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [-1312, 96]
+      "position": [
+        -1312,
+        96
+      ]
     },
     {
       "parameters": {
@@ -111,7 +132,10 @@
       "name": "Supabase - Check Duplicate",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1088, 96],
+      "position": [
+        -1088,
+        96
+      ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput"
     },
@@ -141,7 +165,10 @@
       "name": "IF - Is New Email?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [-864, 96]
+      "position": [
+        -864,
+        96
+      ]
     },
     {
       "parameters": {
@@ -153,7 +180,10 @@
       "name": "Extract PDF Text",
       "type": "n8n-nodes-base.extractFromFile",
       "typeVersion": 1,
-      "position": [-752, 96],
+      "position": [
+        -752,
+        96
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -183,7 +213,10 @@
       "name": "OpenAI - Parse Email",
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 1.8,
-      "position": [-640, 96],
+      "position": [
+        -640,
+        96
+      ],
       "credentials": {
         "openAiApi": {
           "id": "vKBno59QWhuUp1sz",
@@ -199,7 +232,10 @@
       "name": "Code - Extract Parsed Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-288, 96]
+      "position": [
+        -288,
+        96
+      ]
     },
     {
       "parameters": {
@@ -237,7 +273,10 @@
       "name": "Supabase RPC - Update Exam Card",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-288, 320],
+      "position": [
+        -288,
+        320
+      ],
       "notes": "Atualiza exam_card no dashboard PAM. Se há um card aguardando lab com esse pet/exame, marca como 'exame_pronto'. Se não houver match, cria card órfão para triagem manual."
     },
     {
@@ -291,7 +330,10 @@
       "name": "Supabase - Match Existing Sale",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-64, 96]
+      "position": [
+        -64,
+        96
+      ]
     },
     {
       "parameters": {
@@ -313,7 +355,10 @@
       "name": "IF - Sale Match Found?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [160, 96]
+      "position": [
+        160,
+        96
+      ]
     },
     {
       "parameters": {
@@ -383,7 +428,10 @@
       "name": "Supabase - Update Sale Tracking",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [832, 0]
+      "position": [
+        832,
+        0
+      ]
     },
     {
       "parameters": {
@@ -424,7 +472,10 @@
       "name": "Supabase - Match Pet by Name",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [384, 192]
+      "position": [
+        384,
+        192
+      ]
     },
     {
       "parameters": {
@@ -434,7 +485,10 @@
       "name": "Code - Prepare Insert Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [608, 192]
+      "position": [
+        608,
+        192
+      ]
     },
     {
       "parameters": {
@@ -470,7 +524,10 @@
       "name": "Supabase - Insert New Tracking",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [832, 192]
+      "position": [
+        832,
+        192
+      ]
     },
     {
       "parameters": {
@@ -480,7 +537,10 @@
       "name": "Code - Resolve Tracking ID",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1056, 96]
+      "position": [
+        1056,
+        96
+      ]
     },
     {
       "parameters": {
@@ -530,94 +590,196 @@
       "name": "Supabase - Insert Log",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1280, 96]
+      "position": [
+        1280,
+        96
+      ]
     }
   ],
   "connections": {
     "Gmail IMAP - Lab Emails": {
       "main": [
-        [{ "node": "Config", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Config": {
       "main": [
-        [{ "node": "Supabase - Check Duplicate", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Supabase - Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Supabase - Check Duplicate": {
       "main": [
-        [{ "node": "IF - Is New Email?", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "IF - Is New Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "IF - Is New Email?": {
       "main": [
-        [{ "node": "Extract PDF Text", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Extract PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Extract PDF Text": {
       "main": [
-        [{ "node": "OpenAI - Parse Email", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "OpenAI - Parse Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "OpenAI - Parse Email": {
       "main": [
-        [{ "node": "Code - Extract Parsed Data", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code - Extract Parsed Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code - Extract Parsed Data": {
       "main": [
         [
-          { "node": "Supabase RPC - Update Exam Card", "type": "main", "index": 0 },
-          { "node": "Supabase - Match Existing Sale", "type": "main", "index": 0 }
+          {
+            "node": "Supabase RPC - Update Exam Card",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Supabase - Match Existing Sale",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Supabase - Match Existing Sale": {
       "main": [
-        [{ "node": "IF - Sale Match Found?", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "IF - Sale Match Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "IF - Sale Match Found?": {
       "main": [
-        [{ "node": "Supabase - Update Sale Tracking", "type": "main", "index": 0 }],
-        [{ "node": "Supabase - Match Pet by Name", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Supabase - Update Sale Tracking",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase - Match Pet by Name",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Supabase - Update Sale Tracking": {
       "main": [
-        [{ "node": "Code - Resolve Tracking ID", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code - Resolve Tracking ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Supabase - Match Pet by Name": {
       "main": [
-        [{ "node": "Code - Prepare Insert Data", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code - Prepare Insert Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code - Prepare Insert Data": {
       "main": [
-        [{ "node": "Supabase - Insert New Tracking", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Supabase - Insert New Tracking",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Supabase - Insert New Tracking": {
       "main": [
-        [{ "node": "Code - Resolve Tracking ID", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Code - Resolve Tracking ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code - Resolve Tracking ID": {
       "main": [
-        [{ "node": "Supabase - Insert Log", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Supabase - Insert Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
   "pinData": {},
   "settings": {
     "executionOrder": "v1",
-    "saveManualExecutions": true,
-    "saveExecutionProgress": true
+    "saveManualExecutions": false,
+    "saveExecutionProgress": true,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none"
   },
-  "tags": ["pam", "exam-monitor", "labs"],
+  "tags": [
+    "pam",
+    "exam-monitor",
+    "labs"
+  ],
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "0d9a9c0abf4197c3a6a0d07da99221ba39f5016890e60b2a11074995231676af"
-  }
+  },
+  "active": false
 }

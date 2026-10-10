@@ -1,0 +1,1339 @@
+{
+  "name": "EXAMES-05 — Reconciliar pendências",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "DESATIVADO. Reserva Drive vencida preserva ID. Consulta objetos antes de confirmar. Grupo: consulta mensagem por external_id ou procura correlação paginada; ausência permanece uncertain e NÃO causa POST. Backend controla backoff/leases. Consulta não prova contato com tutor.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "a3001a74-3c20-5285-9b03-626435ee2de7",
+      "name": "A cada 15 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a16618ce-6e97-5d13-95fc-23c6340ff479",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Configure IDs only. Select credentials in HTTP nodes; never paste secrets here.\nconst cfg = {\n enabled: false,\n serviceUrl: '', // https://PROJECT.supabase.co/functions/v1/exam-document-service\n driveFolders: {}, // {'2026-10':'VERIFIED_MONTH_FOLDER_ID'}; year/month folders under the exam root\n notificationCutoff: '', // ISO timestamp agreed for the pilot\n maxBytes: 20 * 1024 * 1024,\n worker: 'n8n-exames',\n};\nif (!cfg.enabled) throw new Error('EXAMES pausado: habilite somente após configurar e validar o piloto.');\nif (!/^https:\\/\\/[^/]+\\/functions\\/v1\\/exam-document-service$/.test(cfg.serviceUrl)) throw new Error('serviceUrl inválida.');\ncfg.worker += ':' + $execution.id;\nObject.assign(cfg,{chatwootBaseUrl:'',accountId:null,inboxId:null,conversationId:null,groupJid:'',allowHttpChatwoot:false,providerConfirmationStatuses:['delivered','read']});\nreturn [{json:cfg}];\n"
+      }
+    },
+    {
+      "id": "b67aadb5-ee8b-511c-aa22-d9ebce1806ff",
+      "name": "Reconciliar leases e pendências",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reconcile\",payload:{}}) }}"
+      }
+    },
+    {
+      "id": "b3a6dbee-8a67-5de4-a970-9a3a93d33d04",
+      "name": "Pendências Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -160
+      ],
+      "parameters": {
+        "jsCode": "const tasks=$json.drive_tasks||[];return tasks.length?tasks.map(task=>({json:task})):[{json:{empty:true}}];"
+      }
+    },
+    {
+      "id": "281176f5-6a67-5160-b04e-ad946aa9fadf",
+      "name": "Uma reserva Drive por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        480,
+        -160
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "5bdfea02-fc07-5fba-a1b5-33ff55c65e3e",
+      "name": "Drive - conferir objeto pendente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -160
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.document.drive_file_id)+'?alt=media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2a50842a-0af0-52bc-badd-8b375d657696",
+      "name": "Validar objeto pendente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -160
+      ],
+      "parameters": {
+        "jsCode": "const task=$('Uma reserva Drive por vez').item.json;\nif(!$input.first().binary?.data)return [{json:{task,valid:false}}];\nconst bytes=await this.helpers.getBinaryDataBuffer(0,'data');\nconst sha256=require('crypto').createHash('sha256').update(bytes).digest('hex');\nreturn [{json:{task,valid:sha256===task.document.sha256&&bytes.length===Number(task.document.size_bytes),sha256,size_bytes:bytes.length}}];\n"
+      }
+    },
+    {
+      "id": "3cf5b5d3-e140-5478-a068-397098e73899",
+      "name": "Original pendente íntegro",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ff511457-9ddb-5291-998f-7dff19bb4b09",
+      "name": "Confirmar Drive recuperado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        -160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"confirm_file\",payload:{document_id:$json.document_id,lease_token:$json.lease_token,file:{sha256:$json.document.sha256,size_bytes:$json.document.size_bytes,drive_file_id:$json.drive_file_id,drive_folder_id:$json.document.drive_folder_id,drive_name:$json.document.drive_name}}}) }}"
+      }
+    },
+    {
+      "id": "2ce3d266-2b05-55c3-9834-c0595e5d958a",
+      "name": "Pendências de grupo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        240
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;const tasks=$('Reconciliar leases e pendências').first().json.group_tasks||[];if(!tasks.length)return [];if(!cfg.chatwootBaseUrl||!cfg.accountId||!cfg.inboxId||!cfg.conversationId||!cfg.groupJid.endsWith('@g.us'))throw new Error('Há grupo a reconciliar, mas destino não configurado.');const expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;for(const task of tasks){if((task.configured_destination||task.destination_key)!==expected)throw new Error('Reconciliação exige configuração do destino original da tarefa.');}return tasks.map(t=>({json:t}));"
+      }
+    },
+    {
+      "id": "da4ee167-3bbc-5784-b9e2-47e3e48da116",
+      "name": "Uma mensagem por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        960,
+        240
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "772a856a-a171-5a0f-be3e-4b81607179bf",
+      "name": "Chatwoot - consultar mensagens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        240
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.conversationId+'/messages' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "before",
+                    "value": "={{ Math.min(...($response.body.payload||[]).map(m=>Number(m.id))) }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !($response.body.payload||[]).length || ($response.body.payload||[]).some(m=>new Date(Number(m.created_at)*1000).getTime()<Date.parse($json.created_at||$json.document.received_at)-86400000) }}",
+              "requestInterval": 250,
+              "limitPagesFetched": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "f2fc2b1d-6136-54d2-83da-573f41e95802",
+      "name": "Reconciliar status e correlação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        240
+      ],
+      "parameters": {
+        "jsCode": "const task=$('Uma mensagem por vez').item.json;\nconst list=[];for(const page of $input.all()){const value=page.json;list.push(...(value.payload||value.messages||[]));}\nconst correlation='[EXAM:'+task.document.id+':DELIVERY:'+task.id+']';\nconst found=list.filter(m=>task.external_id?String(m.id)===String(task.external_id):String(m.content||'').includes(correlation));\nif(found.length!==1)return [{json:{task,outcome:{status:'uncertain',error:found.length?'Correlação ambígua; revisão necessária':'Não localizado na página consultada; revisão necessária',external_status:'reconciliation_inconclusive'}}}];\nconst m=found[0];\nconst providerSent=$('Configuração').first().json.providerConfirmationStatuses.includes(String(m.status));\nreturn [{json:{task,outcome:{status:providerSent?'sent':(m.status==='failed'?'uncertain':'submitted'),external_id:String(m.id),external_status:String(m.status||'api_created'),correlation}}}];\n"
+      }
+    },
+    {
+      "id": "f4b4d61b-5856-545c-b6a6-a0b4680d3d9a",
+      "name": "Registrar reconciliação de grupo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"task_result\",payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token,outcome:$json.outcome}}) }}"
+      }
+    },
+    {
+      "id": "59676dd9-956c-581e-81a6-5e2325722dbe",
+      "name": "Reserva Drive válida",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        -360
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "427bdf08-1b40-5115-99e1-0ef14882b1d2",
+      "name": "Documento com ID Drive",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        840,
+        -360
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$json.document.drive_file_id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d30222fb-f6fe-5cb0-b509-36b345d09cfb",
+      "name": "Documento temporário disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        -520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$json.document.staging_path }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4577a356-7993-5d88-9111-0753a6eaea9f",
+      "name": "Ler original temporário",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"file\",payload:{document_id:$('Uma reserva Drive por vez').item.json.document.id}}) }}"
+      }
+    },
+    {
+      "id": "f51a47e3-70df-59a4-a3b1-223fc2a67562",
+      "name": "Validar temporário e pasta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        -520
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst task=$('Uma reserva Drive por vez').item.json;\nconst folderId=$('Configuração').first().json.driveFolders[task.document.received_at.slice(0,7)];\nif(!folderId)throw new Error('Pasta Drive do temporário ainda não configurada.');\nreturn [{json:{task,folderId,sha256,sizeBytes:bytes.length},binary:$input.first().binary}];\n"
+      }
+    },
+    {
+      "id": "2167da7d-655e-5f14-b040-551039cffeef",
+      "name": "Drive - gerar ID temporário",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1800,
+        -520
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "84d4f870-5ba8-5947-b893-42ec6c303103",
+      "name": "Reservar upload temporário",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2040,
+        -520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"stage_file\",payload:{document_id:$('Validar temporário e pasta').item.json.task.document.id,file:{sha256:$('Validar temporário e pasta').item.json.sha256,size_bytes:$('Validar temporário e pasta').item.json.sizeBytes,drive_folder_id:$('Validar temporário e pasta').item.json.folderId,drive_file_id:$json.ids[0]},worker:$('Configuração').first().json.worker}}) }}"
+      }
+    },
+    {
+      "id": "b19e7486-ed20-5d21-9257-f29874b72bf4",
+      "name": "Temporário reservado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2280,
+        -520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.claimed===true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d492900e-0474-50b0-80ab-22a7c8370a1d",
+      "name": "Drive - consultar ID temporário",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2520,
+        -520
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?fields=id,size,name' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "be581ca6-0c50-5c72-8cbb-04ab981d2429",
+      "name": "Estado Drive temporário",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        -520
+      ],
+      "parameters": {
+        "jsCode": "if(![200,404].includes($json.statusCode))throw new Error('Consulta Drive temporário falhou.');return [{json:{...$('Reservar upload temporário').item.json,exists:$json.statusCode===200,hasBytes:$json.statusCode===200&&Number($json.body.size)>0,driveName:$json.body?.name||('Recebido - '+$('Reservar upload temporário').item.json.document_id.slice(0,8)+' - '+$('Reservar upload temporário').item.json.document.original_name)}}];"
+      }
+    },
+    {
+      "id": "67d9e37b-c7a6-5a72-9c62-57c2d78ddc1a",
+      "name": "Criar metadados temporário",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3000,
+        -520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "13180b9f-a306-5314-b551-7652470434d9",
+      "name": "Drive - criar temporário ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3240,
+        -680
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files?fields=id,name",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({id:$json.drive_file_id,name:$json.driveName,mimeType:'application/pdf',parents:[$json.document.drive_folder_id||$('Validar temporário e pasta').item.json.folderId],appProperties:{exam_document_id:$json.document_id,sha256:$('Validar temporário e pasta').item.json.sha256}}) }}"
+      }
+    },
+    {
+      "id": "82726c3d-e095-5fdd-afc9-dcb3d7221914",
+      "name": "Restaurar PDF temporário",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3480,
+        -520
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Estado Drive temporário').item.json,binary:$('Validar temporário e pasta').item.binary}];"
+      }
+    },
+    {
+      "id": "db97e6d7-a812-5b78-9297-83bf2b3ded76",
+      "name": "Temporário tem bytes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3720,
+        -520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.hasBytes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6c8f9c9d-6769-5e9d-8cd4-03b128a082a2",
+      "name": "Drive - bytes temporário ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        -360
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?uploadType=media&fields=id,size' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data"
+      }
+    },
+    {
+      "id": "f535dd25-1bf4-53f8-944f-3494d522dcf6",
+      "name": "Drive - conferir temporário salvo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4200,
+        -520
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($('Reservar upload temporário').item.json.drive_file_id)+'?alt=media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "8e0dc3a6-5376-54ab-833e-d2a8c0d0aa82",
+      "name": "Hash temporário salvo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4440,
+        -520
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst src=$('Validar temporário e pasta').item.json;if(sha256!==src.sha256||bytes.length!==src.sizeBytes)throw new Error('Temporário no Drive divergente.');return [{json:{stage:$('Reservar upload temporário').item.json,src}}];"
+      }
+    },
+    {
+      "id": "482c7d3c-acdb-5d6d-a1ea-627b3b292207",
+      "name": "Confirmar original temporário",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4680,
+        -520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"confirm_file\",payload:{document_id:$json.stage.document_id,lease_token:$json.stage.lease_token,file:{sha256:$json.src.sha256,size_bytes:$json.src.sizeBytes,drive_file_id:$json.stage.drive_file_id,drive_folder_id:$json.stage.document.drive_folder_id||$json.src.folderId,drive_name:$('Estado Drive temporário').item.json.driveName}}}) }}"
+      }
+    },
+    {
+      "id": "6f41475d-d0ab-56b1-9e1a-9002f9a820cb",
+      "name": "Renovar reserva Drive recuperado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"stage_file\",payload:{document_id:$json.task.document.id,file:{sha256:$json.sha256,size_bytes:$json.size_bytes,drive_file_id:$json.task.document.drive_file_id,drive_folder_id:$json.task.document.drive_folder_id},worker:$('Configuração').first().json.worker}}) }}"
+      }
+    },
+    {
+      "id": "55ea02cb-cfba-5cfc-a518-2102ed6f621e",
+      "name": "Recuperação reservada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.claimed===true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cf8be266-14d8-5796-9f9e-165a35475f4a",
+      "name": "Temporário recuperável",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$json.task.document.staging_path }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "A cada 15 minutos": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar leases e pendências",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliar leases e pendências": {
+      "main": [
+        [
+          {
+            "node": "Pendências Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pendências Drive": {
+      "main": [
+        [
+          {
+            "node": "Uma reserva Drive por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uma reserva Drive por vez": {
+      "main": [
+        [
+          {
+            "node": "Pendências de grupo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reserva Drive válida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - conferir objeto pendente": {
+      "main": [
+        [
+          {
+            "node": "Validar objeto pendente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar objeto pendente": {
+      "main": [
+        [
+          {
+            "node": "Original pendente íntegro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Original pendente íntegro": {
+      "main": [
+        [
+          {
+            "node": "Renovar reserva Drive recuperado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Temporário recuperável",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar Drive recuperado": {
+      "main": [
+        [
+          {
+            "node": "Uma reserva Drive por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pendências de grupo": {
+      "main": [
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uma mensagem por vez": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Chatwoot - consultar mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - consultar mensagens": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar status e correlação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliar status e correlação": {
+      "main": [
+        [
+          {
+            "node": "Registrar reconciliação de grupo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar reconciliação de grupo": {
+      "main": [
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserva Drive válida": {
+      "main": [
+        [
+          {
+            "node": "Documento com ID Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma reserva Drive por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documento com ID Drive": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir objeto pendente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Documento temporário disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documento temporário disponível": {
+      "main": [
+        [
+          {
+            "node": "Ler original temporário",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma reserva Drive por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler original temporário": {
+      "main": [
+        [
+          {
+            "node": "Validar temporário e pasta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar temporário e pasta": {
+      "main": [
+        [
+          {
+            "node": "Drive - gerar ID temporário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gerar ID temporário": {
+      "main": [
+        [
+          {
+            "node": "Reservar upload temporário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar upload temporário": {
+      "main": [
+        [
+          {
+            "node": "Temporário reservado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Temporário reservado": {
+      "main": [
+        [
+          {
+            "node": "Drive - consultar ID temporário",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma reserva Drive por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - consultar ID temporário": {
+      "main": [
+        [
+          {
+            "node": "Estado Drive temporário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estado Drive temporário": {
+      "main": [
+        [
+          {
+            "node": "Criar metadados temporário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar metadados temporário": {
+      "main": [
+        [
+          {
+            "node": "Drive - criar temporário ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Restaurar PDF temporário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - criar temporário ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Restaurar PDF temporário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar PDF temporário": {
+      "main": [
+        [
+          {
+            "node": "Temporário tem bytes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Temporário tem bytes": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir temporário salvo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drive - bytes temporário ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - bytes temporário ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir temporário salvo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - conferir temporário salvo": {
+      "main": [
+        [
+          {
+            "node": "Hash temporário salvo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash temporário salvo": {
+      "main": [
+        [
+          {
+            "node": "Confirmar original temporário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar original temporário": {
+      "main": [
+        [
+          {
+            "node": "Uma reserva Drive por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Temporário recuperável": {
+      "main": [
+        [
+          {
+            "node": "Ler original temporário",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma reserva Drive por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Renovar reserva Drive recuperado": {
+      "main": [
+        [
+          {
+            "node": "Recuperação reservada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recuperação reservada": {
+      "main": [
+        [
+          {
+            "node": "Confirmar Drive recuperado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma reserva Drive por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "tags": []
+}

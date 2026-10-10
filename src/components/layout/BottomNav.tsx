@@ -1,12 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ListFilter, Package, AlertTriangle, Settings } from 'lucide-react'
+import { LayoutDashboard, ListFilter, Package, FileText, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const tabs = [
   { to: '/', icon: LayoutDashboard, exact: true },
   { to: '/tracking', icon: ListFilter },
   { to: '/ship', icon: Package, center: true },
-  { to: '/late', icon: AlertTriangle },
+  { to: '/novos-exames', icon: FileText },
   { to: '/settings', icon: Settings },
 ]
 
@@ -18,6 +18,7 @@ export function BottomNav() {
           center ? (
             <NavLink
               key={to}
+              aria-label={to === '/ship' ? 'Enviar amostras' : to}
               to={to}
               className={({ isActive }) => cn(
                 'flex items-center justify-center w-12 h-12 rounded-2xl -mt-5 shadow-lg transition-all',
@@ -31,6 +32,7 @@ export function BottomNav() {
           ) : (
             <NavLink
               key={to}
+              aria-label={to === '/novos-exames' ? 'Novos exames' : to === '/' ? 'Dashboard' : to === '/tracking' ? 'Rastreamento' : 'Configurações'}
               to={to}
               end={exact}
               className={({ isActive }) => cn(

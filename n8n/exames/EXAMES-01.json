@@ -1,0 +1,1262 @@
+{
+  "name": "EXAMES-01 — Receber Outlook",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "DESATIVADO. Coleta paginada de todas as pastas configuradas, IDs imutáveis e todos os anexos. ID Drive reservado antes do upload; readback SHA-256. Nenhum segredo no export. Requer crypto no Code e credenciais selecionadas. Não roda o importador legado.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "69d744f7-2dca-520e-ba69-7a8885609a98",
+      "name": "A cada 5 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a16618ce-6e97-5d13-95fc-23c6340ff479",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Configure IDs only. Select credentials in HTTP nodes; never paste secrets here.\nconst cfg = {\n enabled: false,\n serviceUrl: '', // https://PROJECT.supabase.co/functions/v1/exam-document-service\n driveFolders: {}, // {'2026-10':'VERIFIED_MONTH_FOLDER_ID'}; year/month folders under the exam root\n notificationCutoff: '', // ISO timestamp agreed for the pilot\n maxBytes: 20 * 1024 * 1024,\n worker: 'n8n-exames',\n};\nif (!cfg.enabled) throw new Error('EXAMES pausado: habilite somente após configurar e validar o piloto.');\nif (!/^https:\\/\\/[^/]+\\/functions\\/v1\\/exam-document-service$/.test(cfg.serviceUrl)) throw new Error('serviceUrl inválida.');\ncfg.worker += ':' + $execution.id;\nObject.assign(cfg, {\n mailbox: '',\n graphUserId: '', // optional verified /me id for mailbox aliases\n folderIds: [], // IDs Graph of supplier folders, not only inbox\n allowedSenders: [], // lower-case addresses\n examSubjectHints: ['exame','laudo','resultado','hemograma','ultrassom'],\n intakeCutoff: '', // required ISO timestamp; no historical group notifications\n overlapMinutes: 120,\n});\nif (!cfg.mailbox || !cfg.folderIds.length || !cfg.allowedSenders.length || !cfg.intakeCutoff || !Number.isFinite(Date.parse(cfg.intakeCutoff))) throw new Error('Configure mailbox, folderIds, allowedSenders e intakeCutoff.');\nconst state = $getWorkflowStaticData('global');\nconst cutoff = Date.parse(cfg.intakeCutoff);\nconst sweepEnd = new Date().toISOString();\nconst watermark = Math.max(cutoff, Date.parse(state.watermark || cfg.intakeCutoff) - cfg.overlapMinutes*60000);\nreturn [{json:{...cfg,sweepEnd,sweepId:String($execution.id),windowStart:new Date(watermark).toISOString()}}];\n"
+      }
+    },
+    {
+      "id": "8659487d-8202-554d-880d-7a9a29fe4f18",
+      "name": "Pastas monitoradas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $input.first().json.folderIds.map(folderId=>({json:{...$input.first().json,folderId}}));"
+      }
+    },
+    {
+      "id": "aad2acef-a6c8-5363-a072-c9d72c2ea3f0",
+      "name": "Graph - mensagens paginadas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.microsoft.com/v1.0/me/mailFolders/'+encodeURIComponent($json.folderId)+'/messages?$top=100&$select=id,internetMessageId,subject,from,receivedDateTime,hasAttachments&$orderby=receivedDateTime asc&$filter='+encodeURIComponent('receivedDateTime ge '+$json.windowStart+' and receivedDateTime le '+$json.sweepEnd) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body['@odata.nextLink'] || '' }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body['@odata.nextLink'] }}",
+              "requestInterval": 250,
+              "limitPagesFetched": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "IdType=\"ImmutableId\""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "f78773d4-1667-51ce-8942-efecae14af28",
+      "name": "Mensagens elegíveis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;\nconst messages=[];const seen=new Set();\nfunction collect(v){if(Array.isArray(v)){for(const x of v)collect(x);}else if(v&&Array.isArray(v.value)){for(const m of v.value){if(!seen.has(m.id)){seen.add(m.id);messages.push(m);}}}}\nfor(const item of $input.all())collect(item.json);\nconst out=[];\nfor(const m of messages){\n const sender=(m.from?.emailAddress?.address||'').toLowerCase();\n const trusted=cfg.allowedSenders.includes(sender);\n const hint=cfg.examSubjectHints.some(h=>(m.subject||'').toLowerCase().includes(h));\n if(!trusted&&!hint)continue;\n out.push({json:{...m,sender,unknownSender:!trusted}});\n}\nreturn out.length?out:[{json:{emptySweep:true}}];\n"
+      }
+    },
+    {
+      "id": "da4ee167-3bbc-5784-b9e2-47e3e48da116",
+      "name": "Uma mensagem por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "580347c0-8ad2-561e-8ab9-ebb102a70679",
+      "name": "Mensagem disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.emptySweep }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2453017a-2524-5e40-843d-15d4b895da7e",
+      "name": "Graph - todos os anexos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent($json.id)+'/attachments?$top=100&$select=id,name,contentType,size,isInline' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body['@odata.nextLink'] || '' }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body['@odata.nextLink'] }}",
+              "requestInterval": 250,
+              "limitPagesFetched": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "IdType=\"ImmutableId\""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "09b5f831-5ad8-54c5-b56e-3a935395289c",
+      "name": "Enumerar anexos e ausência",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const message=$('Mensagem disponível').item.json;const list=[];\nfunction collect(v){if(Array.isArray(v)){for(const x of v)collect(x);}else if(v?.value)list.push(...v.value);}\nfor(const i of $input.all())collect(i.json);\nconst candidates=list.filter(a=>!a.isInline && !(String(a.contentType||'').startsWith('image/')&&/logo|assinatura|signature|image\\d|banner/i.test(a.name||'')));\nif(!candidates.length)return [{json:{message,missing:true,attachment:{id:'missing-pdf',name:'PDF ausente',contentType:null}}}];\nreturn candidates.map(a=>({json:{message,attachment:a,missing:!(a.contentType==='application/pdf'||/\\.pdf$/i.test(a.name||''))||a['@odata.type']==='#microsoft.graph.referenceAttachment'||a['@odata.type']==='#microsoft.graph.itemAttachment'}}));\n"
+      }
+    },
+    {
+      "id": "b3f88579-e8b4-5c95-afb3-7da70ce74df1",
+      "name": "Um anexo por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "16dbc888-7df9-5ecb-a7b9-95c2c2d0fabb",
+      "name": "Reservar origem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reserve_source\",payload:{source:{channel:'email',account_id:$('Configuração').first().json.mailbox,message_id:$json.message.id,attachment_id:$json.attachment.id,original_name:$json.attachment.name,mime_type:$json.attachment.contentType,received_at:$json.message.receivedDateTime,metadata:{internet_message_id:$json.message.internetMessageId,unknown_sender:$json.message.unknownSender,missing_attachment:$json.missing,unsupported_attachment:$json.missing&&$json.attachment.id!=='missing-pdf',subject:$json.message.subject}}}}) }}"
+      }
+    },
+    {
+      "id": "1505e63a-2e45-5648-b9fa-6f09711e0813",
+      "name": "Decidir recebimento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const origin=$('Um anexo por vez').item.json;\nif(!$json.document_id)throw new Error('reserve_source sem document_id.');\nreturn [{json:{...origin,reservation:$json,documentId:$json.document_id,skip:origin.missing||$json.document?.file_status==='saved'||$json.document?.identification_status==='not_exam'}}];\n"
+      }
+    },
+    {
+      "id": "260447ab-f161-59f3-ad85-8a3fb730eb6c",
+      "name": "Precisa baixar",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "46c4ba2d-c787-5d14-8c22-91a00aa8154a",
+      "name": "Graph - baixar PDF original",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent($json.message.id)+'/attachments/'+encodeURIComponent($json.attachment.id)+'/$value' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "IdType=\"ImmutableId\""
+            }
+          ]
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "f358b76e-fe93-5c12-9a09-0b7f4c5253ad",
+      "name": "Validar bytes e SHA-256",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst source=$('Decidir recebimento').item.json;\nconst period=source.message.receivedDateTime.slice(0,7);\nconst folderId=$('Configuração').first().json.driveFolders[period];\nif(!folderId)throw new Error('Pasta Drive não configurada para '+period+'. Origem preservada para retomada.');\nreturn [{json:{...source,sha256,sizeBytes:bytes.length,folderId},binary:$input.first().binary}];\n"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "e21399f7-c1fe-5ba6-b79b-e17b1890d4a0",
+      "name": "Drive - gerar ID de arquivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "c20bb1f7-e1f7-5802-bbe0-b8b2f6c92562",
+      "name": "Reservar ID e upload Drive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"stage_file\",payload:{document_id:$('Validar bytes e SHA-256').item.json.documentId,file:{sha256:$('Validar bytes e SHA-256').item.json.sha256,size_bytes:$('Validar bytes e SHA-256').item.json.sizeBytes,drive_folder_id:$('Validar bytes e SHA-256').item.json.folderId,drive_file_id:$json.ids[0]},worker:$('Configuração').first().json.worker}}) }}"
+      }
+    },
+    {
+      "id": "2c4e1295-96d5-55b9-9657-63415f149b2f",
+      "name": "Upload reservado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3600,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.claimed === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3976bc81-cbc5-5803-a581-e0fa0a56375b",
+      "name": "Drive - consultar ID reservado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3840,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?fields=id,size,name,appProperties,sha256Checksum' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "bb0998df-f55d-54b4-a5b2-684c58bc2d04",
+      "name": "Validar estado do objeto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const stage=$('Reservar ID e upload Drive').item.json;const r=$json;\nif(r.statusCode!==200&&r.statusCode!==404)throw new Error('Drive consultado sem resposta utilizável: '+r.statusCode);\nreturn [{json:{...stage,exists:r.statusCode===200,hasBytes:r.statusCode===200&&Number(r.body.size)>0,driveName:r.body?.name||('Recebido - '+stage.document.received_at.replace(/[:.]/g,'-')+' - '+stage.document_id.slice(0,8)+' - '+stage.document.original_name)}}];\n"
+      }
+    },
+    {
+      "id": "0ea803e8-15f7-5f52-9cff-03caff489b1e",
+      "name": "Metadados ausentes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "92268cac-a111-5b2d-8aee-0ff56f4ea05c",
+      "name": "Drive - criar metadados com ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4560,
+        -180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files?fields=id,name",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({id:$json.drive_file_id,name:$json.driveName,mimeType:'application/pdf',parents:[$json.document.drive_folder_id||$('Validar bytes e SHA-256').item.json.folderId],appProperties:{exam_document_id:$json.document_id,sha256:$('Validar bytes e SHA-256').item.json.sha256}}) }}"
+      }
+    },
+    {
+      "id": "274ca9f1-eb90-5ede-88ef-cacbd56c7ac9",
+      "name": "Restaurar contexto Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Validar estado do objeto').item.json,binary:$('Validar bytes e SHA-256').item.binary}];\n"
+      }
+    },
+    {
+      "id": "cbec4348-0021-5f76-96d2-884b09491d85",
+      "name": "Objeto já tem bytes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5040,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.hasBytes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b09b9dd3-6acb-53b7-a04c-b8d24bc94e6f",
+      "name": "Drive - gravar bytes no ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5280,
+        180
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?uploadType=media&fields=id,size,sha256Checksum' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data"
+      }
+    },
+    {
+      "id": "c5bca78a-d4be-5832-ae0e-350c3afc9ad6",
+      "name": "Drive - conferir bytes salvos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5520,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($('Reservar ID e upload Drive').item.json.drive_file_id)+'?alt=media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "63e1c157-cf1c-56fb-a613-5891a8a9d5e0",
+      "name": "Conferir integridade do original",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5760,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst src=$('Validar bytes e SHA-256').item.json;\nif(sha256!==src.sha256||bytes.length!==src.sizeBytes)throw new Error('Conflito de integridade no Drive. Não sobrescrever arquivo existente.');\nreturn [{json:{stage:$('Reservar ID e upload Drive').item.json,source:src}}];\n"
+      }
+    },
+    {
+      "id": "88ab882a-b1a5-5ae9-8ed5-381ee5455f2b",
+      "name": "Confirmar armazenamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6000,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"confirm_file\",payload:{document_id:$json.stage.document_id,lease_token:$json.stage.lease_token,file:{sha256:$json.source.sha256,size_bytes:$json.source.sizeBytes,drive_file_id:$json.stage.drive_file_id,drive_folder_id:$json.stage.document.drive_folder_id||$json.source.folderId,drive_name:$('Validar estado do objeto').item.json.driveName||'Recebido - '+$json.stage.document_id.slice(0,8)}}}) }}"
+      }
+    },
+    {
+      "id": "9053245a-f5a6-56d8-903b-4f11c7a1658a",
+      "name": "Confirmar varredura concluída",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;\nconst state=$getWorkflowStaticData('global');\nconst failed=Boolean(state.failedSweeps?.[cfg.sweepId]);\nif(!failed)state.watermark=cfg.sweepEnd;\nif(state.failedSweeps)delete state.failedSweeps[cfg.sweepId];\nreturn [{json:{complete:!failed,sweepEnd:cfg.sweepEnd,watermarkAdvanced:!failed}}];\n"
+      }
+    },
+    {
+      "id": "af905911-a21b-589a-adb5-a3904f289d90",
+      "name": "Graph - conferir conta OAuth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -120,
+        -180
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/me?$select=id,mail,userPrincipalName",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "5cb6a63e-1c92-5ae4-aadb-e9b45e1aee84",
+      "name": "Validar identidade da caixa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        -180
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;\nconst requested=cfg.mailbox.toLowerCase();const candidates=[$json.mail,$json.userPrincipalName].filter(Boolean).map(v=>String(v).toLowerCase());\nif(!candidates.includes(requested)&&(!cfg.graphUserId||$json.id!==cfg.graphUserId))throw new Error('Credencial Outlook não corresponde à caixa/ID verificados.');\nreturn [{json:cfg}];"
+      }
+    },
+    {
+      "id": "defb0858-0a63-5b2c-b7f9-67a2bd83f365",
+      "name": "Adiar sweep quando upload pendente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const staged=$('Reservar ID e upload Drive').item.json;\nif(staged.document?.file_status!=='saved'&&staged.upload_required!==false){\n const cfg=$('Configuração').first().json;const state=$getWorkflowStaticData('global');\n state.failedSweeps=state.failedSweeps||{};state.failedSweeps[cfg.sweepId]=true;\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "fb51caa1-2150-5b1c-a465-dac526e3ac0f",
+      "name": "Original baixado e validado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3000,
+        -180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$json.sha256 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1ff1d447-d9f1-5df4-8d5e-b4f5e40037d0",
+      "name": "Registrar falha de origem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3240,
+        -360
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"source_error\",payload:{document_id:$('Decidir recebimento').item.json.documentId,error:'Original não baixado ou inválido',review_reason:'Conferir anexo original, formato PDF, tamanho e acesso ao Outlook'}}) }}"
+      }
+    },
+    {
+      "id": "f27c15a2-364e-563b-904c-faddda698e2b",
+      "name": "Manter janela para recuperação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3480,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;const state=$getWorkflowStaticData('global');state.failedSweeps=state.failedSweeps||{};state.failedSweeps[cfg.sweepId]=true;return $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "A cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Graph - conferir conta OAuth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Graph - conferir conta OAuth": {
+      "main": [
+        [
+          {
+            "node": "Validar identidade da caixa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar identidade da caixa": {
+      "main": [
+        [
+          {
+            "node": "Pastas monitoradas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pastas monitoradas": {
+      "main": [
+        [
+          {
+            "node": "Graph - mensagens paginadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Graph - mensagens paginadas": {
+      "main": [
+        [
+          {
+            "node": "Mensagens elegíveis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagens elegíveis": {
+      "main": [
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uma mensagem por vez": {
+      "main": [
+        [
+          {
+            "node": "Confirmar varredura concluída",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mensagem disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem disponível": {
+      "main": [
+        [
+          {
+            "node": "Graph - todos os anexos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Graph - todos os anexos": {
+      "main": [
+        [
+          {
+            "node": "Enumerar anexos e ausência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enumerar anexos e ausência": {
+      "main": [
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Um anexo por vez": {
+      "main": [
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reservar origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar origem": {
+      "main": [
+        [
+          {
+            "node": "Decidir recebimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir recebimento": {
+      "main": [
+        [
+          {
+            "node": "Precisa baixar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Precisa baixar": {
+      "main": [
+        [
+          {
+            "node": "Graph - baixar PDF original",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Graph - baixar PDF original": {
+      "main": [
+        [
+          {
+            "node": "Validar bytes e SHA-256",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar bytes e SHA-256": {
+      "main": [
+        [
+          {
+            "node": "Original baixado e validado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gerar ID de arquivo": {
+      "main": [
+        [
+          {
+            "node": "Reservar ID e upload Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar ID e upload Drive": {
+      "main": [
+        [
+          {
+            "node": "Upload reservado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload reservado": {
+      "main": [
+        [
+          {
+            "node": "Drive - consultar ID reservado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adiar sweep quando upload pendente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adiar sweep quando upload pendente": {
+      "main": [
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - consultar ID reservado": {
+      "main": [
+        [
+          {
+            "node": "Validar estado do objeto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar estado do objeto": {
+      "main": [
+        [
+          {
+            "node": "Metadados ausentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Metadados ausentes": {
+      "main": [
+        [
+          {
+            "node": "Drive - criar metadados com ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Restaurar contexto Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - criar metadados com ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Restaurar contexto Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar contexto Drive": {
+      "main": [
+        [
+          {
+            "node": "Objeto já tem bytes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Objeto já tem bytes": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir bytes salvos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drive - gravar bytes no ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gravar bytes no ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir bytes salvos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - conferir bytes salvos": {
+      "main": [
+        [
+          {
+            "node": "Conferir integridade do original",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir integridade do original": {
+      "main": [
+        [
+          {
+            "node": "Confirmar armazenamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar armazenamento": {
+      "main": [
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Original baixado e validado": {
+      "main": [
+        [
+          {
+            "node": "Drive - gerar ID de arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar falha de origem": {
+      "main": [
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manter janela para recuperação": {
+      "main": [
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "tags": []
+}

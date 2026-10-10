@@ -1,0 +1,4 @@
+[functions.exam-document-service]
+# Dedicated worker secret is not a JWT. The function verifies real users with getUser
+# and checks exam_document_member; every worker request verifies its dedicated secret.
+verify_jwt = false
