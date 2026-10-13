@@ -7,6 +7,7 @@ import {
   Moon,
   ChevronsLeft,
   ChevronsRight,
+  FileText,
 } from 'lucide-react'
 import { useState } from 'react'
 import { AlertBanner } from '@/components/dashboard/AlertBanner'
@@ -18,6 +19,7 @@ import { Settings, Package, History } from 'lucide-react'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { to: '/novos-exames', label: 'Novos exames', icon: FileText },
   { to: '/tracking', label: 'Rastreamento', icon: ListFilter },
   { to: '/ship', label: 'Enviar Amostras', icon: Package },
   { to: '/shipments', label: 'Histórico Envios', icon: History },

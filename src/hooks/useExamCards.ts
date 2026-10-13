@@ -115,7 +115,7 @@ export function useMarkContact() {
   })
 }
 
-/** Mark all pending items on a card as contacted at once */
+/** Register contact for the selected legacy items without completing managed documents. */
 export function useMarkAllContacted() {
   const queryClient = useQueryClient()
 
@@ -129,6 +129,7 @@ export function useMarkAllContacted() {
       itemIds: string[]
       contactedBy: string
     }) => {
+      if (itemIds.length === 0) throw new Error('Nenhum exame selecionado')
       const contactedAt = new Date().toISOString()
 
       const { error: itemError } = await supabase
@@ -142,17 +143,27 @@ export function useMarkAllContacted() {
 
       if (itemError) throw itemError
 
+      const { data: card, error: cardError } = await supabase
+        .from('exam_card')
+        .select('status')
+        .eq('id', cardId)
+        .single()
+      if (cardError) throw cardError
+
       const { error: logError } = await supabase.from('exam_card_log').insert({
         exam_card_id: cardId,
-        new_status: 'contato_realizado',
+        new_status: card.status,
         changed_by: contactedBy,
-        change_reason: `Contato concluído por ${contactedBy}`,
+        change_reason: card.status === 'contato_realizado'
+          ? `Contato concluído por ${contactedBy}`
+          : `Contato registrado em ${itemIds.length} exame(s) por ${contactedBy}; outros itens seguem pendentes`,
       })
 
       if (logError) throw logError
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-card'] })
       queryClient.invalidateQueries({ queryKey: ['exam-card-stats'] })
       queryClient.invalidateQueries({ queryKey: ['exam-card-logs'] })
     },

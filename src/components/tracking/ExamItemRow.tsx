@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Phone, CheckCircle2, FlaskConical, Pencil, Trash2, Check, X, Package } from 'lucide-react'
+import { Phone, CheckCircle2, FlaskConical, Pencil, Trash2, Check, X, Package, FileText } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useUpdateItem, useDeleteItem } from '@/hooks/useExamCardMutations'
-import type { ExamItem } from '@/types/exam-card'
+import { isManagedExamItem, type ExamItem } from '@/types/exam-card'
 
 interface ExamItemRowProps {
   item: ExamItem
@@ -24,8 +25,11 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
   const isContacted = item.contacted
   const isReady = item.result_received
   const isWaiting = !item.result_received
+  const isManaged = isManagedExamItem(item)
+  const documentIds = item.document_ids ?? []
 
   async function handleSaveEdit() {
+    if (isManaged) return toast.error('Abra o documento em Novos exames para revisar este exame')
     try {
       await updateItem.mutateAsync({
         id: item.id,
@@ -40,6 +44,7 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
   }
 
   async function handleDelete() {
+    if (isManaged) return toast.error('O documento e seu histórico devem ser preservados')
     try {
       await deleteItem.mutateAsync(item.id)
       toast.success('Exame removido')
@@ -49,7 +54,7 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
   }
 
   // Inline edit mode
-  if (editing) {
+  if (editing && !isManaged) {
     return (
       <div className="flex items-center gap-2 py-1">
         <input
@@ -96,7 +101,7 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
   }
 
   // Delete confirm mode
-  if (showDeleteConfirm) {
+  if (showDeleteConfirm && !isManaged) {
     return (
       <div className="flex items-center gap-2 py-1">
         <span className="flex-1 text-xs text-[hsl(var(--muted-foreground))]">
@@ -120,84 +125,110 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
   }
 
   return (
-    <div className={cn('flex items-center gap-2 group', compact ? 'py-0.5' : 'py-1')}>
-      {/* Checkbox visual */}
-      <div className="shrink-0">
-        {isReady ? (
-          <span className="w-4 h-4 rounded border-2 border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 flex items-center justify-center">
-            <span className="w-2 h-2 rounded-sm bg-[hsl(var(--primary))]" />
+    <div className={cn('group min-w-0', compact ? 'py-0.5' : 'py-1')}>
+      <div className="flex items-center gap-2 min-w-0">
+        {/* Checkbox visual */}
+        <div className="shrink-0">
+          {isReady ? (
+            <span className="w-4 h-4 rounded border-2 border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 flex items-center justify-center">
+              <span className="w-2 h-2 rounded-sm bg-[hsl(var(--primary))]" />
+            </span>
+          ) : (
+            <span className="w-4 h-4 rounded border-2 border-[hsl(var(--border))] bg-transparent block" />
+          )}
+        </div>
+
+        {/* Exam name */}
+        <span
+          className={cn(
+            'flex-1 text-xs truncate',
+            isWaiting
+              ? 'text-[hsl(var(--muted-foreground))]'
+              : 'text-[hsl(var(--foreground))]'
+          )}
+        >
+          {item.exam_type}
+        </span>
+
+        {/* Edit/Delete actions — only in detail (non-compact) with cardId */}
+        {!compact && cardId && !isManaged && (
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => { e.stopPropagation(); setEditing(true) }}
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-[hsl(var(--muted))] transition-all"
+              title="Editar exame"
+            >
+              <Pencil className="w-3 h-3 text-[hsl(var(--muted-foreground))]" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(true) }}
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-50 dark:hover:bg-red-950/30 transition-all"
+              title="Remover exame"
+            >
+              <Trash2 className="w-3 h-3 text-[hsl(var(--muted-foreground))] hover:text-red-500" />
+            </button>
+          </div>
+        )}
+
+        {/* Shipped icon */}
+        {item.sent_to_lab_at && (
+          <span title={`Enviado por ${item.sent_to_lab_by || '—'}`}>
+            <Package className="w-3.5 h-3.5 text-[hsl(var(--primary))] shrink-0" />
           </span>
+        )}
+
+        {/* Action icon (contact / ready / waiting) */}
+        {isContacted ? (
+          <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
+        ) : isReady ? (
+          onContactClick && !isManaged ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onContactClick(item)
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-[hsl(var(--accent))] transition-colors group/phone shrink-0"
+              aria-label="Registrar contato"
+            >
+              <Phone className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] group-hover/phone:text-[hsl(var(--primary))] transition-colors" />
+            </button>
+          ) : (
+            <Phone className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
+          )
         ) : (
-          <span className="w-4 h-4 rounded border-2 border-[hsl(var(--border))] bg-transparent block" />
+          <FlaskConical className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
+        )}
+
+        {/* Lab chip — only in non-compact mode */}
+        {!compact && item.lab_name && (
+          <span className="text-[10px] text-[hsl(var(--muted-foreground))] hidden sm:block truncate max-w-[72px]">
+            {item.lab_name}
+          </span>
         )}
       </div>
-
-      {/* Exam name */}
-      <span
-        className={cn(
-          'flex-1 text-xs truncate',
-          isWaiting
-            ? 'text-[hsl(var(--muted-foreground))]'
-            : 'text-[hsl(var(--foreground))]'
-        )}
-      >
-        {item.exam_type}
-      </span>
-
-      {/* Edit/Delete actions — only in detail (non-compact) with cardId */}
-      {!compact && cardId && (
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={(e) => { e.stopPropagation(); setEditing(true) }}
-            className="w-5 h-5 flex items-center justify-center rounded hover:bg-[hsl(var(--muted))] transition-all"
-            title="Editar exame"
-          >
-            <Pencil className="w-3 h-3 text-[hsl(var(--muted-foreground))]" />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(true) }}
-            className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-50 dark:hover:bg-red-950/30 transition-all"
-            title="Remover exame"
-          >
-            <Trash2 className="w-3 h-3 text-[hsl(var(--muted-foreground))] hover:text-red-500" />
-          </button>
+      {isManaged && (
+        <div className="ml-6 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {documentIds.map((documentId) => (
+            <Link
+              key={documentId}
+              to={`/novos-exames/${documentId}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              title="Abrir documento, registrar contato e revisar em Novos exames"
+              className="inline-flex items-center gap-1 text-[10px] font-medium text-[hsl(var(--primary))] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))]/50 rounded"
+            >
+              <FileText className="w-3 h-3 shrink-0" />
+              Documento EX-{documentId.slice(0, 8).toUpperCase()}
+            </Link>
+          ))}
+          {!compact && (
+            <span className="text-[10px] text-[hsl(var(--muted-foreground))]">
+              Contato e revisão em Novos exames
+            </span>
+          )}
         </div>
-      )}
-
-      {/* Shipped icon */}
-      {item.sent_to_lab_at && (
-        <span title={`Enviado por ${item.sent_to_lab_by || '—'}`}>
-          <Package className="w-3.5 h-3.5 text-[hsl(var(--primary))] shrink-0" />
-        </span>
-      )}
-
-      {/* Action icon (contact / ready / waiting) */}
-      {isContacted ? (
-        <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
-      ) : isReady ? (
-        onContactClick ? (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onContactClick(item)
-            }}
-            className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-[hsl(var(--accent))] transition-colors group/phone shrink-0"
-            aria-label="Registrar contato"
-          >
-            <Phone className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] group-hover/phone:text-[hsl(var(--primary))] transition-colors" />
-          </button>
-        ) : (
-          <Phone className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
-        )
-      ) : (
-        <FlaskConical className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
-      )}
-
-      {/* Lab chip — only in non-compact mode */}
-      {!compact && item.lab_name && (
-        <span className="text-[10px] text-[hsl(var(--muted-foreground))] hidden sm:block truncate max-w-[72px]">
-          {item.lab_name}
-        </span>
       )}
     </div>
   )

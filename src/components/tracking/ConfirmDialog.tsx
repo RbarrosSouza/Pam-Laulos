@@ -8,6 +8,7 @@ interface ConfirmDialogProps {
   description: string
   confirmLabel?: string
   loading?: boolean
+  loadingLabel?: string
   onConfirm: () => void
   onClose: () => void
 }
@@ -17,6 +18,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = 'Excluir',
   loading = false,
+  loadingLabel = 'Excluindo…',
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
@@ -70,7 +72,7 @@ export function ConfirmDialog({
               'transition-all disabled:opacity-50 disabled:cursor-not-allowed'
             )}
           >
-            {loading ? 'Excluindo…' : confirmLabel}
+            {loading ? loadingLabel : confirmLabel}
           </button>
         </div>
       </motion.div>
