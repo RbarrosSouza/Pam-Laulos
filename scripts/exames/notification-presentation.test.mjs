@@ -27,11 +27,12 @@ test('missing or impossible exam date is never replaced by email receipt date',(
  for(const date of [null,'','2026-02-30','2026-99-99','16/10/2026']){
   const result=examPresentation({...doc,extracted_data:{...fields,exam_date:date}},base);
   assert.equal(result.ready,false);assert.deepEqual(result.missingFields,['exam_date']);
-  assert(result.fileName.endsWith('Data a conferir.pdf'));assert(!result.fileName.includes('16-10-2026'));
+  assert.equal(result.fileName,'Luna - Ana Souza - Hemograma.pdf');assert(!result.fileName.includes('16-10-2026'));
+  assert(!result.content.includes('*Realizado em:*'));
  }
 });
 
-test('all four fields required, partial confirmation preserves extracted data, server notification fields take precedence',()=>{
+test('missing fields remain diagnostic, partial confirmation and server notification fields take precedence',()=>{
  for(const key of ['pet_name','client_name','exam_type'])assert(!examPresentation({...doc,extracted_data:{...fields,[key]:'—'}},base).ready);
  const merged=examPresentation({...doc,confirmed_data:{client_name:'Ana Lima'}},base);
  assert.equal(merged.fileName,'Luna - Ana Lima - Hemograma - 14-10-2026.pdf');
@@ -44,6 +45,16 @@ test('all four fields required, partial confirmation preserves extracted data, s
  assert(examPresentation({...doc,confirmed_data:{tutor_name:'Ana Lima'}},base).fileName.includes('Ana Lima'));
  assert.equal(examPresentation({...doc,confirmed_data:{tutor_name:null}},base).ready,false);
  assert(examPresentation({...doc,confirmed_data:{client_name:'Ana Lima',tutor_name:'Outra'}},base).fileName.includes('Ana Lima'));
+});
+
+test('partial and unidentified exams keep only available fields and are ready to present without invented placeholders',()=>{
+ for(const [available,expected] of [[{pet_name:'Luna'},'Luna.pdf'],[{client_name:'Ana Souza'},'Ana Souza.pdf'],[{exam_type:'Hemograma'},'Hemograma.pdf'],[{},'Exame.pdf']]){
+  const result=examPresentation({...doc,extracted_data:available},base);
+  assert.equal(result.fileName,expected);
+  assert(result.content.includes('Informações incompletas'));
+  assert(!result.content.includes(': —'));assert(!result.content.includes('não identificado'));
+  for(const [key,label] of [['client_name','Tutor'],['pet_name','Pet'],['exam_type','Exame']])assert.equal(result.content.includes('*'+label+':*'),Boolean(available[key]));
+ }
 });
 
 test('file values and WhatsApp formatting cannot be broken by linebreaks or reserved punctuation',()=>{
@@ -86,6 +97,11 @@ test('generated processing and group nodes agree on filename and put correlation
  assert.equal(ack[0].json.outcome.status,'sent');assert.equal(ack[0].json.outcome.external_id,'31');
  const ambiguous=await run('group','Conferir entrega sem reenviar',{json:{payload:[message,{...message,id:32}]}});
  assert.equal(ambiguous[0].json.outcome.status,'uncertain');
- task.document.extracted_data={...fields,exam_date:null};
- await assert.rejects(run('group','Preparar PDF e correlação',{json:{},binary}),/aguarda identificação: exam_date/);
+ for(const available of [{...fields,exam_date:null},{pet_name:'Luna'},{}]){
+  task.document.extracted_data=available;
+  const partial=await run('group','Preparar PDF e correlação',{json:{},binary});
+  assert.equal(partial[0].json.verified,true);
+  assert(partial[0].json.content.includes('Informações incompletas'));
+  assert.equal(partial[0].binary.data.fileName,examPresentation(task.document,base).fileName);
+ }
 });

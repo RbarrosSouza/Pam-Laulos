@@ -57,6 +57,8 @@ try{
  await db.exec(`INSERT INTO auth.users(id) VALUES('${staff}'); INSERT INTO exam_document_member(user_id,role) VALUES('${staff}','admin');`);
  for(const file of ['20261016000006_exam_operational_flow.sql','20261016000007_exam_clinical_group_eligibility.sql','20261016000008_exam_gmail_origin_identity.sql'])
   await db.exec(await readFile(new URL('../migrations/'+file,import.meta.url),'utf8'));
+ // Production has this existing review grant; mirror it only for the exact guarded installer.
+ if(process.env.EXAM_GROUP_INSTALL_SQL)await db.exec('GRANT EXECUTE ON FUNCTION public.review_exam_document(uuid,bigint,jsonb,text,text) TO service_role');
  await db.exec("CREATE SCHEMA supabase_migrations; CREATE TABLE supabase_migrations.schema_migrations(version text PRIMARY KEY,name text,statements text[]); INSERT INTO supabase_migrations.schema_migrations VALUES('20261016000008','synthetic',ARRAY[]::text[])");
  await worker();
  await db.exec("UPDATE exam_document_configuration SET ingestion_enabled=true,enabled_destinations=ARRAY['drive','processing','group','nexus'],notification_cutoff=now()-interval '1 minute',group_destination_key='synthetic-group'");

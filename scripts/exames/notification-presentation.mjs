@@ -10,7 +10,8 @@ export function examPresentation(document, baseUrl) {
   const dateLabel = examDate ? examDate.slice(8, 10) + '/' + examDate.slice(5, 7) + '/' + examDate.slice(0, 4) : '';
   const missingFields = ['pet_name', 'client_name', 'exam_type'].filter(field => !/[\p{L}\p{N}]/u.test(text(fields[field])));
   if (!examDate) missingFields.push('exam_date');
-  const fileName = [filePart(fields.pet_name, 'Pet a conferir', 60), filePart(fields.client_name, 'Tutor a conferir', 60), filePart(fields.exam_type, 'Exame a conferir', 90), dateLabel ? dateLabel.replace(/\//g, '-') : 'Data a conferir'].join(' - ') + '.pdf';
+  const present = field => !missingFields.includes(field);
+  const fileName = ([present('pet_name') ? filePart(fields.pet_name, '', 60) : null, present('client_name') ? filePart(fields.client_name, '', 60) : null, present('exam_type') ? filePart(fields.exam_type, '', 90) : null, dateLabel ? dateLabel.replace(/\//g, '-') : null].filter(Boolean).join(' - ') || 'Exame') + '.pdf';
   let shortUrl = null;
   if (baseUrl) {
     if (typeof document.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(document.id)) throw new Error('Identificador do documento inválido');
@@ -23,10 +24,11 @@ export function examPresentation(document, baseUrl) {
   const content = [
     '🧪 *Novo exame*',
     '',
-    '*Tutor:* ' + text(fields.client_name),
-    '*Pet:* ' + text(fields.pet_name),
-    '*Exame:* ' + text(fields.exam_type),
-    '*Realizado em:* ' + dateLabel,
+    present('client_name') ? '*Tutor:* ' + text(fields.client_name) : null,
+    present('pet_name') ? '*Pet:* ' + text(fields.pet_name) : null,
+    present('exam_type') ? '*Exame:* ' + text(fields.exam_type) : null,
+    dateLabel ? '*Realizado em:* ' + dateLabel : null,
+    missingFields.length ? '📌 Informações incompletas — conferir no Pam Laudos.' : null,
     '',
     '📋 *Abrir e assumir no Pam Laudos*',
     shortUrl,
