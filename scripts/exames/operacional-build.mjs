@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {examPresentation,findExamDelivery} from './notification-presentation.mjs';
+import {validateExamExtraction} from './extraction-validation.mjs';
 
 const ROOT=fileURLToPath(new URL('../../',import.meta.url));
 const KINDS=['intake','processing','group','nexus'];
@@ -27,10 +28,13 @@ const inRoot=target=>{const relative=path.relative(ROOT,path.resolve(target));re
 function applyNotificationPresentation(workflow, kind){
  const node=name=>{const found=workflow.nodes.find(item=>item.name===name);if(!found)throw new Error('Missing notification node: '+name);return found;};
  if(kind==='processing'){
+  node('Validar JSON e evidências').parameters.jsCode=validateExamExtraction.toString()+`\nconst context=$('Preparar classificação ou revisão').item.json;\nreturn [{json:{task:context.task,extraction:validateExamExtraction(context,$json)}}];\n`;
   node('Resultado para persistir').parameters.jsCode=examPresentation.toString()+`\nconst input=$input.first().json;\nconst task=input.task;const extraction=input.extraction;\nconst presentation=examPresentation({...task.document,extracted_data:extraction.fields});\nreturn [{json:{task,extraction,driveName:presentation.fileName}}];\n`;
   const request=node('Extrair dados estruturados').parameters;
   const instruction='exam_date é a data explicitamente identificada no documento como realização do exame ou coleta. Nunca use data de recebimento do email, emissão ou assinatura como substituta; se a data de realização/coleta não estiver clara, retorne null.';
   if(!request.jsonBody.includes(instruction))request.jsonBody=request.jsonBody.replace('Ausências são null; não invente data.', 'Ausências são null; não invente data. '+instruction);
+  const identityInstruction='Copie pet_name e client_name por inteiro, exatamente como impressos, incluindo todos os sobrenomes e nomes compostos; nunca reduza ao primeiro nome nem complete usando conhecimento externo. Acompanhante do Exame pode identificar o tutor quando aparece claramente no bloco de identificação do paciente. exam_type deve ser uma expressão literal presente no PDF (por exemplo RELATÓRIO RADIOGRÁFICO); não componha ou parafraseie modalidade e região. Cada valor não nulo precisa de evidência na própria página. Copie os trechos de evidência com seus rótulos e mantenha as quebras de linha existentes. Data do Laudo, emissão e assinatura não comprovam realização/coleta.';
+  if(!request.jsonBody.includes(identityInstruction))request.jsonBody=request.jsonBody.replace(instruction,instruction+' '+identityInstruction);
  }
  if(kind==='group'){
   const prepare=node('Preparar PDF e correlação');

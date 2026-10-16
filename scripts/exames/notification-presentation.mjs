@@ -11,7 +11,7 @@ export function examPresentation(document, baseUrl) {
   const missingFields = ['pet_name', 'client_name', 'exam_type'].filter(field => !/[\p{L}\p{N}]/u.test(text(fields[field])));
   if (!examDate) missingFields.push('exam_date');
   const present = field => !missingFields.includes(field);
-  const fileName = ([present('pet_name') ? filePart(fields.pet_name, '', 60) : null, present('client_name') ? filePart(fields.client_name, '', 60) : null, present('exam_type') ? filePart(fields.exam_type, '', 90) : null, dateLabel ? dateLabel.replace(/\//g, '-') : null].filter(Boolean).join(' - ') || 'Exame') + '.pdf';
+  const fileName = ([present('pet_name') ? filePart(fields.pet_name, '', 300) : null, present('client_name') ? filePart(fields.client_name, '', 300) : null, present('exam_type') ? filePart(fields.exam_type, '', 300) : null, dateLabel ? dateLabel.replace(/\//g, '-') : null].filter(Boolean).join(' - ') || 'Exame') + '.pdf';
   let shortUrl = null;
   if (baseUrl) {
     if (typeof document.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(document.id)) throw new Error('Identificador do documento inválido');

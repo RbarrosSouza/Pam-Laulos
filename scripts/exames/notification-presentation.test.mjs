@@ -12,6 +12,13 @@ const base='https://pam-laulos.vercel.app';
 const workflows=await buildWorkflows();
 const node=(kind,name)=>workflows[kind].nodes.find(n=>n.name===name);
 
+test('extractor prompt requests complete printed names, a literal exam type and no report-date substitution',()=>{
+ const prompt=node('processing','Extrair dados estruturados').parameters.jsonBody;
+ assert(prompt.includes('incluindo todos os sobrenomes e nomes compostos'));
+ assert(prompt.includes('Acompanhante do Exame'));assert(prompt.includes('expressão literal presente no PDF'));
+ assert(prompt.includes('Data do Laudo, emissão e assinatura não comprovam realização/coleta'));
+});
+
 test('filename starts with pet then tutor, exam, performed date; received time appears only at end of caption',()=>{
  const result=examPresentation(doc,base);
  assert(result.ready);assert.equal(result.fileName,'Luna - Ana Souza - Hemograma - 14-10-2026.pdf');
@@ -61,6 +68,15 @@ test('file values and WhatsApp formatting cannot be broken by linebreaks or rese
  const result=examPresentation({...doc,extracted_data:{...fields,pet_name:'Lu\nna/<x>',client_name:'*Ana*\n_Equipe_'}},base);
  assert(!/[\\/:*?"<>|\x00-\x1f]/.test(result.fileName));
  assert(result.content.includes('*Tutor:* Ana Equipe\n*Pet:* Lu na/<x>'));
+});
+
+test('full pet and tutor names over 60 characters remain complete in filename and caption',()=>{
+ const pet='Princesa Luna da Casa Verde dos Jardins de São Sebastião do Vale';
+ const tutor='Ana Beatriz de Albuquerque Vasconcelos Oliveira dos Santos Ferreira';
+ assert(pet.length>60);assert(tutor.length>60);
+ const result=examPresentation({...doc,extracted_data:{...fields,pet_name:pet,client_name:tutor}},base);
+ assert.equal(result.fileName,pet+' - '+tutor+' - Hemograma - 14-10-2026.pdf');
+ assert(result.content.includes('*Tutor:* '+tutor));assert(result.content.includes('*Pet:* '+pet));
 });
 
 test('internal attributes recover lost POST response, ignore unrelated messages, keep legacy marker compatibility',()=>{

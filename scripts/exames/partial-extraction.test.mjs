@@ -43,22 +43,23 @@ test('missing pet or uncertain single patient preserves valid metadata without b
   }
 });
 
-test('invalid or unevidenced values and dates still discard extraction instead of trusting partial identity',async()=>{
-  for(const mutation of [
-    data=>{data.fields.pet_name='Mel';},
-    data=>{data.fields.exam_type='Ultrassom';},
-    data=>{data.fields.exam_date='2026-10-15';},
-    data=>{data.fields.exam_date='2026-02-30';},
-    data=>{data.evidence=data.evidence.filter(e=>e.field!=='exam_date');},
-    data=>{data.evidence.find(e=>e.field==='exam_type').page=2;},
-    data=>{data.evidence.find(e=>e.field==='exam_type').excerpt='Hemograma não consta no PDF';},
-    data=>{data.review_reason={unsafe:'object'};},
+test('generated validator invalidates only unsupported fields while preserving independent evidence',async()=>{
+  for(const [field,mutation] of [
+    ['pet_name',data=>{data.fields.pet_name='Mel';}],
+    ['exam_type',data=>{data.fields.exam_type='Ultrassom';}],
+    ['exam_date',data=>{data.fields.exam_date='2026-10-15';}],
+    ['exam_date',data=>{data.fields.exam_date='2026-02-30';}],
+    ['exam_date',data=>{data.evidence=data.evidence.filter(e=>e.field!=='exam_date');}],
+    ['exam_type',data=>{data.evidence.find(e=>e.field==='exam_type').page=2;}],
+    ['exam_type',data=>{data.evidence.find(e=>e.field==='exam_type').excerpt='Hemograma não consta no PDF';}],
   ]){
     const data=structuredClone(complete);delete data.fields.client_name;
     data.evidence=data.evidence.filter(e=>e.field!=='client_name');mutation(data);
     const {extraction}=await validate(data);
-    assert.equal(extraction.classification,'review');assert.deepEqual(extraction.fields,{});assert.deepEqual(extraction.evidence,[]);
-    assert.match(extraction.review_reason,/Resposta do extrator inválida/);
+    assert.equal(extraction.classification,'review');assert.equal(extraction.fields[field],null);
+    for(const key of Object.keys(data.fields).filter(key=>key!==field))assert.equal(extraction.fields[key],data.fields[key]);
+    assert.equal(extraction.evidence.some(e=>e.field===field),false);
+    assert.match(extraction.review_reason,/Campos sem comprovação/);
   }
 });
 
