@@ -103,7 +103,7 @@ test('group uses only verified original destination, one multipart POST, timeout
  const context={task,correlation:'[EXAM:'+docId+':DELIVERY:task]'};
  for(const r of [{error:'timeout'},{statusCode:503,body:{}}]){const result=await asyncCode(w,'Classificar submissão sem reenvio',{json:r},{'Preparar PDF e correlação':[{json:context}]});assert.equal(result[0].json.outcome.status,'uncertain');}
  const submitted=await asyncCode(w,'Classificar submissão sem reenvio',{json:{statusCode:200,body:{id:91,status:'sent'}}},{'Preparar PDF e correlação':[{json:context}]});assert.equal(submitted[0].json.outcome.status,'submitted');
- const sent=await asyncCode(w,'Conferir entrega sem reenviar',{json:{payload:[{id:91,status:'delivered'}]}},{'Uma confirmação por vez':[{json:task}]});assert.equal(sent[0].json.outcome.status,'sent');
+ const sent=await asyncCode(w,'Conferir entrega sem reenviar',{json:{payload:[{id:91,status:'delivered',private:false,message_type:'outgoing'}]}},{'Uma confirmação por vez':[{json:task}]});assert.equal(sent[0].json.outcome.status,'sent');
  const empty=await asyncCode(w,'Conferir entrega sem reenviar',{json:{payload:[]}},{'Uma confirmação por vez':[{json:task}]});assert.equal(empty[0].json.outcome.status,'uncertain');
  const posts=w.nodes.filter(x=>x.name.startsWith('Chatwoot -')&&x.parameters.method==='POST');assert.equal(posts.length,1);assert.equal(posts[0].retryOnFail,false);assert.equal(posts[0].parameters.bodyParameters.parameters.filter(p=>p.name==='attachments[]').length,1);
  assert.equal(w.connections['Registrar confirmação observada'].main[0][0].node,'Uma confirmação por vez');assert(!n(w,'Preparar PDF e correlação').parameters.jsCode.includes('\\\\n'));

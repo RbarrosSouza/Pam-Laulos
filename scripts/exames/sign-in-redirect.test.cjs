@@ -20,6 +20,7 @@ const safeSignInRedirect = new Function(`${compiled}\nreturn safeSignInRedirect;
 
 const fallback = '/novos-exames';
 const documentRoute = '/novos-exames/10000000-0000-4000-8000-000000000001';
+const shortRoute = '/e/' + Buffer.from('10000000000040008000000000000001', 'hex').toString('base64url');
 const cases = [
   ['missing redirect', null, fallback],
   ['empty redirect', '', fallback],
@@ -31,6 +32,11 @@ const cases = [
   ['settings route', '/settings', '/settings'],
   ['new exams list', '/novos-exames', '/novos-exames'],
   ['document route preserves query and fragment', `${documentRoute}?tab=contact#historico`, `${documentRoute}?tab=contact#historico`],
+  ['short document route survives login', shortRoute, shortRoute],
+  ['short route preserves query and fragment', `${shortRoute}?tab=contact#historico`, `${shortRoute}?tab=contact#historico`],
+  ['invalid short route length', `${shortRoute}A`, fallback],
+  ['invalid short route padding bits', '/e/AAAAAAAAAAAAAAAAAAAAAB', fallback],
+  ['invalid short route alphabet', '/e/AAAAAAAAAAAAAAAAAAAAA+', fallback],
   ['absolute external URL', 'https://outside.invalid/tracking', fallback],
   ['protocol-relative external URL', '//outside.invalid/tracking', fallback],
   ['relative path', 'tracking', fallback],

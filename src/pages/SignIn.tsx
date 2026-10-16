@@ -15,7 +15,8 @@ function safeSignInRedirect(raw: string | null) {
     const target = new URL(raw, base)
     const routes = new Set(['/', '/tracking', '/ship', '/shipments', '/late', '/settings', '/novos-exames'])
     const documentRoute = /^\/novos-exames\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(target.pathname)
-    if (target.origin !== base || (!routes.has(target.pathname) && !documentRoute)) return fallback
+    const shortDocumentRoute = /^\/e\/[A-Za-z0-9_-]{21}[AQgw]$/.test(target.pathname)
+    if (target.origin !== base || (!routes.has(target.pathname) && !documentRoute && !shortDocumentRoute)) return fallback
     return `${target.pathname}${target.search}${target.hash}`
   } catch { return fallback }
 }

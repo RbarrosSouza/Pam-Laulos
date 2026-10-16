@@ -10,6 +10,7 @@ import { LateExams } from '@/pages/LateExams'
 import { ShipmentHistory } from '@/pages/ShipmentHistory'
 import { NewExams } from '@/pages/NewExams'
 import { ExamDocumentDetail } from '@/pages/ExamDocumentDetail'
+import { ExamShortLink } from '@/pages/ExamShortLink'
 import { SignIn } from '@/pages/SignIn'
 import { ExamAuthProvider } from '@/contexts/ExamAuthProvider'
 import { RequireExamAccess } from '@/components/documents/RequireExamAccess'
@@ -27,6 +28,7 @@ function AnimatedRoutes() {
       <Routes location={location} key={location.pathname}>
         <Route path="/entrar" element={<SignIn />} />
         <Route element={<RequireExamAccess><Shell /></RequireExamAccess>}>
+          <Route path="/e/:shortId" element={<ExamShortLink />} />
           <Route path="/novos-exames" element={<NewExams />} />
           <Route path="/novos-exames/:documentId" element={<ExamDocumentDetail />} />
           <Route path="/" element={<Dashboard />} />

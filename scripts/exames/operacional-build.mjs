@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {examPresentation,findExamDelivery} from './notification-presentation.mjs';
 
 const ROOT=fileURLToPath(new URL('../../',import.meta.url));
 const KINDS=['intake','processing','group','nexus'];
@@ -23,6 +24,22 @@ export const CREDENTIALS=Object.freeze({
  extractor:{id:'SELECT_OPENAI_CREDENTIAL',name:'Select OpenAI credential'},
 });
 const inRoot=target=>{const relative=path.relative(ROOT,path.resolve(target));return relative===''||(!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative));};
+function applyNotificationPresentation(workflow, kind){
+ const node=name=>{const found=workflow.nodes.find(item=>item.name===name);if(!found)throw new Error('Missing notification node: '+name);return found;};
+ if(kind==='processing'){
+  node('Resultado para persistir').parameters.jsCode=examPresentation.toString()+`\nconst input=$input.first().json;\nconst task=input.task;const extraction=input.extraction;\nconst presentation=examPresentation({...task.document,extracted_data:extraction.fields});\nreturn [{json:{task,extraction,driveName:presentation.fileName}}];\n`;
+  const request=node('Extrair dados estruturados').parameters;
+  const instruction='exam_date é a data explicitamente identificada no documento como realização do exame ou coleta. Nunca use data de recebimento do email, emissão ou assinatura como substituta; se a data de realização/coleta não estiver clara, retorne null.';
+  if(!request.jsonBody.includes(instruction))request.jsonBody=request.jsonBody.replace('Ausências são null; não invente data.', 'Ausências são null; não invente data. '+instruction);
+ }
+ if(kind==='group'){
+  const prepare=node('Preparar PDF e correlação');
+  prepare.parameters.jsCode=examPresentation.toString()+`\nconst crypto=require('crypto');\nconst bytes=await this.helpers.getBinaryDataBuffer(0,'data');\nconst cfg=$('Configuração').first().json;const task=$('Tarefa disponível').item.json;const doc=task.document;\nif(!bytes.length||bytes.length>cfg.maxBytes||!bytes.subarray(0,1024).includes(Buffer.from('%PDF-')))throw new Error('PDF vazio, inválido ou fora do limite.');\nif(crypto.createHash('sha256').update(bytes).digest('hex')!==doc.sha256||bytes.length!==Number(doc.size_bytes))throw new Error('PDF para grupo sem integridade comprovada.');\nconst presentation=examPresentation({...doc,notification_fields:task.notification_fields||doc.notification_fields},cfg.pamLaudosBaseUrl);\nif(!presentation.ready)throw new Error('Aviso aguarda identificação: '+presentation.missingFields.join(', '));\nconst correlation='[EXAM:'+doc.id+':DELIVERY:'+task.id+']';\nconst contentAttributes={pamvet_exam_document_id:doc.id,pamvet_exam_delivery_id:task.id,pamvet_exam_sha256:doc.sha256};\nconst binary=$input.first().binary;binary.data.fileName=presentation.fileName;binary.data.mimeType='application/pdf';\nreturn [{json:{task,correlation,contentAttributes,content:presentation.content,verified:true},binary}];\n`;
+  const parameters=node('Chatwoot - enviar PDF único').parameters.bodyParameters.parameters;
+  if(!parameters.some(parameter=>parameter.name==='content_attributes'))parameters.push({name:'content_attributes',value:'={{ JSON.stringify($json.contentAttributes) }}',parameterType:'formData'});
+  node('Conferir entrega sem reenviar').parameters.jsCode=findExamDelivery.toString()+`\nconst task=$('Uma confirmação por vez').item.json;const list=[];for(const i of $input.all()){const body=i.json;list.push(...(body.payload||body.messages||[]));}\nconst found=findExamDelivery(list,task,$('Configuração').first().json);\nlet outcome={status:'uncertain',error:'Entrega não comprovada nas páginas consultadas; conferir no PamLaudos',external_status:'reconciliation_inconclusive'};\nif(found.length===1){const m=found[0];const sent=$('Configuração').first().json.providerConfirmationStatuses.includes(String(m.status));outcome={status:sent?'sent':m.status==='failed'?'uncertain':'submitted',external_id:String(m.id),external_status:String(m.status||'api_created'),correlation:'[EXAM:'+task.document.id+':DELIVERY:'+task.id+']'};}\nreturn [{json:{task,outcome}}];\n`;
+ }
+}
 function validatePrivateSettings(settings){
  if(!settings||typeof settings!=='object'||Array.isArray(settings)||Object.keys(settings).some(k=>!['config','credentials'].includes(k)))throw new Error('Use only {config,credentials}; never put secret values in this file');
  const configuration=settings.config??{};
@@ -40,6 +57,7 @@ export async function buildWorkflows(settings={}){
  const result={};
  for(let i=0;i<templates.length;i++){
   const workflow=clone(templates[i]);
+  applyNotificationPresentation(workflow,KINDS[i]);
   for(const node of workflow.nodes){
    if(node.name==='Configuração')node.parameters.jsCode=node.parameters.jsCode.replace(configLiteral(workflow),JSON.stringify(config,null,2));
    if(node.parameters.jsCode)node.parameters.jsCode=node.parameters.jsCode.replace('const EXPECTED_MAILBOX='+JSON.stringify(CONFIG.mailbox), 'const EXPECTED_MAILBOX='+JSON.stringify(config.mailbox));
