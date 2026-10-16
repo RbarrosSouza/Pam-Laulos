@@ -12,18 +12,21 @@ const base='https://pam-laulos.vercel.app';
 const workflows=await buildWorkflows();
 const node=(kind,name)=>workflows[kind].nodes.find(n=>n.name===name);
 
-test('extractor prompt requests complete printed names, a literal exam type and no report-date substitution',()=>{
+test('extractor prompt requests complete printed names, a literal exam type and documentary date fallback',()=>{
  const prompt=node('processing','Extrair dados estruturados').parameters.jsonBody;
  assert(prompt.includes('incluindo todos os sobrenomes e nomes compostos'));
  assert(prompt.includes('Acompanhante do Exame'));assert(prompt.includes('expressão literal presente no PDF'));
- assert(prompt.includes('Data do Laudo, emissão e assinatura não comprovam realização/coleta'));
+ assert(prompt.includes('Priorize a data de realização ou coleta'));
+ assert(prompt.includes('na ausência dela, use a Data do Laudo'));
+ assert(!prompt.includes('não comprovam realização/coleta'));
+ assert(prompt.includes('Nunca use data de recebimento do email, nascimento ou rodapé genérico'));
 });
 
-test('filename starts with pet then tutor, exam, performed date; received time appears only at end of caption',()=>{
+test('filename starts with pet then tutor, exam, documented date; received time appears only at end of caption',()=>{
  const result=examPresentation(doc,base);
  assert(result.ready);assert.equal(result.fileName,'Luna - Ana Souza - Hemograma - 14-10-2026.pdf');
  assert(result.content.indexOf('*Tutor:*')<result.content.indexOf('*Pet:*'));
- assert(result.content.includes('*Realizado em:* 14/10/2026'));
+ assert(result.content.includes('*Data do exame:* 14/10/2026'));
  assert(result.content.endsWith('_Recebido em 16/10/2026 às 15:29_'));
  assert(!result.content.includes('[EXAM:'));assert(!result.content.includes(id));
  assert.equal(result.shortUrl,base+'/e/ERERERERQRGhEREREREREQ');
@@ -35,7 +38,7 @@ test('missing or impossible exam date is never replaced by email receipt date',(
   const result=examPresentation({...doc,extracted_data:{...fields,exam_date:date}},base);
   assert.equal(result.ready,false);assert.deepEqual(result.missingFields,['exam_date']);
   assert.equal(result.fileName,'Luna - Ana Souza - Hemograma.pdf');assert(!result.fileName.includes('16-10-2026'));
-  assert(!result.content.includes('*Realizado em:*'));
+  assert(!result.content.includes('*Data do exame:*'));
  }
 });
 

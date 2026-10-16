@@ -27,7 +27,7 @@ export function examPresentation(document, baseUrl) {
     present('client_name') ? '*Tutor:* ' + text(fields.client_name) : null,
     present('pet_name') ? '*Pet:* ' + text(fields.pet_name) : null,
     present('exam_type') ? '*Exame:* ' + text(fields.exam_type) : null,
-    dateLabel ? '*Realizado em:* ' + dateLabel : null,
+    dateLabel ? '*Data do exame:* ' + dateLabel : null,
     missingFields.length ? '📌 Informações incompletas — conferir no Pam Laudos.' : null,
     '',
     '📋 *Abrir e assumir no Pam Laudos*',

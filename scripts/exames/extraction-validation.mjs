@@ -1,6 +1,6 @@
 /** Pure, self-contained validator embedded in n8n. Never completes names from a registry. */
 export function validateExamExtraction(context, response) {
-  const fallback = reason => ({classification:'review', single_patient:false, fields:{}, evidence:[], review_reason:reason, extractor_version:'document-evidence-v2'});
+  const fallback = reason => ({classification:'review', single_patient:false, fields:{}, evidence:[], review_reason:reason, extractor_version:'document-evidence-v3'});
   const allowed = ['pet_name','client_name','exam_type','exam_date','lab_name','species','report_number'];
   const normalized = value => value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
   const comparable = value => normalized(value).toLocaleLowerCase('pt-BR');
@@ -49,15 +49,15 @@ export function validateExamExtraction(context, response) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value + 'T00:00:00Z')) || new Date(value + 'T00:00:00Z').toISOString().slice(0,10) !== value) return false;
     const [year,month,day] = value.split('-');
     const variants = [value, ...['/','.', '-'].flatMap(separator => [...new Set([day,String(Number(day))])].flatMap(d => [...new Set([month,String(Number(month))])].map(m => d + separator + m + separator + year)))];
-    const clinicalLabel = /(?:data\s+(?:(?:da|de|do)\s+)?(?:realiza[cç][aã]o(?:\s+(?:do|de)\s+exame)?|coleta|exame)|realiza[cç][aã]o(?:\s+(?:do|de)\s+exame)?|coleta|exame\s+realizado|realizad[oa]|coletad[oa])(?:\s+em)?\s*[:=-]?\s*$/iu;
+    const documentDateLabel = /(?:data\s+(?:(?:da|de|do)\s+)?(?:realiza[cç][aã]o(?:\s+(?:do|de)\s+exame)?|coleta|exame)|realiza[cç][aã]o(?:\s+(?:do|de)\s+exame)?|coleta|exame\s+realizado|realizad[oa]|coletad[oa]|data\s+(?:(?:da|de|do)\s+)?(?:laudo|emiss[aã]o|assinatura)|laudo(?:\s+(?:emitido|realizado|assinado))?|emiss[aã]o|emitido|assinatura|assinado)(?:\s+em)?\s*[:=-]?\s*$/iu;
     const page = context.pages[ev.page - 1], indexedExcerpt = indexed(ev.excerpt);
     for (const variant of variants) for (const at of occurrences(ev.excerpt, variant)) {
       // The label must immediately qualify this date, not some other date in the quote.
       const rawStart = ev.start + indexedExcerpt.starts[at];
       const prefix = page.slice(Math.max(0, rawStart - 160), rawStart);
       const label = prefix.split(/\d{4}-\d{2}-\d{2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}|[;.!?]/u).at(-1);
-      if (/\b(?:laudo|emiss[aã]o|assinatura|receb(?:ido|imento)|n[aã]o)\b/iu.test(label)) continue;
-      if (clinicalLabel.test(normalized(label))) return true;
+      if (/\b(?:receb(?:ido|imento)|nascimento|nascido|n[aã]o)\b/iu.test(label)) continue;
+      if (documentDateLabel.test(normalized(label))) return true;
     }
     return false;
   }
@@ -81,6 +81,6 @@ export function validateExamExtraction(context, response) {
   return {
     classification:data.classification === 'not_exam' ? 'not_exam' : incomplete || invalidCore ? 'review' : data.classification,
     single_patient:data.single_patient, fields, evidence,
-    review_reason:reasons.join('; ') || null, extractor_version:'document-evidence-v2',
+    review_reason:reasons.join('; ') || null, extractor_version:'document-evidence-v3',
   };
 }

@@ -72,31 +72,33 @@ test('uncertain single-patient identity remains review while partial fields rema
   assert.equal(out.fields.pet_name,'LILI');assert.equal(out.fields.exam_type,'RELATÓRIO RADIOGRÁFICO');
 });
 
-test('report, receipt and signature dates do not become performance dates',()=>{
-  for(const label of ['Data do Laudo','Data de emissão','Assinatura','Recebido em']){
+test('report, issue and signature dates are accepted as documentary exam dates',()=>{
+  for(const label of ['Data do Laudo','Data de emissão','Data da assinatura','Assinatura','Laudo emitido em','Laudo\nrealizado em']){
+    const data=copy();data.fields.exam_date='2026-10-16';data.evidence.push({field:'exam_date',page:1,excerpt:label+': 16/10/2026'});
+    const sourcePages=[pages[0].replace('Data do Laudo',label),...pages.slice(1)];
+    const out=run(data,sourcePages);assert.equal(out.fields.exam_date,'2026-10-16');
+    assert.equal(out.fields.client_name,source.fields.client_name);assert.equal(out.classification,'exam');
+    assert(out.evidence.every(e=>sourcePages[e.page-1].includes(e.excerpt)));
+  }
+});
+
+test('receipt, birth, generic and negated dates stay excluded',()=>{
+  for(const label of ['Recebido em','Data de recebimento','Nascimento','Data de nascimento','Exame não realizado em','Versão','Atualizado em']){
     const data=copy();data.fields.exam_date='2026-10-16';data.evidence.push({field:'exam_date',page:1,excerpt:label+': 16/10/2026'});
     const out=run(data,[pages[0].replace('Data do Laudo',label),...pages.slice(1)]);
     assert.equal(out.fields.exam_date,null);assert.equal(out.fields.client_name,source.fields.client_name);
   }
 });
 
-test('each clinical date needs its own immediately associated realization or collection label',()=>{
+test('the date evidence must have its own valid label even if the quote is cropped',()=>{
   const data=copy();data.fields.exam_date='2026-10-16';
-  const text='Coleta: 14/10/2026. Data do Laudo: 16/10/2026.';
+  const text='Coleta: 14/10/2026. Data do Laudo: 16/10/2026. Recebido em: 17/10/2026.';
   data.evidence.push({field:'exam_date',page:1,excerpt:text});
   const sourcePages=[pages[0]+'\n'+text,...pages.slice(1)];
-  assert.equal(run(data,sourcePages).fields.exam_date,null);
+  assert.equal(run(data,sourcePages).fields.exam_date,'2026-10-16');
   data.fields.exam_date='2026-10-14';assert.equal(run(data,sourcePages).fields.exam_date,'2026-10-14');
-  // Even an excerpt cropped to just the report date cannot hide its actual label.
-  data.fields.exam_date='2026-10-16';data.evidence.at(-1).excerpt='16/10/2026';
+  data.fields.exam_date='2026-10-17';data.evidence.at(-1).excerpt='17/10/2026';
   assert.equal(run(data,sourcePages).fields.exam_date,null);
-});
-
-test('report preparation, signature and negated realization labels are never clinical dates',()=>{
-  for(const label of ['Laudo realizado em','Laudo\nrealizado em','Data de assinatura do exame realizado em','Exame não realizado em']){
-    const data=copy();data.fields.exam_date='2026-10-16';data.evidence.push({field:'exam_date',page:1,excerpt:label+': 16/10/2026'});
-    assert.equal(run(data,[pages[0]+'\n'+label+': 16/10/2026',...pages.slice(1)]).fields.exam_date,null);
-  }
 });
 
 test('explicit clinical labels support valid calendar dates and reject impossible or unevidenced ones',()=>{
