@@ -1,0 +1,920 @@
+{
+  "name": "OPERACIONAL 03 — Avisar EXAMES - PamVet",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "OPERACIONAL — salvo desativado. Reutiliza as conexões existentes. Definir o corte e liberar após a migração definitiva e substituição do importador legado. Sem journal ou autorização temporária. Não enviar novamente uma mensagem de grupo com retorno incerto.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "b7cb2327-bd51-56ea-8261-f2c861d8f69d",
+      "name": "A cada 5 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a16618ce-6e97-5d13-95fc-23c6340ff479",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Referências de credenciais são selecionadas nos HTTPs. Corte e enabled são a única liberação deste fluxo.\nconst cfg={\n  \"enabled\": false,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"mailbox\": \"exames@example.invalid\",\n  \"driveFolderId\": \"SELECT_PRIVATE_DRIVE_FOLDER\",\n  \"intakeCutoff\": \"\",\n  \"notificationCutoff\": \"\",\n  \"manualMessageId\": \"\",\n  \"dedicatedMailbox\": false,\n  \"allowedSenders\": [],\n  \"examSubjectHints\": [\n    \"exame\",\n    \"laudo\",\n    \"resultados do atendimento\",\n    \"resultado de exame\",\n    \"hemograma\",\n    \"ultrassom\"\n  ],\n  \"maxBytes\": 20971520,\n  \"maxMimeDepth\": 8,\n  \"maxPages\": 100,\n  \"includeSpamTrash\": false,\n  \"worker\": \"n8n-exames-operacional\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"pamLaudosBaseUrl\": \"https://pamlaudos.example.invalid\",\n  \"allowHttpChatwoot\": false,\n  \"providerConfirmationStatuses\": [\n    \"delivered\",\n    \"read\"\n  ],\n  \"extractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"extractorModel\": \"gpt-4.1\",\n  \"maxTextChars\": 80000,\n  \"maxProcessingPages\": 100\n};\nif(!cfg.enabled)throw new Error('EXAMES_OPERACIONAL_PAUSADO');\nif(!cfg.serviceUrl.startsWith('https://')||!cfg.serviceUrl.endsWith('/functions/v1/exam-document-service')||!cfg.pamLaudosBaseUrl.startsWith('https://'))throw new Error('Configuração de serviço/painel inválida');\nif(!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(cfg.intakeCutoff)||!Number.isFinite(Date.parse(cfg.intakeCutoff)))throw new Error('Defina o marco de corte do coletor legado');\nif(!cfg.driveFolderId||typeof cfg.includeSpamTrash!=='boolean')throw new Error('Destino Drive inválido');\nif(cfg.notificationCutoff!==cfg.intakeCutoff||!cfg.groupJid.endsWith('@g.us')||!cfg.accountId||!cfg.inboxId||!cfg.conversationId)throw new Error('Destino do grupo ou marco de aviso inválido');\nif(cfg.manualMessageId&&$execution.mode!=='test')throw new Error('Seleção de mensagem só pode ser usada manualmente');\nif(cfg.manualMessageId&&!/^[a-f0-9]{8,64}$/i.test(cfg.manualMessageId))throw new Error('ID de mensagem manual inválido');\ncfg.worker+=':'+$execution.id;\ncfg.maxPages=cfg.maxPages;\nreturn [{json:cfg}];"
+      }
+    },
+    {
+      "id": "9ad151fe-beb6-54ad-a070-084e39ef40db",
+      "name": "Reservar tarefa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reserve_tasks\",payload:{destination:\"group\",worker:$('Configuração').first().json.worker,limit:1} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "a1f50d00-0e6b-511e-abfe-eeaf7596e75a",
+      "name": "Tarefa disponível",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "if(!$json.tasks?.length)return [];\nconst cfg=$('Configuração').first().json;\nconst expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;\nreturn $json.tasks.map(t=>({json:{...t,destinationVerified:t.configured_destination===expected}}));"
+      }
+    },
+    {
+      "id": "6682eaae-e454-551e-bb3d-5cb3e20f3f75",
+      "name": "Chatwoot - conferir conversa destino",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.conversationId }}",
+        "authentication": "predefinedCredentialType",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "nodeCredentialType": "chatwootApi"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_CHATWOOT_CREDENTIAL",
+          "name": "Select Chatwoot credential"
+        }
+      }
+    },
+    {
+      "id": "aca0be46-5551-542c-9013-74f8ce9bbaac",
+      "name": "Validar grupo e caixa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;\nconst contact=$json.meta?.sender||$json.contact||{};\nconst identifier=contact.identifier||$json.contact_inbox?.source_id||$json.meta?.sender?.additional_attributes?.jid;\nif(Number($json.inbox_id)!==Number(cfg.inboxId)||Number($json.id)!==Number(cfg.conversationId)||identifier!==cfg.groupJid)throw new Error('Conversa não confere com inbox/JID verificados.');\nreturn [{json:cfg}];\n"
+      }
+    },
+    {
+      "id": "9f4b1c65-bcfc-5da3-b123-2ee449eedc82",
+      "name": "Drive - baixar PDF para grupo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.document.drive_file_id)+'?alt=media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      }
+    },
+    {
+      "id": "9aae44ab-0cae-5bf8-b797-d2e00e02ccc5",
+      "name": "Preparar PDF e correlação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst task=$('Tarefa disponível').item.json;const doc=task.document;const cfg=$('Configuração').first().json;\nif(sha256!==doc.sha256||bytes.length!==Number(doc.size_bytes))throw new Error('PDF para grupo sem integridade comprovada.');\nconst f=Object.keys(doc.confirmed_data||{}).length?doc.confirmed_data:(doc.extracted_data||{});\nconst correlation='[EXAM:'+doc.id+':DELIVERY:'+task.id+']';\nconst content='🧪 Novo exame recebido\\nPet: '+(f.pet_name||'—')+' | Tutor: '+(f.client_name||'—')+'\\nExame: '+(f.exam_type||'—')+' | Data: '+(f.exam_date||'—')+'\\n'+(doc.pet_id?'':'Cadastro a conferir\\n')+'Acompanhar e assumir: '+cfg.pamLaudosBaseUrl.replace(/\\/$/,'')+'/novos-exames/'+doc.id+'\\n'+(!doc.assigned_to?'Aguardando responsável\\n':'')+correlation;\nconst binary=$input.first().binary;binary.data.fileName=doc.drive_name||doc.original_name||'exame.pdf';binary.data.mimeType='application/pdf';\nreturn [{json:{task,correlation,content,verified:true},binary}];\n"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "04c53870-76bf-5661-8f1f-16ab2a96b89a",
+      "name": "Chatwoot - enviar PDF único",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.conversationId+'/messages' }}",
+        "authentication": "predefinedCredentialType",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.content }}",
+              "parameterType": "formData"
+            },
+            {
+              "name": "message_type",
+              "value": "outgoing",
+              "parameterType": "formData"
+            },
+            {
+              "name": "private",
+              "value": "false",
+              "parameterType": "formData"
+            },
+            {
+              "name": "attachments[]",
+              "inputDataFieldName": "data",
+              "parameterType": "formBinaryData"
+            }
+          ]
+        },
+        "nodeCredentialType": "chatwootApi"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false,
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_CHATWOOT_CREDENTIAL",
+          "name": "Select Chatwoot credential"
+        }
+      }
+    },
+    {
+      "id": "301af542-9a47-5e8e-8bdc-e66f61f337e7",
+      "name": "Classificar submissão sem reenvio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const context=$('Preparar PDF e correlação').item.json;\nconst response=$json;const status=Number(response.statusCode||0);const id=response.body?.id;\nlet outcome;\nif(status>=200&&status<300&&id)outcome={status:'submitted',external_id:String(id),external_status:String(response.body.status||'api_created')};\nelse if(status>=400&&status<500&&![408,409,429].includes(status))outcome={status:'failed',error:'Chatwoot rejeitou a submissão HTTP '+status,external_status:'rejected'};\nelse outcome={status:'uncertain',error:'Resposta de envio inconclusiva; reconciliar antes de qualquer novo POST',external_status:'response_unknown'};\noutcome.correlation=context.correlation;\nreturn [{json:{task:context.task,outcome}}];\n"
+      }
+    },
+    {
+      "id": "d65cd48b-790c-56da-8de3-ab8cd87eae56",
+      "name": "Persistir tentativa de grupo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"task_result\",payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token,outcome:$json.outcome} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "28ff9c5c-b3bb-526a-97c1-426d958e4378",
+      "name": "Destino da tarefa confere",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        840,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.destinationVerified===true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "79e0b342-73b7-52c7-8369-76127239e8bd",
+      "name": "PDF íntegro para enviar",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.verified===true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c0b8310e-6130-59c0-ae41-e194f8748e3e",
+      "name": "Falha confirmada antes do POST",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        360
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"task_result\",payload:{delivery_id:$('Tarefa disponível').item.json.id,lease_token:$('Tarefa disponível').item.json.lease_token,outcome:{status:'failed',external_status:'preflight_failed',error:'Nenhum POST de mensagem realizado: conferir destino, acesso ao Drive e integridade do PDF'} } }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "d18af1e3-da75-443d-a700-089e938078d0",
+      "name": "Executar manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        -480,
+        180
+      ]
+    },
+    {
+      "id": "f50c7160-5210-410a-a97b-7322f8e78d0f",
+      "name": "Reconciliar reservas e mensagens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reconcile\",payload:{} }) }}"
+      },
+      "position": [
+        900,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "d64e16f0-2f4e-40c9-abbf-e2745456818f",
+      "name": "Mensagens aguardando confirmação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const cfg=$('Configuração').first().json;const expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;const tasks=$json.group_tasks||[];for(const task of tasks){if((task.configured_destination||task.destination_key)!==expected)throw new Error('Conferir o destino original da mensagem antes de continuar');}return tasks.length?tasks.map(json=>({json})):[{json:{empty:true}}];"
+      },
+      "position": [
+        1120,
+        320
+      ]
+    },
+    {
+      "id": "ff52b10d-9dad-4d51-af53-85ffaa70e742",
+      "name": "Uma confirmação por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "position": [
+        1340,
+        320
+      ]
+    },
+    {
+      "id": "05eb2b50-0d96-47f2-a567-3fd37ef1393d",
+      "name": "Mensagem anterior disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "position": [
+        1560,
+        320
+      ]
+    },
+    {
+      "id": "190abc41-6a31-4657-a165-2021c41199f7",
+      "name": "Chatwoot - consultar mensagens existentes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.conversationId+'/messages' }}",
+        "authentication": "predefinedCredentialType",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "before",
+                    "value": "={{ Math.min(...($response.body.payload||[]).map(m=>Number(m.id))) }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !($response.body.payload||[]).length || ($response.body.payload||[]).some(m=>new Date(Number(m.created_at)*1000).getTime()<Date.parse($json.created_at||$json.document.received_at)-86400000) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 20,
+              "requestInterval": 250
+            }
+          }
+        },
+        "nodeCredentialType": "chatwootApi"
+      },
+      "position": [
+        1780,
+        320
+      ],
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_CHATWOOT_CREDENTIAL",
+          "name": "Select Chatwoot credential"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "d5b0c0b3-2efb-4ec5-a6c7-2ebc50369ced",
+      "name": "Conferir entrega sem reenviar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const task=$('Uma confirmação por vez').item.json;const list=[];for(const i of $input.all()){const body=i.json;list.push(...(body.payload||body.messages||[]));}\nconst correlation='[EXAM:'+task.document.id+':DELIVERY:'+task.id+']';\nconst found=list.filter(m=>task.external_id?String(m.id)===String(task.external_id):String(m.content||'').includes(correlation));\nlet outcome={status:'uncertain',error:'Entrega não comprovada nas páginas consultadas; conferir no PamLaudos',external_status:'reconciliation_inconclusive'};\nif(found.length===1){const m=found[0];const sent=$('Configuração').first().json.providerConfirmationStatuses.includes(String(m.status));outcome={status:sent?'sent':m.status==='failed'?'uncertain':'submitted',external_id:String(m.id),external_status:String(m.status||'api_created'),correlation};}\nreturn [{json:{task,outcome}}];"
+      },
+      "position": [
+        2000,
+        320
+      ]
+    },
+    {
+      "id": "0116bf87-e6fb-432a-a983-2830696d1624",
+      "name": "Registrar confirmação observada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"task_result\",payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token,outcome:$json.outcome} }) }}"
+      },
+      "position": [
+        2220,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    }
+  ],
+  "connections": {
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - conferir conversa destino",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar tarefa": {
+      "main": [
+        [
+          {
+            "node": "Tarefa disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - conferir conversa destino": {
+      "main": [
+        [
+          {
+            "node": "Validar grupo e caixa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar grupo e caixa": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar reservas e mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tarefa disponível": {
+      "main": [
+        [
+          {
+            "node": "Destino da tarefa confere",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Destino da tarefa confere": {
+      "main": [
+        [
+          {
+            "node": "Drive - baixar PDF para grupo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha confirmada antes do POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - baixar PDF para grupo": {
+      "main": [
+        [
+          {
+            "node": "Preparar PDF e correlação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha confirmada antes do POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar PDF e correlação": {
+      "main": [
+        [
+          {
+            "node": "PDF íntegro para enviar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha confirmada antes do POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF íntegro para enviar": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - enviar PDF único",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha confirmada antes do POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - enviar PDF único": {
+      "main": [
+        [
+          {
+            "node": "Classificar submissão sem reenvio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classificar submissão sem reenvio": {
+      "main": [
+        [
+          {
+            "node": "Persistir tentativa de grupo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliar reservas e mensagens": {
+      "main": [
+        [
+          {
+            "node": "Mensagens aguardando confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagens aguardando confirmação": {
+      "main": [
+        [
+          {
+            "node": "Uma confirmação por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uma confirmação por vez": {
+      "main": [
+        [
+          {
+            "node": "Reservar tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mensagem anterior disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem anterior disponível": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - consultar mensagens existentes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma confirmação por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - consultar mensagens existentes": {
+      "main": [
+        [
+          {
+            "node": "Conferir entrega sem reenviar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir entrega sem reenviar": {
+      "main": [
+        [
+          {
+            "node": "Registrar confirmação observada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar confirmação observada": {
+      "main": [
+        [
+          {
+            "node": "Uma confirmação por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

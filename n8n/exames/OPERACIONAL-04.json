@@ -1,0 +1,325 @@
+{
+  "name": "OPERACIONAL 04 — Anexar paciente confirmado",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "OPERACIONAL — salvo desativado. Reutiliza as conexões existentes. Definir o corte e liberar após a migração definitiva e substituição do importador legado. Sem journal ou autorização temporária. Não enviar novamente uma mensagem de grupo com retorno incerto.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "b7cb2327-bd51-56ea-8261-f2c861d8f69d",
+      "name": "A cada 5 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a16618ce-6e97-5d13-95fc-23c6340ff479",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Referências de credenciais são selecionadas nos HTTPs. Corte e enabled são a única liberação deste fluxo.\nconst cfg={\n  \"enabled\": false,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"mailbox\": \"exames@example.invalid\",\n  \"driveFolderId\": \"SELECT_PRIVATE_DRIVE_FOLDER\",\n  \"intakeCutoff\": \"\",\n  \"notificationCutoff\": \"\",\n  \"manualMessageId\": \"\",\n  \"dedicatedMailbox\": false,\n  \"allowedSenders\": [],\n  \"examSubjectHints\": [\n    \"exame\",\n    \"laudo\",\n    \"resultados do atendimento\",\n    \"resultado de exame\",\n    \"hemograma\",\n    \"ultrassom\"\n  ],\n  \"maxBytes\": 20971520,\n  \"maxMimeDepth\": 8,\n  \"maxPages\": 100,\n  \"includeSpamTrash\": false,\n  \"worker\": \"n8n-exames-operacional\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"pamLaudosBaseUrl\": \"https://pamlaudos.example.invalid\",\n  \"allowHttpChatwoot\": false,\n  \"providerConfirmationStatuses\": [\n    \"delivered\",\n    \"read\"\n  ],\n  \"extractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"extractorModel\": \"gpt-4.1\",\n  \"maxTextChars\": 80000,\n  \"maxProcessingPages\": 100\n};\nif(!cfg.enabled)throw new Error('EXAMES_OPERACIONAL_PAUSADO');\nif(!cfg.serviceUrl.startsWith('https://')||!cfg.serviceUrl.endsWith('/functions/v1/exam-document-service')||!cfg.pamLaudosBaseUrl.startsWith('https://'))throw new Error('Configuração de serviço/painel inválida');\nif(!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(cfg.intakeCutoff)||!Number.isFinite(Date.parse(cfg.intakeCutoff)))throw new Error('Defina o marco de corte do coletor legado');\nif(!cfg.driveFolderId||typeof cfg.includeSpamTrash!=='boolean')throw new Error('Destino Drive inválido');\n\nif(cfg.manualMessageId&&$execution.mode!=='test')throw new Error('Seleção de mensagem só pode ser usada manualmente');\nif(cfg.manualMessageId&&!/^[a-f0-9]{8,64}$/i.test(cfg.manualMessageId))throw new Error('ID de mensagem manual inválido');\ncfg.worker+=':'+$execution.id;\ncfg.maxPages=cfg.maxPages;\nreturn [{json:cfg}];"
+      }
+    },
+    {
+      "id": "9ad151fe-beb6-54ad-a070-084e39ef40db",
+      "name": "Reservar tarefa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reserve_tasks\",payload:{destination:\"nexus\",worker:$('Configuração').first().json.worker,limit:1} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "a1f50d00-0e6b-511e-abfe-eeaf7596e75a",
+      "name": "Tarefa disponível",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "if(!$json.tasks?.length)return [];return $json.tasks.map(t=>({json:t}));"
+      }
+    },
+    {
+      "id": "25d3f400-244f-55e0-add8-9d2da3827f8c",
+      "name": "Anexar e verificar no backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"attach_nexus\",payload:{delivery_id:$json.id,lease_token:$json.lease_token} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "d18af1e3-da75-443d-a700-089e938078d0",
+      "name": "Executar manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        -480,
+        180
+      ]
+    },
+    {
+      "id": "138d0716-a87c-4ce6-a4fd-87a3e196302b",
+      "name": "Registrar falha de anexação",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"task_result\",payload:{delivery_id:$(\"Tarefa disponível\").item.json.id,lease_token:$(\"Tarefa disponível\").item.json.lease_token,outcome:{status:\"failed\",error:\"Anexação não confirmada; preservar pendência\"} } }) }}"
+      },
+      "position": [
+        720,
+        220
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "875d6f04-3b89-442d-a5c2-e15018eec4ce",
+      "name": "Reconciliar reservas vencidas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reconcile\",payload:{} }) }}"
+      },
+      "position": [
+        -160,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    }
+  ],
+  "connections": {
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar reservas vencidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar tarefa": {
+      "main": [
+        [
+          {
+            "node": "Tarefa disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tarefa disponível": {
+      "main": [
+        [
+          {
+            "node": "Anexar e verificar no backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anexar e verificar no backend": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Registrar falha de anexação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliar reservas vencidas": {
+      "main": [
+        [
+          {
+            "node": "Reservar tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,1804 @@
+{
+  "name": "OPERACIONAL 01 — Gmail para Drive e Novos exames",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "OPERACIONAL — salvo desativado. Reutiliza as conexões existentes. Definir o corte e liberar após a migração definitiva e substituição do importador legado. Sem journal ou autorização temporária. Não enviar novamente uma mensagem de grupo com retorno incerto.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "69d744f7-2dca-520e-ba69-7a8885609a98",
+      "name": "A cada 5 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a16618ce-6e97-5d13-95fc-23c6340ff479",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Referências de credenciais são selecionadas nos HTTPs. Corte e enabled são a única liberação deste fluxo.\nconst cfg={\n  \"enabled\": false,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"mailbox\": \"exames@example.invalid\",\n  \"driveFolderId\": \"SELECT_PRIVATE_DRIVE_FOLDER\",\n  \"intakeCutoff\": \"\",\n  \"notificationCutoff\": \"\",\n  \"manualMessageId\": \"\",\n  \"dedicatedMailbox\": false,\n  \"allowedSenders\": [],\n  \"examSubjectHints\": [\n    \"exame\",\n    \"laudo\",\n    \"resultados do atendimento\",\n    \"resultado de exame\",\n    \"hemograma\",\n    \"ultrassom\"\n  ],\n  \"maxBytes\": 20971520,\n  \"maxMimeDepth\": 8,\n  \"maxPages\": 100,\n  \"includeSpamTrash\": false,\n  \"worker\": \"n8n-exames-operacional\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"pamLaudosBaseUrl\": \"https://pamlaudos.example.invalid\",\n  \"allowHttpChatwoot\": false,\n  \"providerConfirmationStatuses\": [\n    \"delivered\",\n    \"read\"\n  ],\n  \"extractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"extractorModel\": \"gpt-4.1\",\n  \"maxTextChars\": 80000,\n  \"maxProcessingPages\": 100\n};\nif(!cfg.enabled)throw new Error('EXAMES_OPERACIONAL_PAUSADO');\nif(!cfg.serviceUrl.startsWith('https://')||!cfg.serviceUrl.endsWith('/functions/v1/exam-document-service')||!cfg.pamLaudosBaseUrl.startsWith('https://'))throw new Error('Configuração de serviço/painel inválida');\nif(!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(cfg.intakeCutoff)||!Number.isFinite(Date.parse(cfg.intakeCutoff)))throw new Error('Defina o marco de corte do coletor legado');\nif(!cfg.driveFolderId||typeof cfg.includeSpamTrash!=='boolean')throw new Error('Destino Drive inválido');\n\nif(cfg.manualMessageId&&$execution.mode!=='test')throw new Error('Seleção de mensagem só pode ser usada manualmente');\nif(cfg.manualMessageId&&!/^[a-f0-9]{8,64}$/i.test(cfg.manualMessageId))throw new Error('ID de mensagem manual inválido');\ncfg.worker+=':'+$execution.id;\ncfg.maxPages=cfg.maxPages;\nreturn [{json:cfg}];"
+      }
+    },
+    {
+      "id": "8659487d-8202-554d-880d-7a9a29fe4f18",
+      "name": "Janela de recebimento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction validateWindow(config) {\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  for (const value of [config.windowStart, config.sweepEnd, config.intakeCutoff])\n    if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) fail('gmail_window_invalid');\n  const from = Date.parse(config.windowStart), through = Date.parse(config.sweepEnd), cutoff = Date.parse(config.intakeCutoff);\n  if (!Number.isFinite(from) || !Number.isFinite(through) || !Number.isFinite(cutoff) || from < cutoff || through <= from) fail('gmail_window_invalid');\n  return { from, through, cutoff };\n}\nfunction listQuery(config) {\n  const { from, through } = validateWindow(config);\n  // Widen the coarse seconds search, then enforce exact epoch-ms bounds on internalDate.\n  return 'has:attachment after:' + (Math.floor(from / 1000) - 60) + ' before:' + (Math.ceil(through / 1000) + 60);\n}\nconst cfg=$json;const window={...cfg,windowStart:cfg.intakeCutoff,sweepEnd:new Date().toISOString()};return [{json:{...window,listQuery:listQuery(window)}}];"
+      }
+    },
+    {
+      "id": "aad2acef-a6c8-5363-a072-c9d72c2ea3f0",
+      "name": "Gmail - IDs paginados",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&includeSpamTrash='+$('Configuração').first().json.includeSpamTrash+'&fields='+encodeURIComponent('messages(id,threadId),nextPageToken,resultSizeEstimate')+'&q='+encodeURIComponent($('Janela de recebimento').first().json.listQuery) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&includeSpamTrash='+$('Configuração').first().json.includeSpamTrash+'&fields='+encodeURIComponent('messages(id,threadId),nextPageToken,resultSizeEstimate')+'&q='+encodeURIComponent($('Janela de recebimento').first().json.listQuery)+'&pageToken='+encodeURIComponent($response.body.nextPageToken||'') }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.nextPageToken }}",
+              "limitPagesFetched": true,
+              "maxRequests": 100,
+              "requestInterval": 250
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_GMAIL_OAUTH",
+          "name": "Select Gmail OAuth"
+        }
+      }
+    },
+    {
+      "id": "f78773d4-1667-51ce-8942-efecae14af28",
+      "name": "IDs de mensagens",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction listIds(pages, maxPages = 100) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > maxPages) fail('gmail_pagination_limit');\n  const ids = [], seenIds = new Set(), seenTokens = new Set();\n  for (let index = 0; index < pages.length; index++) {\n    const page = unwrap(pages[index]);\n    if (page.messages !== undefined && !Array.isArray(page.messages)) fail('gmail_messages_invalid');\n    for (const entry of page.messages || []) {\n      if (!object(entry)) fail('gmail_message_reference_invalid');\n      const id = stableId(entry.id, 'gmail_message_id_invalid');\n      if (!seenIds.has(id)) { seenIds.add(id); ids.push({id}); }\n    }\n    if (page.nextPageToken !== undefined && page.nextPageToken !== '') {\n      const token = stableId(page.nextPageToken, 'gmail_page_token_invalid');\n      if (seenTokens.has(token)) fail('gmail_pagination_cycle');\n      seenTokens.add(token);\n      if (index === pages.length - 1) fail('gmail_pagination_incomplete');\n    } else if (index !== pages.length - 1) fail('gmail_pagination_unexpected_extra_page');\n  }\n  return ids;\n}\nconst pages=$input.all().flatMap(i=>Array.isArray(i.json)?i.json:[i.json]);const ids=listIds(pages,100);return ids.length?ids.map(json=>({json})):[{json:{emptySweep:true}}];"
+      }
+    },
+    {
+      "id": "da4ee167-3bbc-5784-b9e2-47e3e48da116",
+      "name": "Uma mensagem por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "580347c0-8ad2-561e-8ab9-ebb102a70679",
+      "name": "Mensagem disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.emptySweep }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2453017a-2524-5e40-843d-15d4b895da7e",
+      "name": "Gmail - MIME sem bytes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages/'+encodeURIComponent($json.id)+'?format=full&fields='+encodeURIComponent(\"id,threadId,internalDate,payload(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size),parts(partId))))))))))\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_GMAIL_OAUTH",
+          "name": "Select Gmail OAuth"
+        }
+      }
+    },
+    {
+      "id": "09b5f831-5ad8-54c5-b56e-3a935395289c",
+      "name": "Enumerar anexos e ausência",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction validateWindow(config) {\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  for (const value of [config.windowStart, config.sweepEnd, config.intakeCutoff])\n    if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) fail('gmail_window_invalid');\n  const from = Date.parse(config.windowStart), through = Date.parse(config.sweepEnd), cutoff = Date.parse(config.intakeCutoff);\n  if (!Number.isFinite(from) || !Number.isFinite(through) || !Number.isFinite(cutoff) || from < cutoff || through <= from) fail('gmail_window_invalid');\n  return { from, through, cutoff };\n}\nfunction header(headers, name) {\n  if (headers !== undefined && !Array.isArray(headers)) fail('gmail_headers_invalid');\n  const matches = (headers || []).filter(value => object(value) && String(value.name).toLowerCase() === name.toLowerCase());\n  if (matches.length > 1) fail('gmail_ambiguous_header');\n  if (!matches.length) return '';\n  if (typeof matches[0].value !== 'string' || matches[0].value.length > 8192 || /[\\r\\n\\x00]/.test(matches[0].value)) fail('gmail_header_invalid');\n  return matches[0].value;\n}\nfunction senderAddress(from) {\n  // A forwarded envelope remains its own sender; do not trust quoted body headers.\n  const value = from.trim(), angle = value.match(/<([^<>\\s]+@[^<>\\s]+)>\\s*$/);\n  const email = angle ? angle[1] : value;\n  return /^[^@\\s<>;,]+@[^@\\s<>;,]+$/.test(email) ? email.toLowerCase() : '';\n}\nfunction inspectMessage(response, expectedId, config) {\n  const message = unwrap(response), bounds = validateWindow(config);\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  if (message.id !== stableId(expectedId, 'gmail_expected_id_invalid')) fail('gmail_message_identity_mismatch');\n  if (typeof message.internalDate !== 'string' || !/^\\d{1,16}$/.test(message.internalDate)) fail('gmail_internal_date_invalid');\n  const received = Number(message.internalDate);\n  if (!Number.isSafeInteger(received) || received <= 0) fail('gmail_internal_date_invalid');\n  if (received < bounds.from || received >= bounds.through || received < bounds.cutoff) return {excluded: true, reason: 'outside_received_window', origins: []};\n  if (!object(message.payload)) fail('gmail_mime_payload_missing');\n  const sender = senderAddress(header(message.payload.headers, 'From'));\n  const subject = header(message.payload.headers, 'Subject');\n  const internetMessageId = header(message.payload.headers, 'Message-ID');\n  const trusted = Array.isArray(config.allowedSenders) && config.allowedSenders.includes(sender);\n  const hint = Array.isArray(config.examSubjectHints) && config.examSubjectHints.some(value => subject.toLowerCase().includes(value.toLowerCase()));\n  const needsReview = !trusted && !hint;\n  const parts = [], partIds = new Set();\n  function visit(part, depth) {\n    if (!object(part) || depth > (config.maxMimeDepth ?? MAX_MIME_DEPTH)) fail('gmail_mime_projection_or_depth_incomplete');\n    const partId = stableId(part.partId, 'gmail_part_id_invalid', true);\n    if (partIds.has(partId)) fail('gmail_duplicate_part_id');\n    partIds.add(partId);\n    if (part.body !== undefined && !object(part.body)) fail('gmail_part_body_invalid');\n    if (part.body && Object.hasOwn(part.body, 'data')) fail('gmail_bytes_received_before_reservation');\n    if (typeof part.mimeType !== 'string') fail('gmail_mime_projection_or_depth_incomplete');\n    if (part.parts !== undefined && !Array.isArray(part.parts)) fail('gmail_mime_parts_invalid');\n    const pdf = part.mimeType.toLowerCase() === 'application/pdf' || /\\.pdf$/i.test(part.filename || '');\n    if (pdf) {\n      const attachmentId = part.body?.attachmentId;\n      if (attachmentId !== undefined) stableId(attachmentId, 'gmail_attachment_id_invalid');\n      const size = part.body?.size;\n      if (!Number.isSafeInteger(size) || size < 0) fail('gmail_attachment_size_invalid');\n      parts.push({partId, attachmentId: attachmentId || null, size, name: part.filename || 'original.pdf', mimeType: part.mimeType});\n    }\n    for (const child of part.parts || []) visit(child, depth + 1);\n  }\n  visit(message.payload, 0);\n  const receivedAt = new Date(received).toISOString();\n  const normalizedMessage = {id: message.id, internalDate: message.internalDate, receivedDateTime: receivedAt,\n    sender, subject, internetMessageId, unknownSender: !trusted};\n  const create = part => {\n    const inline = !part.attachmentId;\n    const key = 'gmail-part:' + JSON.stringify([part.partId, part.attachmentId]);\n    const reason = inline ? 'bytes_inline_nao_suportados' : part.size > (config.maxBytes ?? MAX_BYTES) ? 'pdf_exceeds_limit' : needsReview ? 'pdf_sem_indicio_exame' : null;\n    const source = {channel: 'email', account_id: 'gmail:' + config.mailbox, message_id: message.id,\n      attachment_id: key, original_name: part.name, mime_type: part.mimeType, received_at: receivedAt,\n      metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: hint, gmail_part_id: part.partId,\n        gmail_attachment_id: part.attachmentId, internet_message_id: internetMessageId, unknown_sender: !trusted && config.dedicatedMailbox !== true, sender_address: sender, sender_allowlisted: trusted,\n        missing_attachment: inline, unsupported_attachment: inline || part.size > (config.maxBytes ?? MAX_BYTES),\n        pending_reason: reason, review_reason: needsReview ? 'PDF sem indício clínico: conferência humana antes dos bytes' : null, subject}};\n    return {message: normalizedMessage, attachment: {id: key, partId: part.partId, gmailAttachmentId: part.attachmentId,\n      name: part.name, contentType: part.mimeType, size: part.size}, source,\n      missing: inline || part.size > (config.maxBytes ?? MAX_BYTES), needsReview, pendingReason: reason};\n  };\n  if (parts.length) return {excluded: false, origins: parts.map(create)};\n  if (needsReview) return {excluded: true, reason: 'no_pdf_or_exam_hint', origins: []};\n  const source = {channel: 'email', account_id: 'gmail:' + config.mailbox, message_id: message.id, attachment_id: 'missing-pdf',\n    original_name: 'PDF ausente', mime_type: null, received_at: receivedAt,\n    metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: hint, internet_message_id: internetMessageId,\n      unknown_sender: !trusted && config.dedicatedMailbox !== true, sender_address: sender, sender_allowlisted: trusted, missing_attachment: true, pending_reason: 'notice_without_pdf', subject}};\n  return {excluded: false, origins: [{message: normalizedMessage, attachment: {id: 'missing-pdf', name: 'PDF ausente', contentType: null},\n    source, missing: true, pendingReason: 'notice_without_pdf'}]};\n}\nconst cfg=$('Janela de recebimento').first().json;const result=inspectMessage($json,$('Mensagem disponível').item.json.id,cfg);return result.excluded?[{json:{messageExcluded:true}}]:result.origins.map(json=>({json:{...json,resetAttachments:true}}));"
+      }
+    },
+    {
+      "id": "b3f88579-e8b4-5c95-afb3-7da70ce74df1",
+      "name": "Um anexo por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {
+          "reset": "={{ $json.resetAttachments === true }}"
+        }
+      }
+    },
+    {
+      "id": "16dbc888-7df9-5ecb-a7b9-95c2c2d0fabb",
+      "name": "Reservar origem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reserve_source\",payload:{source:$json.source} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "1505e63a-2e45-5648-b9fa-6f09711e0813",
+      "name": "Decidir recebimento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction decideReservation(origin, response) {\n  const reservation = response;\n  if (!object(reservation) || typeof reservation.document_id !== 'string' || !/^[a-f\\d]{8}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{12}$/i.test(reservation.document_id)) fail('gmail_source_reservation_unproven');\n  if (reservation.document && reservation.document.id !== reservation.document_id) fail('gmail_source_reservation_identity_mismatch');\n  return {...origin, reservation, documentId: reservation.document_id,\n    skip: origin.missing || reservation.document?.file_status === 'saved' || reservation.document?.identification_status === 'not_exam'};\n}\nreturn [{json:decideReservation($('Um anexo por vez').item.json,$json)}];"
+      }
+    },
+    {
+      "id": "260447ab-f161-59f3-ad85-8a3fb730eb6c",
+      "name": "Precisa baixar",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "46c4ba2d-c787-5d14-8c22-91a00aa8154a",
+      "name": "Gmail - baixar PDF reservado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages/'+encodeURIComponent($json.message.id)+'/attachments/'+encodeURIComponent($json.attachment.gmailAttachmentId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_GMAIL_OAUTH",
+          "name": "Select Gmail OAuth"
+        }
+      }
+    },
+    {
+      "id": "f358b76e-fe93-5c12-9a09-0b7f4c5253ad",
+      "name": "Validar bytes e SHA-256",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto=require('crypto');\nconst EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction decodeOriginal(response, source, config) {\n  const body = unwrap(response), maxBytes = config.maxBytes ?? MAX_BYTES;\n  if (!source?.documentId || source.skip || !source.attachment?.gmailAttachmentId) fail('gmail_original_not_reserved');\n  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) fail('gmail_max_bytes_invalid');\n  if (typeof body.data !== 'string' || !body.data.length || body.data.length > Math.ceil(maxBytes / 3) * 4 + 2 || !/^[A-Za-z0-9_-]+={0,2}$/.test(body.data)) fail('gmail_base64url_invalid_or_oversize');\n  const raw = body.data.replace(/=+$/, '');\n  if (raw.length % 4 === 1 || (body.data.includes('=') && body.data.length % 4 !== 0)) fail('gmail_base64url_invalid_or_oversize');\n  const bytes = Buffer.from(raw, 'base64url');\n  if (!bytes.length || bytes.length > maxBytes || bytes.toString('base64url') !== raw) fail('gmail_base64url_invalid_or_oversize');\n  if (!Number.isSafeInteger(body.size) || body.size !== bytes.length || source.attachment.size !== bytes.length) fail('gmail_attachment_size_mismatch');\n  if (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) fail('gmail_pdf_signature_missing');\n  const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\n  const folderId = config.driveFolderId;\n  if (typeof folderId !== 'string' || !folderId.length) fail('gmail_destination_folder_missing');\n  return {bytes, json: {...source, sha256, sizeBytes: bytes.length, folderId}};\n}\nconst decoded=decodeOriginal($json,$('Decidir recebimento').item.json,$('Configuração').first().json);return [{json:decoded.json,binary:{data:await this.helpers.prepareBinaryData(decoded.bytes,decoded.json.source.original_name,'application/pdf')}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "e21399f7-c1fe-5ba6-b79b-e17b1890d4a0",
+      "name": "Drive - gerar ID de arquivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c20bb1f7-e1f7-5802-bbe0-b8b2f6c92562",
+      "name": "Reservar ID e upload Drive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"stage_file\",payload:{document_id:$(\"Validar bytes e SHA-256\").item.json.documentId,file:{sha256:$(\"Validar bytes e SHA-256\").item.json.sha256,size_bytes:$(\"Validar bytes e SHA-256\").item.json.sizeBytes,drive_folder_id:$(\"Validar bytes e SHA-256\").item.json.folderId,drive_file_id:$json.ids[0]},worker:$(\"Configuração\").first().json.worker} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "2c4e1295-96d5-55b9-9657-63415f149b2f",
+      "name": "Upload reservado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3600,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.claimed === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3976bc81-cbc5-5803-a581-e0fa0a56375b",
+      "name": "Drive - consultar ID reservado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3840,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?fields=id,size,name,mimeType,parents,trashed,ownedByMe,shared,appProperties,sha256Checksum' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "bb0998df-f55d-54b4-a5b2-684c58bc2d04",
+      "name": "Validar estado do objeto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction validateStage(stage, decoded) {\n  if(!object(stage)||!object(stage.document)||stage.document_id!==stage.document.id||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(stage.document_id)||stage.document.sha256!==decoded.sha256||Number(stage.document.size_bytes)!==decoded.sizeBytes||stage.drive_file_id!==stage.document.drive_file_id||!stage.drive_file_id)fail('drive_stage_receipt_unproven');\n  if(stage.claimed===true&&(!stage.lease_token||!stage.delivery_id))fail('drive_stage_lease_missing');\n  if(stage.document.file_status==='saved'&&stage.upload_required!==false)fail('drive_saved_receipt_unproven');\n  return stage;\n}\nfunction inspectDriveObject(response, stage, decoded) {\n  validateStage(stage,decoded);\n  if(!object(response)||![200,404].includes(response.statusCode))fail('drive_lookup_unproven');\n  const f=response.body;\n  if(response.statusCode===200){\n    if(!object(f)||f.id!==stage.drive_file_id||f.mimeType!=='application/pdf'||f.trashed!==false||f.ownedByMe!==true||f.shared!==false||!Array.isArray(f.parents)||f.parents.length!==1||f.parents[0]!==stage.document.drive_folder_id)fail('drive_object_identity_or_parent_unproven');\n    if(f.appProperties?.exam_document_id!==stage.document_id||f.appProperties?.sha256!==decoded.sha256)fail('drive_object_binding_unproven');\n    if(Number(f.size)>0&&Number(f.size)!==decoded.sizeBytes)fail('drive_existing_bytes_conflict');\n  }\n  return {...stage,exists:response.statusCode===200,hasBytes:response.statusCode===200&&Number(f.size)>0,driveName:f?.name||('Recebido - '+stage.document.received_at.slice(0,10)+' - '+stage.document_id.slice(0,8)+' - '+stage.document.original_name)};\n}\nreturn [{json:inspectDriveObject($json,$('Reservar ID e upload Drive').item.json,$('Validar bytes e SHA-256').item.json)}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "0ea803e8-15f7-5f52-9cff-03caff489b1e",
+      "name": "Metadados ausentes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "92268cac-a111-5b2d-8aee-0ff56f4ea05c",
+      "name": "Drive - criar metadados com ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4560,
+        -180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files?fields=id,name",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({id:$json.drive_file_id,name:$json.driveName,mimeType:'application/pdf',parents:[$json.document.drive_folder_id||$('Validar bytes e SHA-256').item.json.folderId],appProperties:{exam_document_id:$json.document_id,sha256:$('Validar bytes e SHA-256').item.json.sha256} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "274ca9f1-eb90-5ede-88ef-cacbd56c7ac9",
+      "name": "Restaurar contexto Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Validar estado do objeto').item.json,binary:$('Validar bytes e SHA-256').item.binary}];\n"
+      }
+    },
+    {
+      "id": "cbec4348-0021-5f76-96d2-884b09491d85",
+      "name": "Objeto já tem bytes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5040,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.hasBytes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b09b9dd3-6acb-53b7-a04c-b8d24bc94e6f",
+      "name": "Drive - gravar bytes no ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5280,
+        180
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?uploadType=media&fields=id,size,sha256Checksum' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c5bca78a-d4be-5832-ae0e-350c3afc9ad6",
+      "name": "Drive - conferir bytes salvos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5520,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($('Reservar ID e upload Drive').item.json.drive_file_id)+'?alt=media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "63e1c157-cf1c-56fb-a613-5891a8a9d5e0",
+      "name": "Conferir integridade do original",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5760,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst src=$('Validar bytes e SHA-256').item.json;\nif(sha256!==src.sha256||bytes.length!==src.sizeBytes)throw new Error('Conflito de integridade no Drive. Não sobrescrever arquivo existente.');\nreturn [{json:{stage:$('Reservar ID e upload Drive').item.json,source:src}}];\n"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "88ab882a-b1a5-5ae9-8ed5-381ee5455f2b",
+      "name": "Confirmar armazenamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6000,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"confirm_file\",payload:{document_id:$json.stage.document_id,lease_token:$json.stage.lease_token,file:{sha256:$json.source.sha256,size_bytes:$json.source.sizeBytes,drive_file_id:$json.stage.drive_file_id,drive_folder_id:$json.stage.document.drive_folder_id||$json.source.folderId,drive_name:$('Validar estado do objeto').item.json.driveName||'Recebido - '+$json.stage.document_id.slice(0,8)} } }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "9053245a-f5a6-56d8-903b-4f11c7a1658a",
+      "name": "Confirmar varredura concluída",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{scanFinished:true,recovery:'fixed_cutoff_idempotent_rescan',checkpointAdvanced:false}}];"
+      }
+    },
+    {
+      "id": "af905911-a21b-589a-adb5-a3904f289d90",
+      "name": "Gmail - conferir conta OAuth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -120,
+        -180
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/profile?fields=emailAddress",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_GMAIL_OAUTH",
+          "name": "Select Gmail OAuth"
+        }
+      }
+    },
+    {
+      "id": "5cb6a63e-1c92-5ae4-aadb-e9b45e1aee84",
+      "name": "Validar identidade da caixa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        -180
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction verifyProfile(response, mailbox = EXPECTED_MAILBOX) {\n  const profile = unwrap(response);\n  if (mailbox !== EXPECTED_MAILBOX || profile.emailAddress !== mailbox) fail('gmail_account_mismatch');\n  return { mailbox, accountId: 'gmail:' + mailbox, provider: 'gmail' };\n}\nverifyProfile($json,$('Configuração').first().json.mailbox);return [{json:$('Configuração').first().json}];"
+      }
+    },
+    {
+      "id": "defb0858-0a63-5b2c-b7f9-67a2bd83f365",
+      "name": "Adiar sweep quando upload pendente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        320
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{pending:$json.document?.file_status!=='saved',document_id:$json.document_id}}];"
+      }
+    },
+    {
+      "id": "fb51caa1-2150-5b1c-a465-dac526e3ac0f",
+      "name": "Original baixado e validado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3000,
+        -180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$json.sha256 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1ff1d447-d9f1-5df4-8d5e-b4f5e40037d0",
+      "name": "Registrar falha de origem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3240,
+        -360
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"source_error\",payload:{document_id:$(\"Decidir recebimento\").item.json.documentId,error:\"Não foi possível preservar o original Gmail/Drive\",review_reason:\"Conferir o anexo original e a pendência de armazenamento\"} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "f27c15a2-364e-563b-904c-faddda698e2b",
+      "name": "Manter janela para recuperação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3480,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{pending:true,recovery:'next_scan_same_source'}}];"
+      }
+    },
+    {
+      "id": "d18af1e3-da75-443d-a700-089e938078d0",
+      "name": "Executar manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        -480,
+        180
+      ]
+    },
+    {
+      "id": "49684d6e-9d07-411f-a1ce-89f31ee91c38",
+      "name": "Drive - conferir pasta privada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.driveFolderId)+'?fields=id,mimeType,trashed,ownedByMe,shared,capabilities(canAddChildren)' }}",
+        "authentication": "genericCredentialType",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "genericAuthType": "oAuth2Api"
+      },
+      "position": [
+        -40,
+        -360
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "d3054753-723f-494b-a732-42b05f63df31",
+      "name": "Validar pasta privada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction validateFolder(response, folderId) {\n  const f=unwrap(response);\n  if(f.id!==folderId||f.mimeType!=='application/vnd.google-apps.folder'||f.trashed!==false||f.ownedByMe!==true||f.shared!==false||f.capabilities?.canAddChildren!==true)fail('drive_private_owned_folder_unproven');\n  return f;\n}\nconst cfg=$('Configuração').first().json;validateFolder($json,cfg.driveFolderId);return [{json:cfg}];"
+      },
+      "position": [
+        140,
+        -360
+      ]
+    },
+    {
+      "id": "ac0e2b23-0f88-41ba-af92-231fbf0af7ae",
+      "name": "Mensagem manual selecionada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$('Configuração').first().json.manualMessageId }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "position": [
+        160,
+        180
+      ]
+    },
+    {
+      "id": "b6ec2426-c823-4aa5-af8b-da85a4f983ed",
+      "name": "Preparar mensagem selecionada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return [{json:{id:$('Configuração').first().json.manualMessageId}}];"
+      },
+      "position": [
+        380,
+        180
+      ]
+    },
+    {
+      "id": "ac939d6f-42fa-4885-a7fe-cac74e871136",
+      "name": "PDF ou aviso disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.messageExcluded }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "position": [
+        1560,
+        -160
+      ]
+    },
+    {
+      "id": "b8cf257d-e944-4d9e-ab6d-102468de6826",
+      "name": "Validar confirmação salva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction verifySaved(receipt, stage, decoded) {\n  if(!object(receipt)||receipt.document_id!==stage.document_id||receipt.document?.id!==stage.document_id||receipt.document.file_status!=='saved'||receipt.document.sha256!==decoded.sha256||Number(receipt.document.size_bytes)!==decoded.sizeBytes||receipt.document.drive_file_id!==stage.drive_file_id||receipt.document.drive_folder_id!==stage.document.drive_folder_id)fail('drive_confirmation_unproven');\n  return {document_id:receipt.document_id,status:'saved'};\n}\nreturn [{json:verifySaved($json,$('Reservar ID e upload Drive').item.json,$('Validar bytes e SHA-256').item.json)}];"
+      },
+      "position": [
+        6240,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "88010c35-2cd5-4808-aee8-242a4e507906",
+      "name": "Próximo anexo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return $input.all().map(i=>{const json={...i.json};delete json.resetAttachments;return {...i,json};});"
+      },
+      "position": [
+        6480,
+        0
+      ]
+    },
+    {
+      "id": "875d6f04-3b89-442d-a5c2-e15018eec4ce",
+      "name": "Reconciliar reservas vencidas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reconcile\",payload:{} }) }}"
+      },
+      "position": [
+        -160,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    }
+  ],
+  "connections": {
+    "A cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar reservas vencidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar identidade da caixa": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir pasta privada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uma mensagem por vez": {
+      "main": [
+        [
+          {
+            "node": "Confirmar varredura concluída",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mensagem disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem disponível": {
+      "main": [
+        [
+          {
+            "node": "Gmail - MIME sem bytes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enumerar anexos e ausência": {
+      "main": [
+        [
+          {
+            "node": "PDF ou aviso disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Um anexo por vez": {
+      "main": [
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reservar origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar origem": {
+      "main": [
+        [
+          {
+            "node": "Decidir recebimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir recebimento": {
+      "main": [
+        [
+          {
+            "node": "Precisa baixar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Precisa baixar": {
+      "main": [
+        [
+          {
+            "node": "Gmail - baixar PDF reservado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Próximo anexo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar bytes e SHA-256": {
+      "main": [
+        [
+          {
+            "node": "Original baixado e validado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gerar ID de arquivo": {
+      "main": [
+        [
+          {
+            "node": "Reservar ID e upload Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar ID e upload Drive": {
+      "main": [
+        [
+          {
+            "node": "Upload reservado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload reservado": {
+      "main": [
+        [
+          {
+            "node": "Drive - consultar ID reservado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adiar sweep quando upload pendente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adiar sweep quando upload pendente": {
+      "main": [
+        [
+          {
+            "node": "Próximo anexo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - consultar ID reservado": {
+      "main": [
+        [
+          {
+            "node": "Validar estado do objeto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar estado do objeto": {
+      "main": [
+        [
+          {
+            "node": "Metadados ausentes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Metadados ausentes": {
+      "main": [
+        [
+          {
+            "node": "Drive - criar metadados com ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Restaurar contexto Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - criar metadados com ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Restaurar contexto Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar contexto Drive": {
+      "main": [
+        [
+          {
+            "node": "Objeto já tem bytes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Objeto já tem bytes": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir bytes salvos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drive - gravar bytes no ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gravar bytes no ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir bytes salvos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - conferir bytes salvos": {
+      "main": [
+        [
+          {
+            "node": "Conferir integridade do original",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir integridade do original": {
+      "main": [
+        [
+          {
+            "node": "Confirmar armazenamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar armazenamento": {
+      "main": [
+        [
+          {
+            "node": "Validar confirmação salva",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Original baixado e validado": {
+      "main": [
+        [
+          {
+            "node": "Drive - gerar ID de arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar falha de origem": {
+      "main": [
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manter janela para recuperação": {
+      "main": [
+        [
+          {
+            "node": "Próximo anexo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - conferir conta OAuth": {
+      "main": [
+        [
+          {
+            "node": "Validar identidade da caixa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Janela de recebimento": {
+      "main": [
+        [
+          {
+            "node": "Mensagem manual selecionada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - IDs paginados": {
+      "main": [
+        [
+          {
+            "node": "IDs de mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IDs de mensagens": {
+      "main": [
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - MIME sem bytes": {
+      "main": [
+        [
+          {
+            "node": "Enumerar anexos e ausência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - baixar PDF reservado": {
+      "main": [
+        [
+          {
+            "node": "Validar bytes e SHA-256",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - conferir pasta privada": {
+      "main": [
+        [
+          {
+            "node": "Validar pasta privada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar pasta privada": {
+      "main": [
+        [
+          {
+            "node": "Janela de recebimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem manual selecionada": {
+      "main": [
+        [
+          {
+            "node": "Preparar mensagem selecionada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - IDs paginados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar mensagem selecionada": {
+      "main": [
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF ou aviso disponível": {
+      "main": [
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Uma mensagem por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar confirmação salva": {
+      "main": [
+        [
+          {
+            "node": "Próximo anexo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Próximo anexo": {
+      "main": [
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliar reservas vencidas": {
+      "main": [
+        [
+          {
+            "node": "Gmail - conferir conta OAuth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}
