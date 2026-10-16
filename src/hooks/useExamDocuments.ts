@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useExamAuth } from '@/contexts/exam-auth'
+import { DocumentActionError, normalizeDocumentActionError } from '@/lib/document-action-error'
 import type { DocumentCandidate, DocumentEvent, ExamDocument } from '@/types/exam-document'
 
 export const DOCUMENT_PAGE_SIZE = 25
@@ -105,10 +106,23 @@ export function useDocumentAction() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async ({ name, args }: { name: string; args: Record<string, unknown> }) => {
-      const { data, error } = await supabase.rpc(name, args)
-      if (error) throw error
-      if (data?.success === false || data?.error) throw new Error(data.error || 'Não foi possível salvar a alteração.')
-      return data
+      try {
+        const { data, error } = await supabase.rpc(name, args)
+        if (error) throw error
+        if (data?.success === false || data?.error) throw data.error
+        return data
+      } catch (error) {
+        throw normalizeDocumentActionError(error)
+      }
+    },
+    onError: error => {
+      if (error instanceof DocumentActionError && error.code === '40001') {
+        // Refresh the version/identity while the component preserves local edits.
+        // A conflict must never trigger an automatic second write.
+        client.invalidateQueries({ queryKey: ['exam-documents'] })
+        client.invalidateQueries({ queryKey: ['exam-document'] })
+        client.invalidateQueries({ queryKey: ['exam-document-events'] })
+      }
     },
     onSuccess: () => {
       client.invalidateQueries({ queryKey: ['exam-documents'] })
