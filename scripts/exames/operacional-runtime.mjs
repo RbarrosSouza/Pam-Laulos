@@ -34,7 +34,7 @@ function validateWindow(config) {
 function listQuery(config) {
   const { from, through } = validateWindow(config);
   // Widen the coarse seconds search, then enforce exact epoch-ms bounds on internalDate.
-  return 'has:attachment after:' + (Math.floor(from / 1000) - 60) + ' before:' + (Math.ceil(through / 1000) + 60);
+  return '{has:attachment (from:hopelab@exames.vet.br subject:"Exame finalizado")} after:' + (Math.floor(from / 1000) - 60) + ' before:' + (Math.ceil(through / 1000) + 60);
 }
 function metadataFields(maxDepth = MAX_MIME_DEPTH) {
   if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > 12) fail('gmail_mime_depth_config_invalid');
@@ -140,6 +140,75 @@ function inspectMessage(response, expectedId, config) {
   return {excluded: false, origins: [{message: normalizedMessage, attachment: {id: 'missing-pdf', name: 'PDF ausente', contentType: null},
     source, missing: true, pendingReason: 'notice_without_pdf'}]};
 }
+function inspectHopelabNotice(response, expectedId, config) {
+  const checked = inspectMessage(response, expectedId, config), message = unwrap(response);
+  if (checked.excluded && checked.reason === 'outside_received_window') return null;
+  if (senderAddress(header(message.payload.headers, 'From')) !== 'hopelab@exames.vet.br' || !/^Exame finalizado(?:\s|:|$)/i.test(header(message.payload.headers, 'Subject').trim())) return null;
+  // Existing PDF attachments keep the established attachment path.
+  if (checked.origins.some(origin => origin.attachment.id !== 'missing-pdf')) return null;
+  return {id:message.id,internalDate:message.internalDate,sender:'hopelab@exames.vet.br',subject:header(message.payload.headers,'Subject'),internetMessageId:header(message.payload.headers,'Message-ID')};
+}
+function hopelabBodyFields(maxDepth = MAX_MIME_DEPTH) {
+  return metadataFields(maxDepth).replaceAll('body(attachmentId,size)', 'body(attachmentId,size,data)');
+}
+function canonicalHopelabUrl(value) {
+  if (typeof value !== 'string') fail('hopelab_url_not_allowed');
+  const match = value.match(/^https:\/\/hopelab\.exames\.vet\.br(\/laudos\/download\/\d{1,10}\/\d{1,10}\/[a-f\d]{32}\/[a-f\d]{32})(?:\?utm_source=email)?$/i);
+  if (!match) fail('hopelab_url_not_allowed');
+  return 'https://hopelab.exames.vet.br' + match[1].toLowerCase();
+}
+function parseHopelabNotice(response, notice, config) {
+  const message = unwrap(response);
+  if (!notice || notice.sender !== 'hopelab@exames.vet.br' || message.id !== notice.id || message.internalDate !== notice.internalDate || senderAddress(header(message.payload?.headers,'From')) !== notice.sender || header(message.payload?.headers,'Subject') !== notice.subject) fail('hopelab_message_identity_mismatch');
+  const bounds = validateWindow(config), received = Number(message.internalDate);
+  if (!Number.isSafeInteger(received) || received < bounds.from || received >= bounds.through || received < bounds.cutoff) fail('hopelab_message_outside_window');
+  const texts = []; let totalBytes = 0;
+  function visit(part, depth) {
+    if (!object(part) || depth > (config.maxMimeDepth ?? MAX_MIME_DEPTH) || typeof part.mimeType !== 'string' || part.parts !== undefined && !Array.isArray(part.parts)) fail('hopelab_body_structure_invalid');
+    if (part.mimeType.toLowerCase() === 'application/pdf' || /\.pdf$/i.test(part.filename || '')) fail('hopelab_unexpected_pdf_in_notice');
+    if (['text/plain','text/html'].includes(part.mimeType.toLowerCase()) && part.body?.data !== undefined) {
+      const encoded = part.body.data;
+      if (typeof encoded !== 'string' || !/^[A-Za-z0-9_-]*={0,2}$/.test(encoded) || encoded.length > 1400000) fail('hopelab_body_encoding_or_limit');
+      const raw = encoded.replace(/=+$/,''), bytes = Buffer.from(raw,'base64url');
+      if (bytes.toString('base64url') !== raw || !Number.isSafeInteger(part.body.size) || part.body.size !== bytes.length) fail('hopelab_body_encoding_or_size');
+      totalBytes += bytes.length;
+      if (totalBytes > 1048576) fail('hopelab_body_limit');
+      const decoded = bytes.toString('utf8');
+      if (!Buffer.from(decoded,'utf8').equals(bytes)) fail('hopelab_body_utf8_invalid');
+      // Only visible text may supply the direct URL; tracking href values are ignored.
+      texts.push(part.mimeType.toLowerCase() === 'text/html' ? decoded.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&amp;/gi,'&') : decoded);
+    }
+    for (const child of part.parts || []) visit(child, depth + 1);
+  }
+  visit(message.payload,0);
+  const urls = new Set();
+  for (const text of texts) for (const candidate of text.match(/https?:\/\/[^\s<>"']+/gi) || []) {
+    try { urls.add(canonicalHopelabUrl(candidate)); } catch { /* Other hosts and tracking links are not downloads. */ }
+  }
+  const receivedAt = new Date(received).toISOString();
+  const create = url => {
+    const digest = url ? crypto.createHash('sha256').update(url).digest('hex') : null;
+    const key = digest ? 'hopelab-link:' + digest : 'hopelab-link:missing';
+    const source = {channel:'email',account_id:'gmail:' + config.mailbox,message_id:message.id,attachment_id:key,original_name:'Laudo Hopelab.pdf',mime_type:url ? 'application/pdf' : null,received_at:receivedAt,
+      metadata:{provider:'hopelab_link',mailbox:config.mailbox,gmail_message_id:message.id,source_kind:'download_link',link_sha256:digest,exam_candidate:true,sender_address:notice.sender,subject:notice.subject,internet_message_id:notice.internetMessageId,unknown_sender:!Array.isArray(config.allowedSenders) || !config.allowedSenders.includes(notice.sender),missing_attachment:!url,pending_reason:url ? null : 'hopelab_link_missing_or_untrusted'}};
+    return {message:{id:message.id,internalDate:message.internalDate,receivedDateTime:receivedAt,sender:notice.sender,subject:notice.subject},attachment:{id:key,name:'Laudo Hopelab.pdf',contentType:source.mime_type,downloadUrl:url},source,missing:!url,needsReview:false,pendingReason:source.metadata.pending_reason};
+  };
+  return [...urls].map(create).concat(urls.size ? [] : [create(null)]);
+}
+function decodeHopelabOriginal(bytes, response, source, config) {
+  const maxBytes = config.maxBytes ?? MAX_BYTES;
+  if (!source?.documentId || source.skip || source.source?.metadata?.provider !== 'hopelab_link') fail('hopelab_original_not_reserved');
+  const url = canonicalHopelabUrl(source.attachment?.downloadUrl);
+  const digest = crypto.createHash('sha256').update(url).digest('hex');
+  if (source.source.attachment_id !== 'hopelab-link:' + digest || source.source.metadata.link_sha256 !== digest) fail('hopelab_origin_url_mismatch');
+  if (!object(response) || response.statusCode !== 200 || !object(response.headers)) fail('hopelab_http_response_unproven');
+  const contentType = Object.entries(response.headers).filter(([key]) => key.toLowerCase() === 'content-type');
+  if (contentType.length !== 1 || typeof contentType[0][1] !== 'string' || contentType[0][1].split(';')[0].trim().toLowerCase() !== 'application/pdf') fail('hopelab_pdf_mime_unproven');
+  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES || !Buffer.isBuffer(bytes) || !bytes.length || bytes.length > maxBytes) fail('hopelab_pdf_size_invalid');
+  if (!bytes.subarray(0,1024).includes(Buffer.from('%PDF-'))) fail('hopelab_pdf_signature_missing');
+  if (typeof config.driveFolderId !== 'string' || !config.driveFolderId) fail('gmail_destination_folder_missing');
+  return {bytes,json:{...source,sha256:crypto.createHash('sha256').update(bytes).digest('hex'),sizeBytes:bytes.length,folderId:config.driveFolderId}};
+}
 function decideReservation(origin, response) {
   const reservation = response;
   if (!object(reservation) || typeof reservation.document_id !== 'string' || !/^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(reservation.document_id)) fail('gmail_source_reservation_unproven');
@@ -190,4 +259,4 @@ function verifySaved(receipt, stage, decoded) {
   if(!object(receipt)||receipt.document_id!==stage.document_id||receipt.document?.id!==stage.document_id||receipt.document.file_status!=='saved'||receipt.document.sha256!==decoded.sha256||Number(receipt.document.size_bytes)!==decoded.sizeBytes||receipt.document.drive_file_id!==stage.drive_file_id||receipt.document.drive_folder_id!==stage.document.drive_folder_id)fail('drive_confirmation_unproven');
   return {document_id:receipt.document_id,status:'saved'};
 }
-export {EXPECTED_MAILBOX,MAX_BYTES,MAX_MIME_DEPTH,fail,object,stableId,unwrap,verifyProfile,validateWindow,listQuery,metadataFields,listIds,header,senderAddress,inspectMessage,decideReservation,decodeOriginal,validateFolder,validateStage,inspectDriveObject,verifySaved};
+export {EXPECTED_MAILBOX,MAX_BYTES,MAX_MIME_DEPTH,fail,object,stableId,unwrap,verifyProfile,validateWindow,listQuery,metadataFields,listIds,header,senderAddress,inspectMessage,inspectHopelabNotice,hopelabBodyFields,canonicalHopelabUrl,parseHopelabNotice,decodeHopelabOriginal,decideReservation,decodeOriginal,validateFolder,validateStage,inspectDriveObject,verifySaved};

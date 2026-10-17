@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {examPresentation,findExamDelivery} from './notification-presentation.mjs';
 import {validateExamExtraction} from './extraction-validation.mjs';
+import * as intakeRuntime from './operacional-runtime.mjs';
 
 const ROOT=fileURLToPath(new URL('../../',import.meta.url));
 const KINDS=['intake','processing','group','nexus'];
@@ -25,6 +26,36 @@ export const CREDENTIALS=Object.freeze({
  extractor:{id:'SELECT_OPENAI_CREDENTIAL',name:'Select OpenAI credential'},
 });
 const inRoot=target=>{const relative=path.relative(ROOT,path.resolve(target));return relative===''||(!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative));};
+function applyHopelabIntake(workflow){
+ const node=name=>{const found=workflow.nodes.find(item=>item.name===name);if(!found)throw new Error('Missing intake node: '+name);return found;};
+ const bundle=names=>'const EXPECTED_MAILBOX='+JSON.stringify(CONFIG.mailbox)+',MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\n'+names.map(name=>intakeRuntime[name].toString()).join('\n')+'\n';
+ const base=['fail','object','stableId','unwrap','validateWindow','header','senderAddress'];
+ const upsert=(name,type,typeVersion,position,parameters,extra={})=>{
+  const hex=crypto.createHash('sha256').update('pamvet-hopelab:'+name).digest('hex');
+  const id=hex.slice(0,8)+'-'+hex.slice(8,12)+'-5'+hex.slice(13,16)+'-a'+hex.slice(17,20)+'-'+hex.slice(20,32);
+  const existing=workflow.nodes.find(item=>item.name===name);
+  if(existing)Object.assign(existing,{parameters,...extra});else workflow.nodes.push({id,name,type:'n8n-nodes-base.'+type,typeVersion,position,parameters,...extra});
+ };
+ const condition=expression=>{const parameters=clone(node('Precisa baixar').parameters);parameters.conditions.conditions[0].leftValue=expression;return parameters;};
+ const connect=(from,outputs)=>{workflow.connections[from]={main:outputs.map(names=>names.map(name=>({node:name,type:'main',index:0})))};};
+ node('Janela de recebimento').parameters.jsCode=bundle(['fail','validateWindow','listQuery'])+"const cfg=$json;const window={...cfg,windowStart:cfg.intakeCutoff,sweepEnd:new Date().toISOString()};return [{json:{...window,listQuery:listQuery(window)}}];";
+ node('Enumerar anexos e ausência').parameters.jsCode=bundle([...base,'inspectMessage','inspectHopelabNotice'])+"const cfg=$('Janela de recebimento').first().json;const expectedId=$('Mensagem disponível').item.json.id;const notice=inspectHopelabNotice($json,expectedId,cfg);if(notice)return [{json:{hopelabNotice:notice}}];const result=inspectMessage($json,expectedId,cfg);return result.excluded?[{json:{messageExcluded:true}}]:result.origins.map(json=>({json:{...json,resetAttachments:true}}));";
+ upsert('Aviso Hopelab autorizado','if',2.2,[1680,360],condition('={{ !!$json.hopelabNotice }}'));
+ const bodyRequest=clone(node('Gmail - MIME sem bytes').parameters);
+ bodyRequest.url="={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages/'+encodeURIComponent($json.hopelabNotice.id)+'?format=full&fields='+encodeURIComponent("+JSON.stringify(intakeRuntime.hopelabBodyFields())+") }}";
+ upsert('Gmail - corpo do aviso Hopelab','httpRequest',4.2,[1920,360],bodyRequest,{retryOnFail:false,credentials:clone(node('Gmail - MIME sem bytes').credentials)});
+ upsert('Extrair link Hopelab autorizado','code',2,[2160,360],{jsCode:"const crypto=require('crypto');\n"+bundle([...base,'canonicalHopelabUrl','parseHopelabNotice'])+"const notice=$('Aviso Hopelab autorizado').item.json.hopelabNotice;const origins=parseHopelabNotice($json,notice,$('Janela de recebimento').first().json);return origins.map(json=>({json:{...json,resetAttachments:true}}));"});
+ upsert('Origem de link Hopelab','if',2.2,[2640,360],condition("={{ $json.source.metadata.provider === 'hopelab_link' }}"));
+ upsert('Hopelab - baixar PDF reservado','httpRequest',4.2,[2880,360],{method:'GET',url:'={{ $json.attachment.downloadUrl }}',options:{timeout:30000,redirect:{redirect:{followRedirects:false}},response:{response:{responseFormat:'file',outputPropertyName:'data',fullResponse:true}}}},{retryOnFail:false,onError:'continueErrorOutput'});
+ node('Validar bytes e SHA-256').parameters.jsCode="const crypto=require('crypto');\n"+bundle(['fail','object','unwrap','canonicalHopelabUrl','decodeOriginal','decodeHopelabOriginal'])+"const origin=$('Decidir recebimento').item.json;const cfg=$('Configuração').first().json;const decoded=origin.source.metadata.provider==='hopelab_link'?decodeHopelabOriginal(await this.helpers.getBinaryDataBuffer(0,'data'),$json,origin,cfg):decodeOriginal($json,origin,cfg);return [{json:decoded.json,binary:{data:await this.helpers.prepareBinaryData(decoded.bytes,decoded.json.source.original_name,'application/pdf')}}];";
+ connect('Enumerar anexos e ausência',[['Aviso Hopelab autorizado']]);
+ connect('Aviso Hopelab autorizado',[['Gmail - corpo do aviso Hopelab'],['PDF ou aviso disponível']]);
+ connect('Gmail - corpo do aviso Hopelab',[['Extrair link Hopelab autorizado']]);
+ connect('Extrair link Hopelab autorizado',[['PDF ou aviso disponível']]);
+ connect('Precisa baixar',[['Origem de link Hopelab'],['Próximo anexo']]);
+ connect('Origem de link Hopelab',[['Hopelab - baixar PDF reservado'],['Gmail - baixar PDF reservado']]);
+ connect('Hopelab - baixar PDF reservado',[['Validar bytes e SHA-256'],['Registrar falha de origem']]);
+}
 function applyNotificationPresentation(workflow, kind){
  const node=name=>{const found=workflow.nodes.find(item=>item.name===name);if(!found)throw new Error('Missing notification node: '+name);return found;};
  if(kind==='processing'){
@@ -63,6 +94,7 @@ export async function buildWorkflows(settings={}){
  const result={};
  for(let i=0;i<templates.length;i++){
   const workflow=clone(templates[i]);
+  if(KINDS[i]==='intake')applyHopelabIntake(workflow);
   applyNotificationPresentation(workflow,KINDS[i]);
   for(const node of workflow.nodes){
    if(node.name==='Configuração')node.parameters.jsCode=node.parameters.jsCode.replace(configLiteral(workflow),JSON.stringify(config,null,2));

@@ -32,7 +32,7 @@ test('four paused operational workflows: only current actions, valid graph, exis
   for(const [from,c]of Object.entries(w.connections)){assert(names.has(from));for(const out of c.main)for(const e of out)assert(names.has(e.node),e.node);}
   for(const node of w.nodes){
    if(node.type.endsWith('code'))new vm.Script('(async function(){'+node.parameters.jsCode+'})');
-   if(node.type.endsWith('httpRequest')){assert.equal(node.retryOnFail,false);assert(node.credentials);if(node.parameters.url.includes('serviceUrl')){assert.equal(node.credentials.httpHeaderAuth.id,'SELECT_WORKER_HEADER');const m=node.parameters.jsonBody.match(/action:\s*["']([^"']+)/);assert(m&&actions.has(m[1]),node.name);}}
+   if(node.type.endsWith('httpRequest')){assert.equal(node.retryOnFail,false);if(node.name==='Hopelab - baixar PDF reservado'){assert.equal(node.credentials,undefined);assert.equal(node.parameters.authentication,undefined);assert.equal(node.parameters.options.redirect.redirect.followRedirects,false);}else assert(node.credentials);if(node.parameters.url.includes('serviceUrl')){assert.equal(node.credentials.httpHeaderAuth.id,'SELECT_WORKER_HEADER');const m=node.parameters.jsonBody.match(/action:\s*["']([^"']+)/);assert(m&&actions.has(m[1]),node.name);}}
   }
   if(process.env.OPERACIONAL_PARSER_PACKAGE){
    const require=createRequire(process.env.OPERACIONAL_PARSER_PACKAGE);const {Tournament}=require('@n8n/tournament');const parser=new Tournament(e=>{throw e;});let count=0;
@@ -46,7 +46,7 @@ test('four paused operational workflows: only current actions, valid graph, exis
 });
 
 test('fixed-cutoff padded query, exact metadata window, real pageToken, incomplete/cyclic pagination refuses completion',()=>{
- const q=a.listQuery(cfg);assert(q.startsWith('has:attachment after:'+String(Date.parse(cfg.intakeCutoff)/1000-60)));assert(!q.includes('subject:'));
+ const q=a.listQuery(cfg);assert(q.startsWith('{has:attachment (from:hopelab@exames.vet.br subject:"Exame finalizado")} after:'+String(Date.parse(cfg.intakeCutoff)/1000-60)));
  const url=expression(n(workflows.intake,'Gmail - IDs paginados').parameters.url,{}, {'Configuração':{json:cfg},'Janela de recebimento':{json:{...cfg,listQuery:q}}});assert.equal(new URL(url).searchParams.get('q'),q);assert.equal(new URL(url).searchParams.get('includeSpamTrash'),'false');
  const next=expression(n(workflows.intake,'Gmail - IDs paginados').parameters.options.pagination.pagination.nextURL,{}, {'Configuração':{json:cfg},'Janela de recebimento':{json:{...cfg,listQuery:q}},$response:{body:{nextPageToken:'opaque token/plus+'}}});assert.equal(new URL(next).searchParams.get('pageToken'),'opaque token/plus+');
  assert.deepEqual(a.listIds([{messages:[{id:'a'}],nextPageToken:'opaque'},{messages:[{id:'b'},{id:'a'}]}]),[{id:'a'},{id:'b'}]);

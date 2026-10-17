@@ -60,7 +60,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction validateWindow(config) {\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  for (const value of [config.windowStart, config.sweepEnd, config.intakeCutoff])\n    if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) fail('gmail_window_invalid');\n  const from = Date.parse(config.windowStart), through = Date.parse(config.sweepEnd), cutoff = Date.parse(config.intakeCutoff);\n  if (!Number.isFinite(from) || !Number.isFinite(through) || !Number.isFinite(cutoff) || from < cutoff || through <= from) fail('gmail_window_invalid');\n  return { from, through, cutoff };\n}\nfunction listQuery(config) {\n  const { from, through } = validateWindow(config);\n  // Widen the coarse seconds search, then enforce exact epoch-ms bounds on internalDate.\n  return 'has:attachment after:' + (Math.floor(from / 1000) - 60) + ' before:' + (Math.ceil(through / 1000) + 60);\n}\nconst cfg=$json;const window={...cfg,windowStart:cfg.intakeCutoff,sweepEnd:new Date().toISOString()};return [{json:{...window,listQuery:listQuery(window)}}];"
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction validateWindow(config) {\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  for (const value of [config.windowStart, config.sweepEnd, config.intakeCutoff])\n    if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) fail('gmail_window_invalid');\n  const from = Date.parse(config.windowStart), through = Date.parse(config.sweepEnd), cutoff = Date.parse(config.intakeCutoff);\n  if (!Number.isFinite(from) || !Number.isFinite(through) || !Number.isFinite(cutoff) || from < cutoff || through <= from) fail('gmail_window_invalid');\n  return { from, through, cutoff };\n}\nfunction listQuery(config) {\n  const { from, through } = validateWindow(config);\n  // Widen the coarse seconds search, then enforce exact epoch-ms bounds on internalDate.\n  return '{has:attachment (from:hopelab@exames.vet.br subject:\"Exame finalizado\")} after:' + (Math.floor(from / 1000) - 60) + ' before:' + (Math.ceil(through / 1000) + 60);\n}\nconst cfg=$json;const window={...cfg,windowStart:cfg.intakeCutoff,sweepEnd:new Date().toISOString()};return [{json:{...window,listQuery:listQuery(window)}}];"
       }
     },
     {
@@ -216,7 +216,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction validateWindow(config) {\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  for (const value of [config.windowStart, config.sweepEnd, config.intakeCutoff])\n    if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) fail('gmail_window_invalid');\n  const from = Date.parse(config.windowStart), through = Date.parse(config.sweepEnd), cutoff = Date.parse(config.intakeCutoff);\n  if (!Number.isFinite(from) || !Number.isFinite(through) || !Number.isFinite(cutoff) || from < cutoff || through <= from) fail('gmail_window_invalid');\n  return { from, through, cutoff };\n}\nfunction header(headers, name) {\n  if (headers !== undefined && !Array.isArray(headers)) fail('gmail_headers_invalid');\n  const matches = (headers || []).filter(value => object(value) && String(value.name).toLowerCase() === name.toLowerCase());\n  if (matches.length > 1) fail('gmail_ambiguous_header');\n  if (!matches.length) return '';\n  if (typeof matches[0].value !== 'string' || matches[0].value.length > 8192 || /[\\r\\n\\x00]/.test(matches[0].value)) fail('gmail_header_invalid');\n  return matches[0].value;\n}\nfunction senderAddress(from) {\n  // A forwarded envelope remains its own sender; do not trust quoted body headers.\n  const value = from.trim(), angle = value.match(/<([^<>\\s]+@[^<>\\s]+)>\\s*$/);\n  const email = angle ? angle[1] : value;\n  return /^[^@\\s<>;,]+@[^@\\s<>;,]+$/.test(email) ? email.toLowerCase() : '';\n}\nfunction inspectMessage(response, expectedId, config) {\n  const message = unwrap(response), bounds = validateWindow(config);\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  if (message.id !== stableId(expectedId, 'gmail_expected_id_invalid')) fail('gmail_message_identity_mismatch');\n  if (typeof message.internalDate !== 'string' || !/^\\d{1,16}$/.test(message.internalDate)) fail('gmail_internal_date_invalid');\n  const received = Number(message.internalDate);\n  if (!Number.isSafeInteger(received) || received <= 0) fail('gmail_internal_date_invalid');\n  if (received < bounds.from || received >= bounds.through || received < bounds.cutoff) return {excluded: true, reason: 'outside_received_window', origins: []};\n  if (!object(message.payload)) fail('gmail_mime_payload_missing');\n  const sender = senderAddress(header(message.payload.headers, 'From'));\n  const subject = header(message.payload.headers, 'Subject');\n  const internetMessageId = header(message.payload.headers, 'Message-ID');\n  const trusted = Array.isArray(config.allowedSenders) && config.allowedSenders.includes(sender);\n  const hint = Array.isArray(config.examSubjectHints) && config.examSubjectHints.some(value => subject.toLowerCase().includes(value.toLowerCase()));\n  const needsReview = !trusted && !hint;\n  const parts = [], partIds = new Set();\n  function visit(part, depth) {\n    if (!object(part) || depth > (config.maxMimeDepth ?? MAX_MIME_DEPTH)) fail('gmail_mime_projection_or_depth_incomplete');\n    const partId = stableId(part.partId, 'gmail_part_id_invalid', true);\n    if (partIds.has(partId)) fail('gmail_duplicate_part_id');\n    partIds.add(partId);\n    if (part.body !== undefined && !object(part.body)) fail('gmail_part_body_invalid');\n    if (part.body && Object.hasOwn(part.body, 'data')) fail('gmail_bytes_received_before_reservation');\n    if (typeof part.mimeType !== 'string') fail('gmail_mime_projection_or_depth_incomplete');\n    if (part.parts !== undefined && !Array.isArray(part.parts)) fail('gmail_mime_parts_invalid');\n    const pdf = part.mimeType.toLowerCase() === 'application/pdf' || /\\.pdf$/i.test(part.filename || '');\n    if (pdf) {\n      const attachmentId = part.body?.attachmentId;\n      if (attachmentId !== undefined) stableId(attachmentId, 'gmail_attachment_id_invalid');\n      const size = part.body?.size;\n      if (!Number.isSafeInteger(size) || size < 0) fail('gmail_attachment_size_invalid');\n      parts.push({partId, attachmentId: attachmentId || null, size, name: part.filename || 'original.pdf', mimeType: part.mimeType});\n    }\n    for (const child of part.parts || []) visit(child, depth + 1);\n  }\n  visit(message.payload, 0);\n  const receivedAt = new Date(received).toISOString();\n  const normalizedMessage = {id: message.id, internalDate: message.internalDate, receivedDateTime: receivedAt,\n    sender, subject, internetMessageId, unknownSender: !trusted};\n  const create = part => {\n    const inline = !part.attachmentId;\n    const key = 'gmail-part:' + JSON.stringify([part.partId, part.attachmentId]);\n    const reason = inline ? 'bytes_inline_nao_suportados' : part.size > (config.maxBytes ?? MAX_BYTES) ? 'pdf_exceeds_limit' : needsReview ? 'pdf_sem_indicio_exame' : null;\n    const source = {channel: 'email', account_id: 'gmail:' + config.mailbox, message_id: message.id,\n      attachment_id: key, original_name: part.name, mime_type: part.mimeType, received_at: receivedAt,\n      metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: hint, gmail_part_id: part.partId,\n        gmail_attachment_id: part.attachmentId, internet_message_id: internetMessageId, unknown_sender: !trusted && config.dedicatedMailbox !== true, sender_address: sender, sender_allowlisted: trusted,\n        missing_attachment: inline, unsupported_attachment: inline || part.size > (config.maxBytes ?? MAX_BYTES),\n        pending_reason: reason, review_reason: needsReview ? 'PDF sem indício clínico: conferência humana antes dos bytes' : null, subject}};\n    return {message: normalizedMessage, attachment: {id: key, partId: part.partId, gmailAttachmentId: part.attachmentId,\n      name: part.name, contentType: part.mimeType, size: part.size}, source,\n      missing: inline || part.size > (config.maxBytes ?? MAX_BYTES), needsReview, pendingReason: reason};\n  };\n  if (parts.length) return {excluded: false, origins: parts.map(create)};\n  if (needsReview) return {excluded: true, reason: 'no_pdf_or_exam_hint', origins: []};\n  const source = {channel: 'email', account_id: 'gmail:' + config.mailbox, message_id: message.id, attachment_id: 'missing-pdf',\n    original_name: 'PDF ausente', mime_type: null, received_at: receivedAt,\n    metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: hint, internet_message_id: internetMessageId,\n      unknown_sender: !trusted && config.dedicatedMailbox !== true, sender_address: sender, sender_allowlisted: trusted, missing_attachment: true, pending_reason: 'notice_without_pdf', subject}};\n  return {excluded: false, origins: [{message: normalizedMessage, attachment: {id: 'missing-pdf', name: 'PDF ausente', contentType: null},\n    source, missing: true, pendingReason: 'notice_without_pdf'}]};\n}\nconst cfg=$('Janela de recebimento').first().json;const result=inspectMessage($json,$('Mensagem disponível').item.json.id,cfg);return result.excluded?[{json:{messageExcluded:true}}]:result.origins.map(json=>({json:{...json,resetAttachments:true}}));"
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction validateWindow(config) {\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  for (const value of [config.windowStart, config.sweepEnd, config.intakeCutoff])\n    if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) fail('gmail_window_invalid');\n  const from = Date.parse(config.windowStart), through = Date.parse(config.sweepEnd), cutoff = Date.parse(config.intakeCutoff);\n  if (!Number.isFinite(from) || !Number.isFinite(through) || !Number.isFinite(cutoff) || from < cutoff || through <= from) fail('gmail_window_invalid');\n  return { from, through, cutoff };\n}\nfunction header(headers, name) {\n  if (headers !== undefined && !Array.isArray(headers)) fail('gmail_headers_invalid');\n  const matches = (headers || []).filter(value => object(value) && String(value.name).toLowerCase() === name.toLowerCase());\n  if (matches.length > 1) fail('gmail_ambiguous_header');\n  if (!matches.length) return '';\n  if (typeof matches[0].value !== 'string' || matches[0].value.length > 8192 || /[\\r\\n\\x00]/.test(matches[0].value)) fail('gmail_header_invalid');\n  return matches[0].value;\n}\nfunction senderAddress(from) {\n  // A forwarded envelope remains its own sender; do not trust quoted body headers.\n  const value = from.trim(), angle = value.match(/<([^<>\\s]+@[^<>\\s]+)>\\s*$/);\n  const email = angle ? angle[1] : value;\n  return /^[^@\\s<>;,]+@[^@\\s<>;,]+$/.test(email) ? email.toLowerCase() : '';\n}\nfunction inspectMessage(response, expectedId, config) {\n  const message = unwrap(response), bounds = validateWindow(config);\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  if (message.id !== stableId(expectedId, 'gmail_expected_id_invalid')) fail('gmail_message_identity_mismatch');\n  if (typeof message.internalDate !== 'string' || !/^\\d{1,16}$/.test(message.internalDate)) fail('gmail_internal_date_invalid');\n  const received = Number(message.internalDate);\n  if (!Number.isSafeInteger(received) || received <= 0) fail('gmail_internal_date_invalid');\n  if (received < bounds.from || received >= bounds.through || received < bounds.cutoff) return {excluded: true, reason: 'outside_received_window', origins: []};\n  if (!object(message.payload)) fail('gmail_mime_payload_missing');\n  const sender = senderAddress(header(message.payload.headers, 'From'));\n  const subject = header(message.payload.headers, 'Subject');\n  const internetMessageId = header(message.payload.headers, 'Message-ID');\n  const trusted = Array.isArray(config.allowedSenders) && config.allowedSenders.includes(sender);\n  const hint = Array.isArray(config.examSubjectHints) && config.examSubjectHints.some(value => subject.toLowerCase().includes(value.toLowerCase()));\n  const needsReview = !trusted && !hint;\n  const parts = [], partIds = new Set();\n  function visit(part, depth) {\n    if (!object(part) || depth > (config.maxMimeDepth ?? MAX_MIME_DEPTH)) fail('gmail_mime_projection_or_depth_incomplete');\n    const partId = stableId(part.partId, 'gmail_part_id_invalid', true);\n    if (partIds.has(partId)) fail('gmail_duplicate_part_id');\n    partIds.add(partId);\n    if (part.body !== undefined && !object(part.body)) fail('gmail_part_body_invalid');\n    if (part.body && Object.hasOwn(part.body, 'data')) fail('gmail_bytes_received_before_reservation');\n    if (typeof part.mimeType !== 'string') fail('gmail_mime_projection_or_depth_incomplete');\n    if (part.parts !== undefined && !Array.isArray(part.parts)) fail('gmail_mime_parts_invalid');\n    const pdf = part.mimeType.toLowerCase() === 'application/pdf' || /\\.pdf$/i.test(part.filename || '');\n    if (pdf) {\n      const attachmentId = part.body?.attachmentId;\n      if (attachmentId !== undefined) stableId(attachmentId, 'gmail_attachment_id_invalid');\n      const size = part.body?.size;\n      if (!Number.isSafeInteger(size) || size < 0) fail('gmail_attachment_size_invalid');\n      parts.push({partId, attachmentId: attachmentId || null, size, name: part.filename || 'original.pdf', mimeType: part.mimeType});\n    }\n    for (const child of part.parts || []) visit(child, depth + 1);\n  }\n  visit(message.payload, 0);\n  const receivedAt = new Date(received).toISOString();\n  const normalizedMessage = {id: message.id, internalDate: message.internalDate, receivedDateTime: receivedAt,\n    sender, subject, internetMessageId, unknownSender: !trusted};\n  const create = part => {\n    const inline = !part.attachmentId;\n    const key = 'gmail-part:' + JSON.stringify([part.partId, part.attachmentId]);\n    const reason = inline ? 'bytes_inline_nao_suportados' : part.size > (config.maxBytes ?? MAX_BYTES) ? 'pdf_exceeds_limit' : needsReview ? 'pdf_sem_indicio_exame' : null;\n    const source = {channel: 'email', account_id: 'gmail:' + config.mailbox, message_id: message.id,\n      attachment_id: key, original_name: part.name, mime_type: part.mimeType, received_at: receivedAt,\n      metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: hint, gmail_part_id: part.partId,\n        gmail_attachment_id: part.attachmentId, internet_message_id: internetMessageId, unknown_sender: !trusted && config.dedicatedMailbox !== true, sender_address: sender, sender_allowlisted: trusted,\n        missing_attachment: inline, unsupported_attachment: inline || part.size > (config.maxBytes ?? MAX_BYTES),\n        pending_reason: reason, review_reason: needsReview ? 'PDF sem indício clínico: conferência humana antes dos bytes' : null, subject}};\n    return {message: normalizedMessage, attachment: {id: key, partId: part.partId, gmailAttachmentId: part.attachmentId,\n      name: part.name, contentType: part.mimeType, size: part.size}, source,\n      missing: inline || part.size > (config.maxBytes ?? MAX_BYTES), needsReview, pendingReason: reason};\n  };\n  if (parts.length) return {excluded: false, origins: parts.map(create)};\n  if (needsReview) return {excluded: true, reason: 'no_pdf_or_exam_hint', origins: []};\n  const source = {channel: 'email', account_id: 'gmail:' + config.mailbox, message_id: message.id, attachment_id: 'missing-pdf',\n    original_name: 'PDF ausente', mime_type: null, received_at: receivedAt,\n    metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: hint, internet_message_id: internetMessageId,\n      unknown_sender: !trusted && config.dedicatedMailbox !== true, sender_address: sender, sender_allowlisted: trusted, missing_attachment: true, pending_reason: 'notice_without_pdf', subject}};\n  return {excluded: false, origins: [{message: normalizedMessage, attachment: {id: 'missing-pdf', name: 'PDF ausente', contentType: null},\n    source, missing: true, pendingReason: 'notice_without_pdf'}]};\n}\nfunction inspectHopelabNotice(response, expectedId, config) {\n  const checked = inspectMessage(response, expectedId, config), message = unwrap(response);\n  if (checked.excluded && checked.reason === 'outside_received_window') return null;\n  if (senderAddress(header(message.payload.headers, 'From')) !== 'hopelab@exames.vet.br' || !/^Exame finalizado(?:\\s|:|$)/i.test(header(message.payload.headers, 'Subject').trim())) return null;\n  // Existing PDF attachments keep the established attachment path.\n  if (checked.origins.some(origin => origin.attachment.id !== 'missing-pdf')) return null;\n  return {id:message.id,internalDate:message.internalDate,sender:'hopelab@exames.vet.br',subject:header(message.payload.headers,'Subject'),internetMessageId:header(message.payload.headers,'Message-ID')};\n}\nconst cfg=$('Janela de recebimento').first().json;const expectedId=$('Mensagem disponível').item.json.id;const notice=inspectHopelabNotice($json,expectedId,cfg);if(notice)return [{json:{hopelabNotice:notice}}];const result=inspectMessage($json,expectedId,cfg);return result.excluded?[{json:{messageExcluded:true}}]:result.origins.map(json=>({json:{...json,resetAttachments:true}}));"
       }
     },
     {
@@ -367,7 +367,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const crypto=require('crypto');\nconst EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction decodeOriginal(response, source, config) {\n  const body = unwrap(response), maxBytes = config.maxBytes ?? MAX_BYTES;\n  if (!source?.documentId || source.skip || !source.attachment?.gmailAttachmentId) fail('gmail_original_not_reserved');\n  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) fail('gmail_max_bytes_invalid');\n  if (typeof body.data !== 'string' || !body.data.length || body.data.length > Math.ceil(maxBytes / 3) * 4 + 2 || !/^[A-Za-z0-9_-]+={0,2}$/.test(body.data)) fail('gmail_base64url_invalid_or_oversize');\n  const raw = body.data.replace(/=+$/, '');\n  if (raw.length % 4 === 1 || (body.data.includes('=') && body.data.length % 4 !== 0)) fail('gmail_base64url_invalid_or_oversize');\n  const bytes = Buffer.from(raw, 'base64url');\n  if (!bytes.length || bytes.length > maxBytes || bytes.toString('base64url') !== raw) fail('gmail_base64url_invalid_or_oversize');\n  if (!Number.isSafeInteger(body.size) || body.size !== bytes.length || source.attachment.size !== bytes.length) fail('gmail_attachment_size_mismatch');\n  if (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) fail('gmail_pdf_signature_missing');\n  const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\n  const folderId = config.driveFolderId;\n  if (typeof folderId !== 'string' || !folderId.length) fail('gmail_destination_folder_missing');\n  return {bytes, json: {...source, sha256, sizeBytes: bytes.length, folderId}};\n}\nconst decoded=decodeOriginal($json,$('Decidir recebimento').item.json,$('Configuração').first().json);return [{json:decoded.json,binary:{data:await this.helpers.prepareBinaryData(decoded.bytes,decoded.json.source.original_name,'application/pdf')}}];"
+        "jsCode": "const crypto=require('crypto');\nconst EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction canonicalHopelabUrl(value) {\n  if (typeof value !== 'string') fail('hopelab_url_not_allowed');\n  const match = value.match(/^https:\\/\\/hopelab\\.exames\\.vet\\.br(\\/laudos\\/download\\/\\d{1,10}\\/\\d{1,10}\\/[a-f\\d]{32}\\/[a-f\\d]{32})(?:\\?utm_source=email)?$/i);\n  if (!match) fail('hopelab_url_not_allowed');\n  return 'https://hopelab.exames.vet.br' + match[1].toLowerCase();\n}\nfunction decodeOriginal(response, source, config) {\n  const body = unwrap(response), maxBytes = config.maxBytes ?? MAX_BYTES;\n  if (!source?.documentId || source.skip || !source.attachment?.gmailAttachmentId) fail('gmail_original_not_reserved');\n  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) fail('gmail_max_bytes_invalid');\n  if (typeof body.data !== 'string' || !body.data.length || body.data.length > Math.ceil(maxBytes / 3) * 4 + 2 || !/^[A-Za-z0-9_-]+={0,2}$/.test(body.data)) fail('gmail_base64url_invalid_or_oversize');\n  const raw = body.data.replace(/=+$/, '');\n  if (raw.length % 4 === 1 || (body.data.includes('=') && body.data.length % 4 !== 0)) fail('gmail_base64url_invalid_or_oversize');\n  const bytes = Buffer.from(raw, 'base64url');\n  if (!bytes.length || bytes.length > maxBytes || bytes.toString('base64url') !== raw) fail('gmail_base64url_invalid_or_oversize');\n  if (!Number.isSafeInteger(body.size) || body.size !== bytes.length || source.attachment.size !== bytes.length) fail('gmail_attachment_size_mismatch');\n  if (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) fail('gmail_pdf_signature_missing');\n  const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\n  const folderId = config.driveFolderId;\n  if (typeof folderId !== 'string' || !folderId.length) fail('gmail_destination_folder_missing');\n  return {bytes, json: {...source, sha256, sizeBytes: bytes.length, folderId}};\n}\nfunction decodeHopelabOriginal(bytes, response, source, config) {\n  const maxBytes = config.maxBytes ?? MAX_BYTES;\n  if (!source?.documentId || source.skip || source.source?.metadata?.provider !== 'hopelab_link') fail('hopelab_original_not_reserved');\n  const url = canonicalHopelabUrl(source.attachment?.downloadUrl);\n  const digest = crypto.createHash('sha256').update(url).digest('hex');\n  if (source.source.attachment_id !== 'hopelab-link:' + digest || source.source.metadata.link_sha256 !== digest) fail('hopelab_origin_url_mismatch');\n  if (!object(response) || response.statusCode !== 200 || !object(response.headers)) fail('hopelab_http_response_unproven');\n  const contentType = Object.entries(response.headers).filter(([key]) => key.toLowerCase() === 'content-type');\n  if (contentType.length !== 1 || typeof contentType[0][1] !== 'string' || contentType[0][1].split(';')[0].trim().toLowerCase() !== 'application/pdf') fail('hopelab_pdf_mime_unproven');\n  if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES || !Buffer.isBuffer(bytes) || !bytes.length || bytes.length > maxBytes) fail('hopelab_pdf_size_invalid');\n  if (!bytes.subarray(0,1024).includes(Buffer.from('%PDF-'))) fail('hopelab_pdf_signature_missing');\n  if (typeof config.driveFolderId !== 'string' || !config.driveFolderId) fail('gmail_destination_folder_missing');\n  return {bytes,json:{...source,sha256:crypto.createHash('sha256').update(bytes).digest('hex'),sizeBytes:bytes.length,folderId:config.driveFolderId}};\n}\nconst origin=$('Decidir recebimento').item.json;const cfg=$('Configuração').first().json;const decoded=origin.source.metadata.provider==='hopelab_link'?decodeHopelabOriginal(await this.helpers.getBinaryDataBuffer(0,'data'),$json,origin,cfg):decodeOriginal($json,origin,cfg);return [{json:decoded.json,binary:{data:await this.helpers.prepareBinaryData(decoded.bytes,decoded.json.source.original_name,'application/pdf')}}];"
       },
       "onError": "continueErrorOutput"
     },
@@ -1153,6 +1153,152 @@
         }
       },
       "retryOnFail": false
+    },
+    {
+      "id": "05a9d3ee-40d9-5d03-afd2-42b827bece7e",
+      "name": "Aviso Hopelab autorizado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        360
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$json.hopelabNotice }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "252b067d-be7a-5342-a6e2-b655a47ed101",
+      "name": "Gmail - corpo do aviso Hopelab",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        360
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages/'+encodeURIComponent($json.hopelabNotice.id)+'?format=full&fields='+encodeURIComponent(\"id,threadId,internalDate,payload(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId,mimeType,filename,headers(name,value),body(attachmentId,size,data),parts(partId))))))))))\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_GMAIL_OAUTH",
+          "name": "Select Gmail OAuth"
+        }
+      }
+    },
+    {
+      "id": "f5307800-8290-50e2-ac98-6308a5021971",
+      "name": "Extrair link Hopelab autorizado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        360
+      ],
+      "parameters": {
+        "jsCode": "const crypto=require('crypto');\nconst EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction validateWindow(config) {\n  if (config.mailbox !== EXPECTED_MAILBOX) fail('gmail_account_mismatch');\n  for (const value of [config.windowStart, config.sweepEnd, config.intakeCutoff])\n    if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) fail('gmail_window_invalid');\n  const from = Date.parse(config.windowStart), through = Date.parse(config.sweepEnd), cutoff = Date.parse(config.intakeCutoff);\n  if (!Number.isFinite(from) || !Number.isFinite(through) || !Number.isFinite(cutoff) || from < cutoff || through <= from) fail('gmail_window_invalid');\n  return { from, through, cutoff };\n}\nfunction header(headers, name) {\n  if (headers !== undefined && !Array.isArray(headers)) fail('gmail_headers_invalid');\n  const matches = (headers || []).filter(value => object(value) && String(value.name).toLowerCase() === name.toLowerCase());\n  if (matches.length > 1) fail('gmail_ambiguous_header');\n  if (!matches.length) return '';\n  if (typeof matches[0].value !== 'string' || matches[0].value.length > 8192 || /[\\r\\n\\x00]/.test(matches[0].value)) fail('gmail_header_invalid');\n  return matches[0].value;\n}\nfunction senderAddress(from) {\n  // A forwarded envelope remains its own sender; do not trust quoted body headers.\n  const value = from.trim(), angle = value.match(/<([^<>\\s]+@[^<>\\s]+)>\\s*$/);\n  const email = angle ? angle[1] : value;\n  return /^[^@\\s<>;,]+@[^@\\s<>;,]+$/.test(email) ? email.toLowerCase() : '';\n}\nfunction canonicalHopelabUrl(value) {\n  if (typeof value !== 'string') fail('hopelab_url_not_allowed');\n  const match = value.match(/^https:\\/\\/hopelab\\.exames\\.vet\\.br(\\/laudos\\/download\\/\\d{1,10}\\/\\d{1,10}\\/[a-f\\d]{32}\\/[a-f\\d]{32})(?:\\?utm_source=email)?$/i);\n  if (!match) fail('hopelab_url_not_allowed');\n  return 'https://hopelab.exames.vet.br' + match[1].toLowerCase();\n}\nfunction parseHopelabNotice(response, notice, config) {\n  const message = unwrap(response);\n  if (!notice || notice.sender !== 'hopelab@exames.vet.br' || message.id !== notice.id || message.internalDate !== notice.internalDate || senderAddress(header(message.payload?.headers,'From')) !== notice.sender || header(message.payload?.headers,'Subject') !== notice.subject) fail('hopelab_message_identity_mismatch');\n  const bounds = validateWindow(config), received = Number(message.internalDate);\n  if (!Number.isSafeInteger(received) || received < bounds.from || received >= bounds.through || received < bounds.cutoff) fail('hopelab_message_outside_window');\n  const texts = []; let totalBytes = 0;\n  function visit(part, depth) {\n    if (!object(part) || depth > (config.maxMimeDepth ?? MAX_MIME_DEPTH) || typeof part.mimeType !== 'string' || part.parts !== undefined && !Array.isArray(part.parts)) fail('hopelab_body_structure_invalid');\n    if (part.mimeType.toLowerCase() === 'application/pdf' || /\\.pdf$/i.test(part.filename || '')) fail('hopelab_unexpected_pdf_in_notice');\n    if (['text/plain','text/html'].includes(part.mimeType.toLowerCase()) && part.body?.data !== undefined) {\n      const encoded = part.body.data;\n      if (typeof encoded !== 'string' || !/^[A-Za-z0-9_-]*={0,2}$/.test(encoded) || encoded.length > 1400000) fail('hopelab_body_encoding_or_limit');\n      const raw = encoded.replace(/=+$/,''), bytes = Buffer.from(raw,'base64url');\n      if (bytes.toString('base64url') !== raw || !Number.isSafeInteger(part.body.size) || part.body.size !== bytes.length) fail('hopelab_body_encoding_or_size');\n      totalBytes += bytes.length;\n      if (totalBytes > 1048576) fail('hopelab_body_limit');\n      const decoded = bytes.toString('utf8');\n      if (!Buffer.from(decoded,'utf8').equals(bytes)) fail('hopelab_body_utf8_invalid');\n      // Only visible text may supply the direct URL; tracking href values are ignored.\n      texts.push(part.mimeType.toLowerCase() === 'text/html' ? decoded.replace(/<(script|style)\\b[^>]*>[\\s\\S]*?<\\/\\1\\s*>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&amp;/gi,'&') : decoded);\n    }\n    for (const child of part.parts || []) visit(child, depth + 1);\n  }\n  visit(message.payload,0);\n  const urls = new Set();\n  for (const text of texts) for (const candidate of text.match(/https?:\\/\\/[^\\s<>\"']+/gi) || []) {\n    try { urls.add(canonicalHopelabUrl(candidate)); } catch { /* Other hosts and tracking links are not downloads. */ }\n  }\n  const receivedAt = new Date(received).toISOString();\n  const create = url => {\n    const digest = url ? crypto.createHash('sha256').update(url).digest('hex') : null;\n    const key = digest ? 'hopelab-link:' + digest : 'hopelab-link:missing';\n    const source = {channel:'email',account_id:'gmail:' + config.mailbox,message_id:message.id,attachment_id:key,original_name:'Laudo Hopelab.pdf',mime_type:url ? 'application/pdf' : null,received_at:receivedAt,\n      metadata:{provider:'hopelab_link',mailbox:config.mailbox,gmail_message_id:message.id,source_kind:'download_link',link_sha256:digest,exam_candidate:true,sender_address:notice.sender,subject:notice.subject,internet_message_id:notice.internetMessageId,unknown_sender:!Array.isArray(config.allowedSenders) || !config.allowedSenders.includes(notice.sender),missing_attachment:!url,pending_reason:url ? null : 'hopelab_link_missing_or_untrusted'}};\n    return {message:{id:message.id,internalDate:message.internalDate,receivedDateTime:receivedAt,sender:notice.sender,subject:notice.subject},attachment:{id:key,name:'Laudo Hopelab.pdf',contentType:source.mime_type,downloadUrl:url},source,missing:!url,needsReview:false,pendingReason:source.metadata.pending_reason};\n  };\n  return [...urls].map(create).concat(urls.size ? [] : [create(null)]);\n}\nconst notice=$('Aviso Hopelab autorizado').item.json.hopelabNotice;const origins=parseHopelabNotice($json,notice,$('Janela de recebimento').first().json);return origins.map(json=>({json:{...json,resetAttachments:true}}));"
+      }
+    },
+    {
+      "id": "9d664b65-b860-55ec-ad21-fab990961f8d",
+      "name": "Origem de link Hopelab",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        360
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.source.metadata.provider === 'hopelab_link' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d9848f9b-b79e-5c52-a870-56824979cfbc",
+      "name": "Hopelab - baixar PDF reservado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        360
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.attachment.downloadUrl }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "onError": "continueErrorOutput"
     }
   ],
   "connections": {
@@ -1229,7 +1375,7 @@
       "main": [
         [
           {
-            "node": "PDF ou aviso disponível",
+            "node": "Aviso Hopelab autorizado",
             "type": "main",
             "index": 0
           }
@@ -1280,7 +1426,7 @@
       "main": [
         [
           {
-            "node": "Gmail - baixar PDF reservado",
+            "node": "Origem de link Hopelab",
             "type": "main",
             "index": 0
           }
@@ -1784,6 +1930,82 @@
         [
           {
             "node": "Gmail - conferir conta OAuth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso Hopelab autorizado": {
+      "main": [
+        [
+          {
+            "node": "Gmail - corpo do aviso Hopelab",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PDF ou aviso disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - corpo do aviso Hopelab": {
+      "main": [
+        [
+          {
+            "node": "Extrair link Hopelab autorizado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair link Hopelab autorizado": {
+      "main": [
+        [
+          {
+            "node": "PDF ou aviso disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Origem de link Hopelab": {
+      "main": [
+        [
+          {
+            "node": "Hopelab - baixar PDF reservado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - baixar PDF reservado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hopelab - baixar PDF reservado": {
+      "main": [
+        [
+          {
+            "node": "Validar bytes e SHA-256",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
             "type": "main",
             "index": 0
           }
