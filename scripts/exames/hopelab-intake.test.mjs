@@ -38,7 +38,8 @@ test('visible direct link is canonicalized, repeated plain/HTML links dedupe, tr
  assert.equal(item.attachment.downloadUrl,url);assert.equal(item.source.attachment_id,'hopelab-link:'+hash);
  assert.equal(item.source.metadata.provider,'hopelab_link');assert.equal(item.source.metadata.exam_candidate,true);
  assert.equal(item.source.metadata.unknown_sender,true);assert.equal(item.source.metadata.gmail_part_id,undefined);
- assert.equal(item.source.account_id,'gmail:'+cfg.mailbox);assert.equal(item.source.message_id,meta.id);
+ assert.equal(item.source.account_id,'gmail:'+cfg.mailbox);assert.equal(item.source.message_id,'hopelab-result:'+hash);
+ assert.equal(item.source.metadata.gmail_message_id,meta.id);assert.equal(item.message.id,meta.id);
  assert(!JSON.stringify(item.source).includes(url));assert(!JSON.stringify(item.source).includes('a'.repeat(32)));
  const changedTracking=runtime.parseHopelabNotice(body(url,'<a href="https://other-tracker.example.invalid/new">'+url+'</a>'),notice(),cfg)[0];
  assert.equal(changedTracking.source.attachment_id,item.source.attachment_id);
@@ -67,6 +68,27 @@ test('saved origins skip GET and duplicate bytes reuse the established canonical
  const canonical='22222222-2222-4222-a222-222222222222';
  const stage={document_id:canonical,drive_file_id:'existing-drive-file',claimed:false,upload_required:false,document:{id:canonical,sha256:decoded.json.sha256,size_bytes:bytes.length,file_status:'saved',drive_file_id:'existing-drive-file'}};
  assert.equal(runtime.validateStage(stage,decoded.json).upload_required,false);
+});
+
+test('two Gmail messages for one Hopelab URL reserve the same origin and skip the regenerated second PDF',()=>{
+ const first=origin(),secondBody=body();secondBody.id='second-gmail-message';
+ const secondMeta=structuredClone(secondBody);for(const part of secondMeta.payload.parts)delete part.body.data;
+ const secondNotice=runtime.inspectHopelabNotice(secondMeta,secondMeta.id,cfg);
+ const second=runtime.parseHopelabNotice(secondBody,secondNotice,cfg)[0];
+ const tuple=item=>[item.source.channel,item.source.account_id,item.source.message_id,item.source.attachment_id];
+ assert.deepEqual(tuple(second),tuple(first));
+ assert.notEqual(second.source.metadata.gmail_message_id,first.source.metadata.gmail_message_id);
+ assert.equal(second.message.id,secondBody.id);assert.equal(first.message.id,meta.id);
+ const regenerated=Buffer.from('%PDF-1.4\nSame report, new generation timestamp.\n%%EOF');
+ assert.notEqual(crypto.createHash('sha256').update(regenerated).digest('hex'),crypto.createHash('sha256').update(bytes).digest('hex'));
+ const saved=new Map();let downloads=0;
+ for(const [item,pdf] of [[first,bytes],[second,regenerated]]){
+  const key=JSON.stringify(tuple(item));
+  const reservation=saved.get(key)||{document_id:docId,document:{id:docId,file_status:'pending'}};
+  const decision=runtime.decideReservation(item,reservation);
+  if(!decision.skip){downloads++;runtime.decodeHopelabOriginal(pdf,response,decision,cfg);saved.set(key,{document_id:docId,document:{id:docId,file_status:'saved'}});}
+ }
+ assert.equal(downloads,1);assert.equal(saved.size,1);
 });
 
 test('download requires prior reservation, bound URL, status200, PDF MIME and exact observed bytes',()=>{

@@ -189,7 +189,8 @@ function parseHopelabNotice(response, notice, config) {
   const create = url => {
     const digest = url ? crypto.createHash('sha256').update(url).digest('hex') : null;
     const key = digest ? 'hopelab-link:' + digest : 'hopelab-link:missing';
-    const source = {channel:'email',account_id:'gmail:' + config.mailbox,message_id:message.id,attachment_id:key,original_name:'Laudo Hopelab.pdf',mime_type:url ? 'application/pdf' : null,received_at:receivedAt,
+    // Hopelab regenerates PDF bytes; the same result URL across emails is one origin.
+    const source = {channel:'email',account_id:'gmail:' + config.mailbox,message_id:digest ? 'hopelab-result:' + digest : message.id,attachment_id:key,original_name:'Laudo Hopelab.pdf',mime_type:url ? 'application/pdf' : null,received_at:receivedAt,
       metadata:{provider:'hopelab_link',mailbox:config.mailbox,gmail_message_id:message.id,source_kind:'download_link',link_sha256:digest,exam_candidate:true,sender_address:notice.sender,subject:notice.subject,internet_message_id:notice.internetMessageId,unknown_sender:!Array.isArray(config.allowedSenders) || !config.allowedSenders.includes(notice.sender),missing_attachment:!url,pending_reason:url ? null : 'hopelab_link_missing_or_untrusted'}};
     return {message:{id:message.id,internalDate:message.internalDate,receivedDateTime:receivedAt,sender:notice.sender,subject:notice.subject},attachment:{id:key,name:'Laudo Hopelab.pdf',contentType:source.mime_type,downloadUrl:url},source,missing:!url,needsReview:false,pendingReason:source.metadata.pending_reason};
   };
