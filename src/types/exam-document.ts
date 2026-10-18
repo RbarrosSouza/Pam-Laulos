@@ -5,6 +5,8 @@ export type DocumentFields = {
   exam_date?: string | null
   lab_name?: string | null
   species?: string | null
+  requesting_vet_name?: string | null
+  requesting_vet_crmv?: string | null
 }
 
 export interface DocumentSource {
@@ -52,6 +54,10 @@ export interface ExamDocument {
   pet_id: string | null
   assigned_to: string | null
   assigned_name?: string | null
+  responsible_vet_id: string | null
+  responsible_vet_name: string | null
+  responsible_vet_avatar_url: string | null
+  responsible_vet_source: 'manual' | 'pdf' | 'sale' | 'pdf_sale' | 'conflict' | null
   group_release_at: string | null
   group_exception_reason: string | null
   previous_document_id: string | null

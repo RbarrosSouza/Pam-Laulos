@@ -15,6 +15,7 @@ const businessMessages = new Map<string, string>([
   ['Motivo obrigatório', 'Informe o motivo da classificação.'],
   ['Resultado vinculado deve ser revisado, nunca descartado', 'Este resultado já está vinculado a um cadastro. Revise a identificação antes de continuar.'],
   ['Responsável não autorizado', 'O responsável escolhido não tem acesso aos exames.'],
+  ['Veterinária não encontrada ou inativa', 'A veterinária selecionada não está mais ativa. Atualize a equipe e escolha novamente.'],
   ['Confirme o paciente e preserve o resultado antes do contato', 'Confirme o paciente e aguarde o PDF ser salvo antes de registrar o contato.'],
   ['Canal, data e anotação de contato válidos são obrigatórios', 'Confira o canal, a data e a anotação do contato.'],
   ['Selecione somente itens abrangidos por este documento', 'Selecione somente os itens que pertencem a este exame.'],

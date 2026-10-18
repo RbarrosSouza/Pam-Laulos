@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { DocumentCandidate, DocumentEvent, DocumentFields, ExamDocument } from '../../../src/types/exam-document'
+import { fixtureVets } from './mock-vets'
 
 export const USER_ID = '11111111-1111-4111-8111-111111111111'
 export const scenario = new URLSearchParams(window.location.search).get('scenario') || 'pending'
@@ -64,7 +65,15 @@ export async function mutateFixture(name: string, args: Record<string, unknown>)
   const next = structuredClone(document)
   if (args.p_expected_version !== undefined && args.p_expected_version !== next.version) throw new Error('A identificação mudou. Recarregue os dados antes de confirmar.')
   let eventType = name
-  if (name === 'assign_exam_document') {
+  if (name === 'set_exam_document_responsible_vet') {
+    const vet = fixtureVets.find(vet => vet.id === args.p_veterinarian_id)
+    if (!vet) throw new Error('Veterinário indisponível.')
+    next.responsible_vet_id = vet.id
+    next.responsible_vet_name = vet.nome
+    next.responsible_vet_avatar_url = vet.avatar_url
+    next.responsible_vet_source = 'manual'
+    eventType = 'responsible_vet_assigned'
+  } else if (name === 'assign_exam_document') {
     next.assigned_to = String(args.p_assignee_id)
     next.assigned_name = 'Dra. Isabela Martins'
     eventType = 'assigned'

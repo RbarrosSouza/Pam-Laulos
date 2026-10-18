@@ -126,3 +126,41 @@ test('clinical date labels can wrap lines and numeric day/month need not be zero
     assert.equal(run(data,[pages[0]+'\n'+text,...pages.slice(1)]).fields.exam_date,'2026-02-01');
   }
 });
+
+test('only the explicitly labelled requester is collected, preserving the full printed name',()=>{
+ const data=copy();data.fields.requesting_vet_name='Ana Beatriz Souza';
+ data.fields.requesting_vet_crmv='SP-12345';
+ const quote='Médica Veterinária Solicitante: Dra. Ana Beatriz Souza\nCRMV: SP-12345';
+ data.evidence.push(...['requesting_vet_name','requesting_vet_crmv'].map(field=>({field,page:1,excerpt:quote})));
+ const out=run(data,[pages[0]+'\n'+quote+'\nLaudante: Dr. Pedro Lima CRMV SP-54321',...pages.slice(1)]);
+ assert.equal(out.fields.requesting_vet_name,'Ana Beatriz Souza');assert.equal(out.fields.requesting_vet_crmv,'SP-12345');
+ assert.equal(out.classification,'exam');
+});
+
+test('report signer, technical director, copied signature or an unqualified CRMV never becomes requester',()=>{
+ for(const label of ['Laudante','Radiologista','Responsável técnico','Assinado por','Médico Veterinário','Tutor']){
+  const data=copy();data.fields.requesting_vet_name='Ana Beatriz Souza';
+  const quote=label+': Ana Beatriz Souza';data.evidence.push({field:'requesting_vet_name',page:1,excerpt:quote});
+  const out=run(data,[pages[0]+'\n'+quote,...pages.slice(1)]);
+  assert.equal(out.fields.requesting_vet_name,null);assert.equal(out.classification,'exam');assert.equal(out.fields.pet_name,'LILI');
+ }
+ const data=copy();data.fields.requesting_vet_name='Ana Beatriz Souza';data.fields.requesting_vet_crmv='12345';
+ const quote='Solicitante: Ana Beatriz Souza CRMV: 12345';
+ data.evidence.push(...['requesting_vet_name','requesting_vet_crmv'].map(field=>({field,page:1,excerpt:quote})));
+ assert.equal(run(data,[pages[0]+'\n'+quote,...pages.slice(1)]).fields.requesting_vet_crmv,null);
+});
+
+test('a requester label for another person does not validate the signer later in the quote',()=>{
+ const data=copy();data.fields.requesting_vet_name='Pedro Lima';
+ const quote='Solicitante: Ana Souza\nRadiologista: Pedro Lima';
+ data.evidence.push({field:'requesting_vet_name',page:1,excerpt:quote});
+ assert.equal(run(data,[pages[0]+'\n'+quote,...pages.slice(1)]).fields.requesting_vet_name,null);
+});
+
+test('another professional registration in a wider quote is not assigned to the requester',()=>{
+ const data=copy();data.fields.requesting_vet_name='Ana Beatriz Souza';data.fields.requesting_vet_crmv='SP-54321';
+ const quote='Solicitante: Ana Beatriz Souza CRMV SP-12345\nResponsável técnico: Pedro Lima CRMV SP-54321';
+ data.evidence.push(...['requesting_vet_name','requesting_vet_crmv'].map(field=>({field,page:1,excerpt:quote})));
+ const out=run(data,[pages[0]+'\n'+quote,...pages.slice(1)]);
+ assert.equal(out.fields.requesting_vet_name,'Ana Beatriz Souza');assert.equal(out.fields.requesting_vet_crmv,null);
+});

@@ -1,7 +1,7 @@
 /** Pure, self-contained validator embedded in n8n. Never completes names from a registry. */
 export function validateExamExtraction(context, response) {
-  const fallback = reason => ({classification:'review', single_patient:false, fields:{}, evidence:[], review_reason:reason, extractor_version:'document-evidence-v3'});
-  const allowed = ['pet_name','client_name','exam_type','exam_date','lab_name','species','report_number'];
+  const fallback = reason => ({classification:'review', single_patient:false, fields:{}, evidence:[], review_reason:reason, extractor_version:'document-evidence-v4'});
+  const allowed = ['pet_name','client_name','exam_type','exam_date','lab_name','species','report_number','requesting_vet_name','requesting_vet_crmv'];
   const normalized = value => value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
   const comparable = value => normalized(value).toLocaleLowerCase('pt-BR');
   const meaningful = value => typeof value === 'string' && /[\p{L}\p{N}]/u.test(value) && value.length <= 300;
@@ -62,13 +62,27 @@ export function validateExamExtraction(context, response) {
     return false;
   }
 
+  function supportsRequester(ev, value, field) {
+    const quote = normalized(ev.excerpt);
+    const label = /(?:solicitante|requisitante|solicitad[oa]\s+por)\s*[:=\-]?\s*(?:(?:dr|dra|doutor|doutora)\.?\s+)?$/iu;
+    if (field === 'requesting_vet_name') {
+      return occurrences(quote, value).some(at => label.test(quote.slice(0, at)));
+    }
+    // A registration belongs to the requester only when the same bounded quote
+    // explicitly names that requester. A report signature is a different role.
+    if (!fields.requesting_vet_name || !/\b(?:[A-Z]{2}\s*[-/]?\s*\d{3,8}|\d{3,8}\s*[-/]?\s*[A-Z]{2})\b/iu.test(value)) return false;
+    return quote.length <= 500 && occurrences(quote, fields.requesting_vet_name).some(at =>
+      label.test(quote.slice(0, at)) && occurrences(quote, value).some(regAt => regAt > at)
+      && !/(?:laudante|radiologista|assinado|signat[aá]rio|respons[aá]vel\s+(?:(?:pelo|do)\s+laudo|t[eé]cnico))/iu.test(quote));
+  }
+
   const fields = {}, evidence = [], invalid = [];
   const candidates = data.evidence.flatMap(locateEvidence);
   for (const field of allowed) {
     if (!Object.hasOwn(data.fields, field)) continue;
     const value = data.fields[field];
     if (value === null) { fields[field] = null; continue; }
-    const valid = meaningful(value) && candidates.filter(ev => ev.field === field).find(ev => field === 'exam_date' ? supportsDate(ev, value) : occurrences(ev.excerpt, value).length > 0);
+    const valid = meaningful(value) && candidates.filter(ev => ev.field === field).find(ev => field === 'exam_date' ? supportsDate(ev, value) : field.startsWith('requesting_vet_') ? supportsRequester(ev, value, field) : occurrences(ev.excerpt, value).length > 0);
     if (!valid) { fields[field] = null; invalid.push(field); continue; }
     fields[field] = value;
     evidence.push({field:valid.field,page:valid.page,excerpt:valid.excerpt});
@@ -81,6 +95,6 @@ export function validateExamExtraction(context, response) {
   return {
     classification:data.classification === 'not_exam' ? 'not_exam' : incomplete || invalidCore ? 'review' : data.classification,
     single_patient:data.single_patient, fields, evidence,
-    review_reason:reasons.join('; ') || null, extractor_version:'document-evidence-v3',
+    review_reason:reasons.join('; ') || null, extractor_version:'document-evidence-v4',
   };
 }

@@ -11,6 +11,9 @@ export function examPresentation(document, baseUrl) {
   const missingFields = ['pet_name', 'client_name', 'exam_type'].filter(field => !/[\p{L}\p{N}]/u.test(text(fields[field])));
   if (!examDate) missingFields.push('exam_date');
   const present = field => !missingFields.includes(field);
+  // Only the resolved clinical assignment may be announced as responsible.
+  // Raw requester text or an authenticated actor is not a clinical assignment.
+  const responsible = document.responsible_vet_id && document.responsible_vet_source !== 'conflict' ? text(document.responsible_vet_name) : '';
   const fileName = ([present('pet_name') ? filePart(fields.pet_name, '', 300) : null, present('client_name') ? filePart(fields.client_name, '', 300) : null, present('exam_type') ? filePart(fields.exam_type, '', 300) : null, dateLabel ? dateLabel.replace(/\//g, '-') : null].filter(Boolean).join(' - ') || 'Exame') + '.pdf';
   let shortUrl = null;
   if (baseUrl) {
@@ -28,12 +31,13 @@ export function examPresentation(document, baseUrl) {
     present('pet_name') ? '*Pet:* ' + text(fields.pet_name) : null,
     present('exam_type') ? '*Exame:* ' + text(fields.exam_type) : null,
     dateLabel ? '*Data do exame:* ' + dateLabel : null,
+    responsible ? '🩺 *Responsável:* ' + responsible : null,
     missingFields.length ? '📌 Informações incompletas — conferir no Pam Laudos.' : null,
     '',
     '📋 *Abrir e assumir no Pam Laudos*',
     shortUrl,
     '',
-    !document.assigned_to ? '⏳ Aguardando responsável' : null,
+    !responsible ? '⏳ Aguardando responsável' : null,
     !document.pet_id ? 'Cadastro no PAM Nexus: selecionar tutor e pet' : null,
     received ? '_Recebido em ' + received + '_' : null,
   ].filter(line => line !== null).join('\n');

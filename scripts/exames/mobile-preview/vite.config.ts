@@ -16,6 +16,7 @@ export default defineConfig({
     alias: [
       { find: '@/contexts/exam-auth', replacement: path.join(root, 'mock-auth.ts') },
       { find: '@/hooks/useExamDocuments', replacement: path.join(root, 'mock-documents.ts') },
+      { find: '@/hooks/useVets', replacement: path.join(root, 'mock-vets.ts') },
       { find: '@/lib/supabase', replacement: path.join(root, 'blocked-backend.ts') },
       { find: '@', replacement: path.join(repository, 'src') },
     ],

@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, FileText, History, Link2, Loader2, Mail, MoreVertical, Phone, Settings2, UserRound, UserRoundPlus } from 'lucide-react'
 import { WhatsappLogo } from '@phosphor-icons/react/dist/csr/WhatsappLogo'
 import { toast } from 'sonner'
 import { useExamAuth } from '@/contexts/exam-auth'
 import { useDocumentAction, useExamDocument } from '@/hooks/useExamDocuments'
+import { useVets, type Vet } from '@/hooks/useVets'
 import { DocumentCorrection, DocumentGroupConfirmation, DocumentProvenance } from '@/components/documents/DocumentControls'
 import { DocumentForm, DocumentHistory, DocumentPreview, DocumentSteps } from '@/components/documents/ExamDocumentPanels'
 import { ExamDetailSheet } from '@/components/documents/ExamDetailSheet'
@@ -30,7 +31,10 @@ function displayDate(value: string) {
 export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refresh: () => Promise<unknown> }) {
   const auth = useExamAuth()
   const action = useDocumentAction()
+  const vets = useVets()
   const [panel, setPanel] = useState<Panel>(null)
+  const [savingVetId, setSavingVetId] = useState<string | null>(null)
+  const assignmentPending = useRef(false)
   const [now, setNow] = useState(Date.now)
   const progress = getExamDetailProgress(doc, now)
   useEffect(() => {
@@ -40,20 +44,26 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
   }, [doc.group_status, doc.contact_status, doc.completed])
   const user = auth.session?.user
   const ownName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || 'Você'
-  const assignedToMe = !!user && doc.assigned_to === user.id
-  const responsible = assignedToMe ? ownName : doc.assigned_name || (doc.assigned_to ? 'Responsável definido' : 'Selecionar responsável')
+  const responsibleVet = doc.responsible_vet_id ? vets.data?.find(vet => vet.id === doc.responsible_vet_id) : undefined
+  const responsible = doc.responsible_vet_id
+    ? doc.responsible_vet_name || responsibleVet?.nome || 'Veterinária definida'
+    : doc.assigned_to === user?.id && doc.assigned_to ? ownName : doc.assigned_name || (doc.assigned_to ? 'Responsável definido' : 'Selecionar responsável')
+  const responsibleAvatar = doc.responsible_vet_id ? doc.responsible_vet_avatar_url || responsibleVet?.avatar_url : null
   const contactAllowed = auth.role === 'admin' || auth.role === 'vet'
   const pet = documentLabel(doc, 'pet_name')
   const tutor = documentLabel(doc, 'client_name')
   const close = () => setPanel(null)
-  const assign = async () => {
-    if (!user || action.isPending) return
+  const assign = async (vet: Vet) => {
+    if (!user || action.isPending || assignmentPending.current || vet.id === doc.responsible_vet_id) return
+    assignmentPending.current = true
+    setSavingVetId(vet.id)
     try {
-      await action.mutateAsync({ name: 'assign_exam_document', args: { p_document_id: doc.id, p_assignee_id: user.id } })
+      await action.mutateAsync({ name: 'set_exam_document_responsible_vet', args: { p_document_id: doc.id, p_veterinarian_id: vet.id, p_expected_version: doc.version } })
       await refresh()
       toast.success('Responsável salvo.')
-      close()
+      setPanel(current => current === 'responsible' ? null : current)
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o responsável.') }
+    finally { assignmentPending.current = false; setSavingVetId(null) }
   }
   const copyLink = () => navigator.clipboard.writeText(`${window.location.origin}/novos-exames/${doc.id}`).then(() => toast.success('Link copiado.')).catch(() => toast.error('Não foi possível copiar o link.'))
   const origin = progress.originChannel === 'email'
@@ -85,8 +95,8 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
           </div>
         </section>
         <button className="exam-detail-responsible" onClick={() => setPanel('responsible')} aria-haspopup="dialog">
-          <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Responsável</span><strong>{responsible}</strong>{assignedToMe && <span className="exam-detail-you">Você</span>}</span>
-          <span className="exam-detail-responsible-icon" aria-hidden="true"><UserRound size={29} /><ChevronDown size={15} /></span>
+          <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Responsável</span><strong>{responsible}</strong></span>
+          <span className="exam-detail-responsible-icon" aria-hidden="true">{responsibleAvatar ? <img className="exam-detail-responsible-photo" src={responsibleAvatar} alt="" /> : <UserRound size={29} />}<ChevronDown size={15} /></span>
         </button>
         <button className={`exam-detail-contact${progress.contactCompleted ? ' is-complete' : ''}`} onClick={() => setPanel('contact')} aria-haspopup="dialog" aria-label={progress.contactCompleted ? 'Contato realizado. Ver registro' : 'Registrar contato com o tutor'}>
           <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Contato com o tutor</span><strong>{progress.contactCompleted ? 'Realizado' : progress.contactedCount ? `${progress.contactedCount} de ${progress.itemCount} exames` : 'Entrei em contato'}</strong></span>
@@ -101,12 +111,15 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
     </div>
     <ExamDetailSheet open={panel !== null} onOpenChange={open => { if (!open) close() }} title={panel ? panelTitles[panel] : ''} wide={panel === 'pdf'}>
       {panel === 'responsible' && <div className="exam-detail-team">
-        {doc.assigned_to && !assignedToMe && <p className="exam-detail-hint">{responsible}. Assuma somente se o atendimento foi transferido para você.</p>}
-        <button className={`exam-detail-vet${assignedToMe ? ' is-selected' : ''}`} disabled={action.isPending || assignedToMe} onClick={() => void assign()}>
-          <span className="exam-detail-avatar"><UserRound size={27} /></span>
-          <span><strong>{ownName}</strong><small>{assignedToMe ? 'Você · responsável atual' : doc.assigned_to ? 'Transferir para mim' : 'Assumir este exame'}</small></span>
-          {action.isPending ? <Loader2 size={21} className="animate-spin" /> : assignedToMe ? <Check size={22} /> : <ChevronRight size={20} />}
-        </button><p className="exam-detail-hint">A responsabilidade é registrada na conta da equipe que possui acesso ao exame.</p>
+        {doc.responsible_vet_source === 'conflict' && !doc.responsible_vet_id && <p className="exam-detail-hint">Responsável a conferir. Selecione uma veterinária da equipe.</p>}
+        {vets.isLoading ? <p className="exam-detail-hint flex items-center gap-2" role="status"><Loader2 size={20} className="animate-spin" />Carregando equipe…</p> : vets.error ? <div role="alert"><p className="exam-detail-hint">Não foi possível carregar a equipe.</p><button className="exam-detail-primary" onClick={() => void vets.refetch()}>Tentar novamente</button></div> : !vets.data?.length ? <p className="exam-detail-hint" role="status">Nenhuma veterinária ativa disponível.</p> : <ul className="exam-detail-team-list" aria-label="Veterinárias ativas">{vets.data.map(vet => {
+          const selected = doc.responsible_vet_id === vet.id
+          return <li key={vet.id}><button className={`exam-detail-vet${selected ? ' is-selected' : ''}`} aria-pressed={selected} disabled={action.isPending || savingVetId !== null || selected} onClick={() => void assign(vet)}>
+            <span className="exam-detail-avatar" aria-hidden="true">{vet.avatar_url ? <img src={vet.avatar_url} alt="" /> : <UserRound size={27} />}</span>
+            <span><strong>{vet.nome}</strong><small>{selected ? 'Responsável atual' : doc.responsible_vet_id || doc.assigned_to ? 'Definir como responsável' : 'Assumir este exame'}</small></span>
+            {savingVetId === vet.id ? <Loader2 size={21} className="animate-spin" aria-label="Salvando responsável" /> : selected ? <Check size={22} aria-hidden="true" /> : <ChevronRight size={20} aria-hidden="true" />}
+          </button></li>
+        })}</ul>}
       </div>}
       {panel === 'contact' && (progress.contactCompleted ? <DocumentProvenance doc={doc} /> : !contactAllowed ? <p className="exam-detail-hint">O registro de contato é feito por uma veterinária ou pela gestão.</p> : !doc.pet_id && !progress.contactCompleted ? <div className="exam-detail-empty"><UserRoundPlus size={35} /><h3>Confirme o paciente primeiro</h3><p>Selecione o cadastro para registrar o contato com o tutor correto.</p><button className="exam-detail-primary" onClick={() => setPanel('patient')}>Selecionar paciente<ChevronRight size={20} /></button></div> : <DocumentForm key={`${doc.id}:contact`} doc={doc} mode="contact" onContactSaved={async () => { await refresh(); setPanel('success') }} />)}
       {panel === 'patient' && <div className="space-y-5"><DocumentForm key={`${doc.id}:patient`} doc={doc} mode="patient" />{progress.nexusLinked && <button className="exam-detail-primary" onClick={() => setPanel('pdf')}><FileText size={22} />Abrir exame anexado</button>}</div>}

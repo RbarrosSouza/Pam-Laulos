@@ -16,7 +16,7 @@ export function useExamDocuments(search: string, filter: DocumentFilter, page: n
       let query = supabase.from('v_exam_documents').select('*', { count: 'exact' }).order('received_at', { ascending: false })
       if (filter === 'open') query = query.eq('completed', false).neq('identification_status', 'not_exam')
       if (filter === 'review') query = query.in('identification_status', ['unidentified', 'suggested', 'review'])
-      if (filter === 'unassigned') query = query.is('assigned_to', null).eq('completed', false)
+      if (filter === 'unassigned') query = query.is('responsible_vet_id', null).is('assigned_to', null).eq('completed', false)
       if (filter === 'group_failed') query = query.in('group_status', ['failed', 'uncertain'])
       if (filter === 'contact') query = query.neq('contact_status', 'completed').neq('identification_status', 'not_exam')
       if (filter === 'nexus') query = query.neq('nexus_status', 'completed').neq('identification_status', 'not_exam')

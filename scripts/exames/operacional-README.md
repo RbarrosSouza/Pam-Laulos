@@ -101,3 +101,12 @@ node --test scripts/exames/operacional-workflows.test.mjs
 The 12 functional tests run Code/expressions in VM and check graph/contracts, pagination, partial failure, nested-loop reset, canonical deduplication, upload recovery, extraction review and uncertain delivery. An additional test checks private configuration/output restrictions and keeps public templates neutral. Optional `OPERACIONAL_PARSER_PACKAGE` points to an already-installed local n8n package for Tournament parsing, without installing dependencies. The 74 expressions were checked with n8n-workflow 2.10.1/Tournament 1.0.6.
 
 These checks do not execute the n8n engine or prove OAuth, model, Drive, Chatwoot or production-database operation. Validate the configured workflow separately before operational activation.
+# Veterinária responsável
+
+A responsabilidade clínica usa o cadastro de veterinários ativos, separado do usuário autenticado que registra a ação. A seleção manual tem prioridade e também atualiza os cards efetivamente ligados ao documento; ela não altera a autoria original da venda nem cria acessos.
+
+Novos PDFs podem identificar a solicitante por trecho documental explícito. A assinatura de quem emitiu o laudo não é usada como solicitante. A venda contribui quando o documento corresponde a um único item pendente do mesmo paciente, tutor e tipo de exame. Duas correspondências ou fontes divergentes deixam a escolha para a equipe. A falta de responsável não bloqueia a entrega do PDF.
+
+A migração `20261018000012_exam_document_responsibility.sql` preserva os contratos implantados e acrescenta os campos `responsible_vet_*` à consulta e à tarefa do grupo. Não reprocessa documentos antigos nem reinicia entregas. Após instalar essa migração, atualizar os nós revisados de OP02/OP03 e a interface. Não executar novamente os envios para testar uma legenda.
+
+Validação direcionada: `npm run test:exames:responsavel`.

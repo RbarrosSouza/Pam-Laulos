@@ -124,3 +124,20 @@ test('generated processing and group nodes agree on filename and put correlation
   assert.equal(partial[0].binary.data.fileName,examPresentation(task.document,base).fileName);
  }
 });
+
+test('initial group caption names only the resolved responsible veterinarian, preserving partial delivery',()=>{
+ const assigned=examPresentation({...doc,responsible_vet_id:'vet-one',responsible_vet_name:'*Dra. Ana* Souza',responsible_vet_source:'sale'},base);
+ assert(assigned.content.includes('🩺 *Responsável:* Dra. Ana Souza'));assert(!assigned.content.includes('Aguardando responsável'));
+ for(const extra of [{assigned_to:'auth-actor'},{extracted_data:{...fields,requesting_vet_name:'Ana Souza'}},{responsible_vet_id:'vet-one',responsible_vet_name:'Ana Souza',responsible_vet_source:'conflict'}]){
+  const out=examPresentation({...doc,...extra},base);assert(out.content.includes('Aguardando responsável'));assert(!out.content.includes('*Responsável:*'));
+ }
+ const partial=examPresentation({...doc,extracted_data:{pet_name:'Luna'},responsible_vet_id:'vet-one',responsible_vet_name:'Ana Souza',responsible_vet_source:'pdf'},base);
+ assert.equal(partial.fileName,'Luna.pdf');assert(partial.content.includes('*Responsável:* Ana Souza'));
+});
+
+test('generated extraction schema requests explicit requester role and state-qualified registration',()=>{
+ const prompt=node('processing','Extrair dados estruturados').parameters.jsonBody;
+ assert(prompt.includes('requesting_vet_name:null|string'));assert(prompt.includes('requesting_vet_crmv:null|string'));
+ assert(prompt.includes('Não use o nome do radiologista'));assert(prompt.includes('um número sem UF é null'));
+ assert(prompt.includes('isso não impede o envio do exame'));
+});
