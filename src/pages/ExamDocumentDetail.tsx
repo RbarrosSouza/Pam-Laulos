@@ -56,8 +56,13 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o responsável.') }
   }
   const copyLink = () => navigator.clipboard.writeText(`${window.location.origin}/novos-exames/${doc.id}`).then(() => toast.success('Link copiado.')).catch(() => toast.error('Não foi possível copiar o link.'))
+  const origin = progress.originChannel === 'email'
+    ? { label: 'E-mail', description: 'Recebido por e-mail', icon: Mail }
+    : progress.originChannel === 'whatsapp'
+      ? { label: 'WhatsApp', description: 'Recebido pelo WhatsApp', icon: WhatsappLogo }
+      : { label: progress.originChannel === 'manual' ? 'Manual' : 'Origem', description: progress.originReceived ? 'Recebido por envio manual' : 'Recebimento não registrado', icon: FileText }
   const stages = [
-    { label: 'E-mail', description: progress.emailReceived ? 'Recebido por e-mail' : 'Origem por e-mail não registrada', done: progress.emailReceived, icon: Mail, panel: 'history' as const },
+    { ...origin, done: progress.originReceived, panel: 'history' as const },
     { label: 'Grupo', description: progress.groupSent ? 'Enviado ao grupo de WhatsApp' : 'Envio ao grupo ainda não confirmado', done: progress.groupSent, icon: WhatsappLogo, panel: 'steps' as const },
     { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : 'Exame ainda não anexado ao cadastro', done: progress.nexusLinked, icon: Link2, panel: 'patient' as const },
     { label: 'Contato', description: progress.contactCompleted ? 'Contato com tutor concluído' : 'Contato com tutor pendente', done: progress.contactCompleted, icon: Phone, panel: 'contact' as const },

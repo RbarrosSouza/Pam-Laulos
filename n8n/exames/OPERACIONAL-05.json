@@ -1,0 +1,1497 @@
+{
+  "name": "OPERACIONAL 05 — WhatsApp pessoal para exames",
+  "active": false,
+  "nodes": [
+    {
+      "id": "89bdec30-2578-5126-aabd-7b2b878b7de5",
+      "name": "Leia antes de configurar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -300
+      ],
+      "parameters": {
+        "content": "WHATSAPP DA EQUIPE → MESMA FILA DE EXAMES. Somente mensagem individual recebida dos números explicitamente autorizados. O webhook é apenas um aviso: conversa/mensagem/remetente/anexos são relidos pela API autenticada do Chatwoot antes de reservar ou baixar. Origem reservada antes dos bytes; dedupe por arquivo no backend. Mesmo fluxo Drive → identificação → grupo → Nexus. Não habilitar até conferir caixa, número, pasta e teste. Nenhuma chave em Code. Logs de dados desabilitados.",
+        "height": 220,
+        "width": 580
+      }
+    },
+    {
+      "id": "b3f88579-e8b4-5c95-afb3-7da70ce74df1",
+      "name": "Um anexo por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {
+          "reset": "={{ $json.resetAttachments === true }}"
+        }
+      }
+    },
+    {
+      "id": "16dbc888-7df9-5ecb-a7b9-95c2c2d0fabb",
+      "name": "Reservar origem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"reserve_source\",payload:{source:$json.source} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "1505e63a-2e45-5648-b9fa-6f09711e0813",
+      "name": "Decidir recebimento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction decideReservation(origin, response) {\n  const reservation = response;\n  if (!object(reservation) || typeof reservation.document_id !== 'string' || !/^[a-f\\d]{8}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{12}$/i.test(reservation.document_id)) fail('whatsapp_source_reservation_unproven');\n  if (reservation.document && reservation.document.id !== reservation.document_id) fail('whatsapp_source_reservation_identity_mismatch');\n  return {...origin, reservation, documentId: reservation.document_id,\n    skip: origin.missing || reservation.document?.file_status === 'saved' || reservation.document?.identification_status === 'not_exam'};\n}\nreturn [{json:decideReservation($('Um anexo por vez').item.json,$json)}];"
+      }
+    },
+    {
+      "id": "260447ab-f161-59f3-ad85-8a3fb730eb6c",
+      "name": "Precisa baixar",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f358b76e-fe93-5c12-9a09-0b7f4c5253ad",
+      "name": "Validar bytes e SHA-256",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const item=$input.first();if(!item.json.sha256||!item.binary?.data)throw new Error('whatsapp_bytes_unverified');return [item];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "e21399f7-c1fe-5ba6-b79b-e17b1890d4a0",
+      "name": "Drive - gerar ID de arquivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c20bb1f7-e1f7-5802-bbe0-b8b2f6c92562",
+      "name": "Reservar ID e upload Drive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"stage_file\",payload:{document_id:$(\"Validar bytes e SHA-256\").item.json.documentId,file:{sha256:$(\"Validar bytes e SHA-256\").item.json.sha256,size_bytes:$(\"Validar bytes e SHA-256\").item.json.sizeBytes,drive_folder_id:$(\"Validar bytes e SHA-256\").item.json.folderId,drive_file_id:$json.ids[0]},worker:$(\"Configuração\").first().json.worker} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "2c4e1295-96d5-55b9-9657-63415f149b2f",
+      "name": "Upload reservado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3600,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.claimed === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3976bc81-cbc5-5803-a581-e0fa0a56375b",
+      "name": "Drive - consultar ID reservado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3840,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?fields=id,size,name,mimeType,parents,trashed,ownedByMe,shared,appProperties,sha256Checksum' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "bb0998df-f55d-54b4-a5b2-684c58bc2d04",
+      "name": "Validar estado do objeto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction validateStage(stage, decoded) {\n  if(!object(stage)||!object(stage.document)||stage.document_id!==stage.document.id||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(stage.document_id)||stage.document.sha256!==decoded.sha256||Number(stage.document.size_bytes)!==decoded.sizeBytes||stage.drive_file_id!==stage.document.drive_file_id||!stage.drive_file_id)fail('drive_stage_receipt_unproven');\n  if(stage.claimed===true&&(!stage.lease_token||!stage.delivery_id))fail('drive_stage_lease_missing');\n  if(stage.document.file_status==='saved'&&stage.upload_required!==false)fail('drive_saved_receipt_unproven');\n  return stage;\n}\nfunction inspectDriveObject(response, stage, decoded) {\n  validateStage(stage,decoded);\n  if(!object(response)||![200,404].includes(response.statusCode))fail('drive_lookup_unproven');\n  const f=response.body;\n  if(response.statusCode===200){\n    if(!object(f)||f.id!==stage.drive_file_id||f.mimeType!=='application/pdf'||f.trashed!==false||f.ownedByMe!==true||f.shared!==false||!Array.isArray(f.parents)||f.parents.length!==1||f.parents[0]!==stage.document.drive_folder_id)fail('drive_object_identity_or_parent_unproven');\n    if(f.appProperties?.exam_document_id!==stage.document_id||f.appProperties?.sha256!==decoded.sha256)fail('drive_object_binding_unproven');\n    if(Number(f.size)>0&&Number(f.size)!==decoded.sizeBytes)fail('drive_existing_bytes_conflict');\n  }\n  return {...stage,exists:response.statusCode===200,hasBytes:response.statusCode===200&&Number(f.size)>0,driveName:f?.name||('Recebido - '+stage.document.received_at.slice(0,10)+' - '+stage.document_id.slice(0,8)+' - '+stage.document.original_name)};\n}\nreturn [{json:inspectDriveObject($json,$('Reservar ID e upload Drive').item.json,$('Validar bytes e SHA-256').item.json)}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "0ea803e8-15f7-5f52-9cff-03caff489b1e",
+      "name": "Metadados ausentes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "92268cac-a111-5b2d-8aee-0ff56f4ea05c",
+      "name": "Drive - criar metadados com ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4560,
+        -180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files?fields=id,name",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({id:$json.drive_file_id,name:$json.driveName,mimeType:'application/pdf',parents:[$json.document.drive_folder_id||$('Validar bytes e SHA-256').item.json.folderId],appProperties:{exam_document_id:$json.document_id,sha256:$('Validar bytes e SHA-256').item.json.sha256} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "274ca9f1-eb90-5ede-88ef-cacbd56c7ac9",
+      "name": "Restaurar contexto Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4800,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Validar estado do objeto').item.json,binary:$('Validar bytes e SHA-256').item.binary}];\n"
+      }
+    },
+    {
+      "id": "cbec4348-0021-5f76-96d2-884b09491d85",
+      "name": "Objeto já tem bytes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5040,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.hasBytes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b09b9dd3-6acb-53b7-a04c-b8d24bc94e6f",
+      "name": "Drive - gravar bytes no ID fixo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5280,
+        180
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?uploadType=media&fields=id,size,sha256Checksum' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c5bca78a-d4be-5832-ae0e-350c3afc9ad6",
+      "name": "Drive - conferir bytes salvos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5520,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($('Reservar ID e upload Drive').item.json.drive_file_id)+'?alt=media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "63e1c157-cf1c-56fb-a613-5891a8a9d5e0",
+      "name": "Conferir integridade do original",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5760,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst bytes = await this.helpers.getBinaryDataBuffer(0, 'data');\nif (!bytes.length || bytes.length > $('Configuração').first().json.maxBytes) throw new Error('PDF vazio ou fora do limite de bytes.');\nif (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF ausente.');\nconst sha256 = crypto.createHash('sha256').update(bytes).digest('hex');\nconst src=$('Validar bytes e SHA-256').item.json;\nif(sha256!==src.sha256||bytes.length!==src.sizeBytes)throw new Error('Conflito de integridade no Drive. Não sobrescrever arquivo existente.');\nreturn [{json:{stage:$('Reservar ID e upload Drive').item.json,source:src}}];\n"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "88ab882a-b1a5-5ae9-8ed5-381ee5455f2b",
+      "name": "Confirmar armazenamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6000,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"confirm_file\",payload:{document_id:$json.stage.document_id,lease_token:$json.stage.lease_token,file:{sha256:$json.source.sha256,size_bytes:$json.source.sizeBytes,drive_file_id:$json.stage.drive_file_id,drive_folder_id:$json.stage.document.drive_folder_id||$json.source.folderId,drive_name:$('Validar estado do objeto').item.json.driveName||'Recebido - '+$json.stage.document_id.slice(0,8)} } }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "defb0858-0a63-5b2c-b7f9-67a2bd83f365",
+      "name": "Adiar sweep quando upload pendente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        320
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{pending:$json.document?.file_status!=='saved',document_id:$json.document_id}}];"
+      }
+    },
+    {
+      "id": "fb51caa1-2150-5b1c-a465-dac526e3ac0f",
+      "name": "Original baixado e validado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3000,
+        -180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !!$json.sha256 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1ff1d447-d9f1-5df4-8d5e-b4f5e40037d0",
+      "name": "Registrar falha de origem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3240,
+        -360
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"source_error\",payload:{document_id:$(\"Decidir recebimento\").item.json.documentId,error:\"Não foi possível preservar o original WhatsApp/Drive\",review_reason:\"Conferir o anexo original e a pendência de armazenamento\"} }) }}"
+      },
+      "retryOnFail": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "f27c15a2-364e-563b-904c-faddda698e2b",
+      "name": "Manter janela para recuperação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3480,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{pending:true,recovery:'forward_or_replay_same_source',document_id:$('Decidir recebimento').item.json.documentId}}];"
+      }
+    },
+    {
+      "id": "49684d6e-9d07-411f-a1ce-89f31ee91c38",
+      "name": "Drive - conferir pasta privada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.driveFolderId)+'?fields=id,mimeType,trashed,ownedByMe,shared,capabilities(canAddChildren)' }}",
+        "authentication": "genericCredentialType",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": false
+            }
+          }
+        },
+        "genericAuthType": "oAuth2Api"
+      },
+      "position": [
+        -600,
+        0
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "SELECT_DRIVE_OAUTH",
+          "name": "Select Drive OAuth"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "d3054753-723f-494b-a732-42b05f63df31",
+      "name": "Validar pasta privada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction stableId(value, code, allowEmpty = false) {\n  if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.length > 2048 || /[\\x00-\\x1f\\x7f]/.test(value)) fail(code);\n  return value;\n}\nfunction unwrap(value) {\n  if (object(value) && Object.hasOwn(value, 'statusCode')) {\n    if (value.statusCode !== 200 || !object(value.body)) fail('gmail_http_response_unproven');\n    return value.body;\n  }\n  if (!object(value)) fail('gmail_response_invalid');\n  return value;\n}\nfunction validateFolder(response, folderId) {\n  const f=unwrap(response);\n  if(f.id!==folderId||f.mimeType!=='application/vnd.google-apps.folder'||f.trashed!==false||f.ownedByMe!==true||f.shared!==false||f.capabilities?.canAddChildren!==true)fail('drive_private_owned_folder_unproven');\n  return f;\n}\nconst cfg=$('Configuração').first().json;validateFolder($json,cfg.driveFolderId);return [{json:cfg}];"
+      },
+      "position": [
+        -360,
+        0
+      ]
+    },
+    {
+      "id": "b8cf257d-e944-4d9e-ab6d-102468de6826",
+      "name": "Validar confirmação salva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const EXPECTED_MAILBOX=\"exames@example.invalid\",MAX_BYTES=20971520,MAX_MIME_DEPTH=8;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction verifySaved(receipt, stage, decoded) {\n  if(!object(receipt)||receipt.document_id!==stage.document_id||receipt.document?.id!==stage.document_id||receipt.document.file_status!=='saved'||receipt.document.sha256!==decoded.sha256||Number(receipt.document.size_bytes)!==decoded.sizeBytes||receipt.document.drive_file_id!==stage.drive_file_id||receipt.document.drive_folder_id!==stage.document.drive_folder_id)fail('drive_confirmation_unproven');\n  return {document_id:receipt.document_id,status:'saved'};\n}\nreturn [{json:verifySaved($json,$('Reservar ID e upload Drive').item.json,$('Validar bytes e SHA-256').item.json)}];"
+      },
+      "position": [
+        6240,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "88010c35-2cd5-4808-aee8-242a4e507906",
+      "name": "Próximo anexo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return $input.all().map(i=>{const json={...i.json};delete json.resetAttachments;return {...i,json};});"
+      },
+      "position": [
+        6480,
+        0
+      ]
+    },
+    {
+      "id": "8fdc97f1-4819-5fc9-abce-9a4d78c77b12",
+      "name": "Entrada WhatsApp da equipe",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1320,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "CONFIGURE_PRIVATE_WHATSAPP_PATH",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "d17d333961c865c565814c8dc98171ea"
+    },
+    {
+      "id": "dc54196f-3809-54f8-a1ff-b636d3a1c909",
+      "name": "Testar mensagem selecionada",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1320,
+        260
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a6935928-9d29-5d35-a402-798fa06a69da",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto=require(\"crypto\");\n// Chatwoot metadata/bytes adapter. Pure functions: no network, credentials or writes.\nconst MAX_BYTES = 20 * 1024 * 1024;\nconst MAX_ATTACHMENTS = 100;\nconst UUID = /^[a-f\\d]{8}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{12}$/i;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction id(value, code) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9]\\d{0,19}$/.test(value)) return value;\n  fail(code);\n}\n\n/** Canonical Brazilian phone digits. A legacy mobile alias is never inferred here. */\nfunction normalizeBrazilPhone(value) {\n  if (typeof value !== 'string' || value.length > 64 || !/^\\+?[\\d\\s().-]+$/.test(value)) return null;\n  const digits = value.replace(/\\D/g, '');\n  const national = digits.length === 12 || digits.length === 13 ? (digits.startsWith('55') ? digits.slice(2) : '') : digits;\n  // 10-digit numbers are retained as such; matching a 9-digit mobile needs explicit config.\n  if (!/^[1-9]\\d[2-9]\\d{7,8}$/.test(national)) return null;\n  if (national.length === 11 && national[2] !== '9') return null;\n  return '55' + national;\n}\n\nfunction providerPhone(value) {\n  if (typeof value !== 'string') return null;\n  return normalizeBrazilPhone(value.replace(/@(s\\.whatsapp\\.net|c\\.us)$/, ''));\n}\nfunction phoneAliases(phone, legacy) {\n  const values = [phone];\n  if (legacy && /^55[1-9]\\d9[6-9]\\d{7}$/.test(phone)) values.push(phone.slice(0, 4) + phone.slice(5));\n  return values;\n}\nfunction publicOrigin(value, code) {\n  // Deliberately narrow HTTPS grammar for n8n's Code sandbox, which exposes neither\n  // the URL global nor the url builtin. Do not turn this into a general URL resolver.\n  if (typeof value !== 'string' || !value.length || value.length > 8192 || /[\\x00-\\x20\\x7f\\\\#]/.test(value)\n    || /%(?![a-f\\d]{2})/i.test(value) || /%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)/i.test(value)) fail(code);\n  const match = /^https:\\/\\/([^/?#]+)(\\/[^?#]*)?(\\?[^#]*)?$/i.exec(value);\n  if (!match) fail(code);\n  const authority = /^([a-z\\d.-]+)(?::443)?$/i.exec(match[1]);\n  if (!authority) fail(code);\n  const hostname = authority[1].toLowerCase(), labels = hostname.split('.');\n  if (hostname.length > 253 || labels.length < 2 || labels.some(label => !/^[a-z\\d](?:[a-z\\d-]{0,61}[a-z\\d])?$/.test(label))\n    || !/^[a-z][a-z\\d-]*$/.test(labels.at(-1))\n    || labels.some(label => ['localhost', 'local', 'localdomain', 'internal', 'intranet', 'lan', 'home'].includes(label))) fail(code);\n  const pathname = match[2] || '/', search = match[3] || '';\n  const origin = 'https://' + hostname;\n  return { origin, hostname, pathname, search, href: origin + pathname + search };\n}\nfunction configValues(config) {\n  if (!object(config)) fail('whatsapp_config_invalid');\n  const accountId = id(config.accountId, 'whatsapp_account_config_invalid');\n  const inboxId = id(config.inboxId, 'whatsapp_inbox_config_invalid');\n  if (!Array.isArray(config.authorizedSenders) || !config.authorizedSenders.length || config.authorizedSenders.length > 20) fail('whatsapp_senders_config_invalid');\n  if (config.allowBrazilLegacyMobileAlias !== undefined && typeof config.allowBrazilLegacyMobileAlias !== 'boolean') fail('whatsapp_alias_config_invalid');\n  const senders = config.authorizedSenders.map(value => {\n    const phone = normalizeBrazilPhone(value);\n    if (!phone || phone.length !== 13) fail('whatsapp_senders_config_invalid');\n    return phone;\n  });\n  const base = publicOrigin(config.chatwootBaseUrl, 'whatsapp_base_url_config_invalid');\n  if (base.pathname !== '/' || base.search) fail('whatsapp_base_url_config_invalid');\n  if (config.allowedAttachmentOrigins !== undefined && (!Array.isArray(config.allowedAttachmentOrigins) || config.allowedAttachmentOrigins.length > 20)) fail('whatsapp_attachment_origins_config_invalid');\n  const origins = new Set([base.origin]);\n  for (const value of config.allowedAttachmentOrigins || []) {\n    const url = publicOrigin(value, 'whatsapp_attachment_origins_config_invalid');\n    if (url.pathname !== '/' || url.search) fail('whatsapp_attachment_origins_config_invalid');\n    origins.add(url.origin);\n  }\n  const maxBytes = config.maxBytes ?? MAX_BYTES;\n  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) fail('whatsapp_max_bytes_invalid');\n  let cutoff = null;\n  if (config.intakeCutoff !== undefined) {\n    if (typeof config.intakeCutoff !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(config.intakeCutoff)) fail('whatsapp_cutoff_invalid');\n    cutoff = Date.parse(config.intakeCutoff);\n    if (!Number.isFinite(cutoff)) fail('whatsapp_cutoff_invalid');\n  }\n  return { accountId, inboxId, senders, origins, maxBytes, cutoff, legacy: config.allowBrazilLegacyMobileAlias === true };\n}\nfunction attachmentUrl(value, origins) {\n  if (typeof value !== 'string' || !value.length || value.length > 8192 || /[\\x00-\\x20\\x7f]/.test(value)) return null;\n  try {\n    const url = publicOrigin(value, 'whatsapp_attachment_url_not_allowed');\n    return origins.has(url.origin) ? url.href : null;\n  } catch { return null; }\n}\n\n/** Follow only an absolute HTTPS URL or an origin-rooted path, always within the media allowlist. */\nfunction resolveChatwootRedirect(location, currentUrl, origins) {\n  if (typeof location !== 'string' || !location.length || typeof origins?.has !== 'function') fail('whatsapp_media_redirect_not_allowed');\n  let candidate;\n  if (/^https:\\/\\//i.test(location)) candidate = location;\n  else if (location.startsWith('/') && !location.startsWith('//')) candidate = publicOrigin(currentUrl, 'whatsapp_media_redirect_not_allowed').origin + location;\n  else fail('whatsapp_media_redirect_not_allowed');\n  const url = attachmentUrl(candidate, origins);\n  if (!url) fail('whatsapp_media_redirect_not_allowed');\n  return url;\n}\nfunction isGroup(payload) {\n  const conversation = payload.conversation, sender = payload.sender, contact = conversation?.meta?.sender;\n  const objects = [payload, conversation, sender, contact, payload.additional_attributes, conversation?.additional_attributes,\n    sender?.additional_attributes, contact?.additional_attributes, conversation?.custom_attributes, sender?.custom_attributes, contact?.custom_attributes];\n  if (objects.some(value => object(value) && (value.is_group === true || value.group === true || value.type === 'group' || value.contact_type === 'group'\n    || (typeof value.group_type === 'string' && value.group_type.toLowerCase() === 'group') || value.group_id != null))) return true;\n  const identifiers = [conversation?.contact_inbox?.source_id, sender?.identifier, sender?.phone_number, contact?.identifier, contact?.phone_number,\n    ...objects.filter(object).flatMap(value => [value.chat_id, value.remote_jid, value.jid, value.identifier, value.source_id])];\n  return identifiers.some(value => typeof value === 'string' && /@(?:g\\.us|broadcast)$/i.test(value));\n}\n\nfunction safeProviderId(value, code) {\n  const normalized = id(value, code), numeric = Number(normalized);\n  if (!Number.isSafeInteger(numeric) || numeric >= Number.MAX_SAFE_INTEGER) fail(code);\n  return normalized;\n}\nfunction unwrapChatwootResponse(response, code) {\n  if (!object(response)) fail(code);\n  if (Object.hasOwn(response, 'statusCode')) {\n    if (response.statusCode !== 200 || !object(response.body)) fail(code);\n    return response.body;\n  }\n  return response;\n}\nfunction cloneJson(value) { return JSON.parse(JSON.stringify(value)); }\n\n/** Webhook hints only choose API reads; they never authorize a sender or a file URL. */\nfunction inspectChatwootWebhook(payload, config) {\n  const cfg = configValues(config);\n  if (!object(payload)) fail('whatsapp_webhook_payload_invalid');\n  if (payload.event !== 'message_created') return { excluded: true, reason: 'not_message_created' };\n  if (![0, 'incoming'].includes(payload.message_type) || payload.private !== false) return { excluded: true, reason: 'not_external_incoming' };\n  if (isGroup(payload)) return { excluded: true, reason: 'group_or_broadcast' };\n  if (isMirror(payload)) return { excluded: true, reason: 'internal_exam_message' };\n  const accountId = safeProviderId(payload.account?.id, 'whatsapp_webhook_account_invalid');\n  const inboxId = safeProviderId(payload.inbox?.id, 'whatsapp_webhook_inbox_invalid');\n  if (accountId !== cfg.accountId || inboxId !== cfg.inboxId) return { excluded: true, reason: 'wrong_account_or_inbox' };\n  const conversationId = safeProviderId(payload.conversation?.id, 'whatsapp_webhook_conversation_invalid');\n  if (safeProviderId(payload.conversation?.inbox_id, 'whatsapp_webhook_conversation_inbox_invalid') !== inboxId) fail('whatsapp_webhook_conversation_inbox_mismatch');\n  if (payload.conversation.account_id != null && safeProviderId(payload.conversation.account_id, 'whatsapp_webhook_conversation_account_invalid') !== accountId) fail('whatsapp_webhook_conversation_account_mismatch');\n  const messageId = safeProviderId(payload.id, 'whatsapp_webhook_message_invalid');\n  return { excluded: false, request: { accountId, inboxId, conversationId, messageId, beforeMessageId: String(Number(messageId) + 1) } };\n}\n\n/** Reconstruct an event solely from matching API objects, never from webhook sender/attachments. */\nfunction canonicalChatwootEvent(request, conversationResponse, messagesResponse, config) {\n  const cfg = configValues(config);\n  if (!object(request) || safeProviderId(request.accountId, 'whatsapp_canonical_request_invalid') !== cfg.accountId\n    || safeProviderId(request.inboxId, 'whatsapp_canonical_request_invalid') !== cfg.inboxId) fail('whatsapp_canonical_request_mismatch');\n  const conversationId = safeProviderId(request.conversationId, 'whatsapp_canonical_request_invalid');\n  const messageId = safeProviderId(request.messageId, 'whatsapp_canonical_request_invalid');\n  if (request.beforeMessageId !== String(Number(messageId) + 1)) fail('whatsapp_canonical_request_window_mismatch');\n  const conversation = unwrapChatwootResponse(conversationResponse, 'whatsapp_conversation_response_unproven');\n  if (safeProviderId(conversation.id, 'whatsapp_canonical_conversation_invalid') !== conversationId\n    || safeProviderId(conversation.inbox_id, 'whatsapp_canonical_inbox_invalid') !== cfg.inboxId) fail('whatsapp_canonical_conversation_mismatch');\n  if (conversation.account_id != null && safeProviderId(conversation.account_id, 'whatsapp_canonical_account_invalid') !== cfg.accountId) fail('whatsapp_canonical_account_mismatch');\n  const messages = unwrapChatwootResponse(messagesResponse, 'whatsapp_messages_response_unproven');\n  if (!Array.isArray(messages.payload) || messages.payload.length > 20) fail('whatsapp_messages_payload_invalid');\n  const matches = messages.payload.filter(item => object(item) && safeProviderId(item.id, 'whatsapp_canonical_message_invalid') === messageId);\n  if (matches.length !== 1) fail('whatsapp_canonical_message_not_unique');\n  const message = matches[0];\n  for (const [field, expected] of [['conversation_id', conversationId], ['account_id', cfg.accountId], ['inbox_id', cfg.inboxId]]) {\n    if (message[field] != null && safeProviderId(message[field], 'whatsapp_canonical_message_' + field + '_invalid') !== expected) fail('whatsapp_canonical_message_' + field + '_mismatch');\n  }\n  if (![0, 'incoming'].includes(message.message_type) || message.private !== false) fail('whatsapp_canonical_not_external_incoming');\n  const sender = message.sender, contact = conversation.meta?.sender;\n  const probe = { ...message, conversation };\n  if (isGroup(probe)) fail('whatsapp_canonical_group_or_broadcast');\n  if (isMirror(probe)) fail('whatsapp_canonical_internal_exam_message');\n  if (!object(sender) || !object(contact) || (sender.type != null && sender.type !== 'contact') || (contact.type != null && contact.type !== 'contact')\n    || safeProviderId(sender.id, 'whatsapp_canonical_sender_id_invalid') !== safeProviderId(contact.id, 'whatsapp_canonical_contact_id_invalid')) fail('whatsapp_canonical_sender_mismatch');\n  const phone = normalizeBrazilPhone(sender.phone_number), contactPhone = normalizeBrazilPhone(contact.phone_number);\n  const phonesAgree = phone && contactPhone && (phone === contactPhone || (cfg.legacy && cfg.senders.some(value => {\n    const aliases = phoneAliases(value, true); return aliases.includes(phone) && aliases.includes(contactPhone);\n  })));\n  if (!phonesAgree) fail('whatsapp_canonical_sender_phone_mismatch');\n  // Some Chatwoot serializers omit contact_inbox. Only the two independently returned,\n  // convergent API contact identities permit reconstructing that individual source.\n  let contactInbox = conversation.contact_inbox;\n  if (contactInbox == null) contactInbox = { source_id: phone };\n  else if (!object(contactInbox) || ![phone, contactPhone].includes(providerPhone(contactInbox.source_id))) fail('whatsapp_canonical_contact_inbox_mismatch');\n  return { event: 'message_created', id: messageId, account: { id: cfg.accountId }, inbox: { id: cfg.inboxId },\n    message_type: message.message_type, private: message.private, created_at: message.created_at,\n    sender: cloneJson(sender), content: message.content,\n    content_attributes: cloneJson(message.content_attributes || {}), additional_attributes: cloneJson(message.additional_attributes || {}),\n    attachments: cloneJson(message.attachments || []), conversation: { ...cloneJson(conversation), contact_inbox: cloneJson(contactInbox) } };\n}\nfunction isMirror(payload) {\n  const attributes = [payload.content_attributes, payload.additional_attributes, payload.conversation?.additional_attributes];\n  return attributes.some(value => object(value) && Object.keys(value).some(key => /^pamvet_exam_/.test(key)))\n    || (typeof payload.content === 'string' && /\\[EXAM:[a-f\\d-]+:DELIVERY:[a-f\\d-]+\\]/i.test(payload.content));\n}\nfunction receivedTime(value) {\n  let time;\n  if (typeof value === 'number' && Number.isFinite(value) && value > 0) time = value < 1e12 ? value * 1000 : value;\n  else if (typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) time = Date.parse(value);\n  if (!Number.isFinite(time) || time <= 0) fail('whatsapp_received_at_invalid');\n  return new Date(time).toISOString();\n}\nfunction originalName(attachment) {\n  for (const value of [attachment.file_name, attachment.filename, attachment.name, attachment.fallback_title]) {\n    if (typeof value === 'string' && value.trim() && value.length <= 512 && !/[\\x00-\\x1f\\x7f]/.test(value)) return value.trim().replace(/[\\\\/]/g, '_');\n  }\n  if (typeof attachment.data_url === 'string') {\n    try {\n      const name = decodeURIComponent(publicOrigin(attachment.data_url, 'whatsapp_attachment_url_not_allowed').pathname.split('/').pop() || '');\n      if (/\\.pdf$/i.test(name) && name.length <= 512 && !/[\\x00-\\x1f\\x7f]/.test(name)) return name.replace(/[\\\\/]/g, '_');\n    } catch { /* An invalid URL becomes a pending source below. */ }\n  }\n  return 'Exame.pdf';\n}\nfunction pdfCandidate(attachment) {\n  const mime = attachment.content_type || attachment.mime_type;\n  if (typeof mime === 'string' && mime.split(';')[0].trim().toLowerCase() === 'application/pdf') return true;\n  if (typeof attachment.extension === 'string' && attachment.extension.toLowerCase().replace(/^\\./, '') === 'pdf') return true;\n  if ([attachment.file_name, attachment.filename, attachment.name, attachment.fallback_title].some(value => typeof value === 'string' && /\\.pdf$/i.test(value))) return true;\n  try { return typeof attachment.data_url === 'string' && /\\.pdf$/i.test(decodeURIComponent(publicOrigin(attachment.data_url, 'whatsapp_attachment_url_not_allowed').pathname)); } catch { return false; }\n}\n\n/** Normalize only provider metadata; the returned download URL is transient and never part of source metadata. */\nfunction inspectChatwootMessage(payload, config) {\n  const cfg = configValues(config);\n  if (!object(payload)) fail('whatsapp_payload_invalid');\n  if (payload.event !== 'message_created') return { excluded: true, reason: 'not_message_created', origins: [] };\n  if (![0, 'incoming'].includes(payload.message_type) || payload.private !== false) return { excluded: true, reason: 'not_external_incoming', origins: [] };\n  if (isGroup(payload)) return { excluded: true, reason: 'group_or_broadcast', origins: [] };\n  if (isMirror(payload)) return { excluded: true, reason: 'internal_exam_message', origins: [] };\n  if (id(payload.account?.id, 'whatsapp_account_missing') !== cfg.accountId || id(payload.inbox?.id, 'whatsapp_inbox_missing') !== cfg.inboxId) return { excluded: true, reason: 'wrong_account_or_inbox', origins: [] };\n  const messageId = id(payload.id, 'whatsapp_message_id_invalid');\n  const conversationId = id(payload.conversation?.id, 'whatsapp_conversation_id_invalid');\n  if (id(payload.conversation?.inbox_id, 'whatsapp_conversation_inbox_missing') !== cfg.inboxId) fail('whatsapp_conversation_inbox_mismatch');\n  if (payload.conversation.account_id != null && id(payload.conversation.account_id, 'whatsapp_conversation_account_invalid') !== cfg.accountId) fail('whatsapp_conversation_account_mismatch');\n  if (!object(payload.sender) || (payload.sender.type != null && payload.sender.type !== 'contact')) return { excluded: true, reason: 'not_contact_sender', origins: [] };\n  const phone = normalizeBrazilPhone(payload.sender.phone_number);\n  if (!phone) return { excluded: true, reason: 'sender_phone_unproven', origins: [] };\n  const sender = cfg.senders.find(value => phoneAliases(value, cfg.legacy).includes(phone));\n  if (!sender) return { excluded: true, reason: 'sender_not_authorized', origins: [] };\n  const allowedPhones = phoneAliases(sender, cfg.legacy);\n  // A contact_inbox source is required to prove this is the individual conversation, not its group participant.\n  const conversationPhone = providerPhone(payload.conversation.contact_inbox?.source_id);\n  if (!conversationPhone || !allowedPhones.includes(conversationPhone)) return { excluded: true, reason: 'individual_conversation_unproven', origins: [] };\n  const contact = payload.conversation.meta?.sender;\n  if (object(contact)) {\n    if (contact.type != null && contact.type !== 'contact') fail('whatsapp_contact_sender_mismatch');\n    if (contact.phone_number != null && !allowedPhones.includes(normalizeBrazilPhone(contact.phone_number))) fail('whatsapp_contact_sender_mismatch');\n    if (contact.id != null && payload.sender.id != null && id(contact.id, 'whatsapp_contact_id_invalid') !== id(payload.sender.id, 'whatsapp_sender_id_invalid')) fail('whatsapp_contact_sender_mismatch');\n  }\n  const receivedAt = receivedTime(payload.created_at);\n  if (cfg.cutoff !== null && Date.parse(receivedAt) < cfg.cutoff) return { excluded: true, reason: 'before_intake_cutoff', origins: [] };\n  if (!Array.isArray(payload.attachments) || !payload.attachments.length) return { excluded: true, reason: 'no_pdf', origins: [] };\n  if (payload.attachments.length > MAX_ATTACHMENTS) fail('whatsapp_attachment_limit');\n  const origins = [], seen = new Set();\n  for (const attachment of payload.attachments) {\n    if (!object(attachment)) fail('whatsapp_attachment_invalid');\n    if (!pdfCandidate(attachment)) continue;\n    const attachmentId = id(attachment.id, 'whatsapp_attachment_id_invalid');\n    if (seen.has(attachmentId)) fail('whatsapp_duplicate_attachment_id');\n    seen.add(attachmentId);\n    if (attachment.account_id != null && id(attachment.account_id, 'whatsapp_attachment_account_invalid') !== cfg.accountId) fail('whatsapp_attachment_account_mismatch');\n    if (attachment.message_id != null && id(attachment.message_id, 'whatsapp_attachment_message_invalid') !== messageId) fail('whatsapp_attachment_message_mismatch');\n    const key = 'chatwoot-attachment:' + attachmentId;\n    const name = originalName(attachment);\n    const downloadUrl = attachmentUrl(attachment.data_url, cfg.origins);\n    const size = attachment.file_size == null ? null : (typeof attachment.file_size === 'number'\n      || (typeof attachment.file_size === 'string' && /^\\d+$/.test(attachment.file_size))) ? Number(attachment.file_size) : NaN;\n    const badSize = size !== null && (!Number.isSafeInteger(size) || size <= 0 || size > cfg.maxBytes);\n    const mime = attachment.content_type || attachment.mime_type;\n    const badMime = mime != null && (typeof mime !== 'string' || !['application/pdf', 'application/octet-stream'].includes(mime.split(';')[0].trim().toLowerCase()));\n    const reason = badSize ? 'pdf_size_invalid_or_exceeds_limit' : badMime ? 'pdf_metadata_mismatch' : !downloadUrl ? 'pdf_url_missing_or_untrusted' : null;\n    const source = { channel: 'whatsapp', account_id: 'chatwoot:' + cfg.accountId + ':inbox:' + cfg.inboxId, message_id: messageId,\n      attachment_id: key, original_name: name, mime_type: 'application/pdf', received_at: receivedAt,\n      metadata: { provider: 'chatwoot', chatwoot_account_id: cfg.accountId, chatwoot_inbox_id: cfg.inboxId,\n        chatwoot_conversation_id: conversationId, chatwoot_message_id: messageId, chatwoot_attachment_id: attachmentId,\n        sender_phone: sender, sender_allowlisted: true, unknown_sender: false, exam_candidate: true,\n        attachment_url_sha256: downloadUrl ? crypto.createHash('sha256').update(downloadUrl).digest('hex') : null,\n        missing_attachment: !downloadUrl, unsupported_attachment: badSize || badMime, pending_reason: reason } };\n    origins.push({ message: { id: messageId, receivedDateTime: receivedAt, sender, conversationId },\n      attachment: { id: key, chatwootAttachmentId: attachmentId, name, contentType: 'application/pdf', size, downloadUrl: reason ? null : downloadUrl },\n      source, missing: reason !== null, needsReview: false, pendingReason: reason });\n  }\n  return origins.length ? { excluded: false, origins } : { excluded: true, reason: 'no_pdf', origins: [] };\n}\n\n/** Verify already-downloaded original bytes, only after the durable origin reservation. */\nfunction decodeChatwootOriginal(bytes, response, origin, config) {\n  const cfg = configValues(config);\n  if (!object(origin) || typeof origin.documentId !== 'string' || !UUID.test(origin.documentId) || origin.skip || origin.missing\n    || origin.reservation?.document_id !== origin.documentId\n    || (origin.reservation.document && origin.reservation.document.id !== origin.documentId)\n    || origin.source?.channel !== 'whatsapp' || origin.source?.metadata?.provider !== 'chatwoot'\n    || origin.source.account_id !== 'chatwoot:' + cfg.accountId + ':inbox:' + cfg.inboxId\n    || origin.source.message_id !== origin.source.metadata.chatwoot_message_id\n    || origin.source.attachment_id !== origin.attachment?.id\n    || origin.attachment.id !== 'chatwoot-attachment:' + origin.source.metadata.chatwoot_attachment_id) fail('whatsapp_original_not_reserved');\n  const url = attachmentUrl(origin.attachment.downloadUrl, cfg.origins);\n  if (!url || origin.source.metadata.attachment_url_sha256 !== crypto.createHash('sha256').update(url).digest('hex')) fail('whatsapp_original_url_mismatch');\n  if (!object(response) || response.statusCode !== 200 || !object(response.headers)) fail('whatsapp_original_http_response_unproven');\n  const types = Object.entries(response.headers).filter(([key]) => key.toLowerCase() === 'content-type');\n  if (types.length !== 1 || typeof types[0][1] !== 'string' || !['application/pdf', 'application/octet-stream'].includes(types[0][1].split(';')[0].trim().toLowerCase())) fail('whatsapp_pdf_mime_unproven');\n  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > cfg.maxBytes) fail('whatsapp_pdf_size_invalid');\n  if (origin.attachment.size !== null && origin.attachment.size !== bytes.length) fail('whatsapp_pdf_size_mismatch');\n  if (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) fail('whatsapp_pdf_signature_missing');\n  if (typeof config.driveFolderId !== 'string' || !config.driveFolderId.length) fail('whatsapp_destination_folder_missing');\n  return { bytes, json: { ...origin, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), sizeBytes: bytes.length, folderId: config.driveFolderId } };\n}\n\nconst cfg={\n  \"enabled\": false,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"mailbox\": \"exames@example.invalid\",\n  \"driveFolderId\": \"SELECT_PRIVATE_DRIVE_FOLDER\",\n  \"intakeCutoff\": \"\",\n  \"notificationCutoff\": \"\",\n  \"manualMessageId\": \"\",\n  \"dedicatedMailbox\": false,\n  \"allowedSenders\": [],\n  \"examSubjectHints\": [\n    \"exame\",\n    \"laudo\",\n    \"resultados do atendimento\",\n    \"resultado de exame\",\n    \"hemograma\",\n    \"ultrassom\"\n  ],\n  \"maxBytes\": 20971520,\n  \"maxMimeDepth\": 8,\n  \"maxPages\": 100,\n  \"includeSpamTrash\": false,\n  \"worker\": \"n8n-exames-operacional\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"pamLaudosBaseUrl\": \"https://pamlaudos.example.invalid\",\n  \"allowHttpChatwoot\": false,\n  \"providerConfirmationStatuses\": [\n    \"delivered\",\n    \"read\"\n  ],\n  \"extractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"extractorModel\": \"gpt-4.1\",\n  \"maxTextChars\": 80000,\n  \"maxProcessingPages\": 100,\n  \"authorizedSenders\": [],\n  \"allowedAttachmentOrigins\": [],\n  \"allowBrazilLegacyMobileAlias\": false,\n  \"webhookPath\": \"CONFIGURE_PRIVATE_WHATSAPP_PATH\",\n  \"manualConversationId\": \"\"\n};\nif(!cfg.enabled)throw new Error('EXAMES_WHATSAPP_PAUSADO');\nif(!cfg.serviceUrl.startsWith('https://')||!cfg.serviceUrl.endsWith('/functions/v1/exam-document-service'))throw new Error('Serviço de exames inválido');\nlet payload=$input.first().json.body;\nif(!payload){\n if(!['test','manual'].includes($execution.mode)||!cfg.manualMessageId||!cfg.manualConversationId)throw new Error('Selecione uma mensagem real para o teste manual');\n payload={event:'message_created',id:cfg.manualMessageId,message_type:'incoming',private:false,account:{id:cfg.accountId},inbox:{id:cfg.inboxId},conversation:{id:cfg.manualConversationId,inbox_id:cfg.inboxId}};\n}\nconst inspected=inspectChatwootWebhook(payload,cfg);\nreturn [{json:{...cfg,...inspected,worker:cfg.worker+':whatsapp:'+$execution.id}}];\n"
+      }
+    },
+    {
+      "id": "c065b768-e940-5088-ade9-b76278d050ad",
+      "name": "Evento para conferir",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -840,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.excluded }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "fb5b05cf-070d-5eed-a063-323ed9a2b381",
+      "name": "Chatwoot - conferir conversa de origem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -120,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.request.conversationId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "chatwootApi",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_CHATWOOT_CREDENTIAL",
+          "name": "Select Chatwoot credential"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "ca597d0d-63a6-5a19-a933-472131acd073",
+      "name": "Chatwoot - reler mensagem de origem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.request.conversationId+'/messages?before='+$('Configuração').first().json.request.beforeMessageId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "chatwootApi",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_CHATWOOT_CREDENTIAL",
+          "name": "Select Chatwoot credential"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "7e389815-d544-5c3a-aac6-3592944133aa",
+      "name": "Conferir remetente e todos os PDFs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto=require(\"crypto\");\n// Chatwoot metadata/bytes adapter. Pure functions: no network, credentials or writes.\nconst MAX_BYTES = 20 * 1024 * 1024;\nconst MAX_ATTACHMENTS = 100;\nconst UUID = /^[a-f\\d]{8}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{12}$/i;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction id(value, code) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9]\\d{0,19}$/.test(value)) return value;\n  fail(code);\n}\n\n/** Canonical Brazilian phone digits. A legacy mobile alias is never inferred here. */\nfunction normalizeBrazilPhone(value) {\n  if (typeof value !== 'string' || value.length > 64 || !/^\\+?[\\d\\s().-]+$/.test(value)) return null;\n  const digits = value.replace(/\\D/g, '');\n  const national = digits.length === 12 || digits.length === 13 ? (digits.startsWith('55') ? digits.slice(2) : '') : digits;\n  // 10-digit numbers are retained as such; matching a 9-digit mobile needs explicit config.\n  if (!/^[1-9]\\d[2-9]\\d{7,8}$/.test(national)) return null;\n  if (national.length === 11 && national[2] !== '9') return null;\n  return '55' + national;\n}\n\nfunction providerPhone(value) {\n  if (typeof value !== 'string') return null;\n  return normalizeBrazilPhone(value.replace(/@(s\\.whatsapp\\.net|c\\.us)$/, ''));\n}\nfunction phoneAliases(phone, legacy) {\n  const values = [phone];\n  if (legacy && /^55[1-9]\\d9[6-9]\\d{7}$/.test(phone)) values.push(phone.slice(0, 4) + phone.slice(5));\n  return values;\n}\nfunction publicOrigin(value, code) {\n  // Deliberately narrow HTTPS grammar for n8n's Code sandbox, which exposes neither\n  // the URL global nor the url builtin. Do not turn this into a general URL resolver.\n  if (typeof value !== 'string' || !value.length || value.length > 8192 || /[\\x00-\\x20\\x7f\\\\#]/.test(value)\n    || /%(?![a-f\\d]{2})/i.test(value) || /%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)/i.test(value)) fail(code);\n  const match = /^https:\\/\\/([^/?#]+)(\\/[^?#]*)?(\\?[^#]*)?$/i.exec(value);\n  if (!match) fail(code);\n  const authority = /^([a-z\\d.-]+)(?::443)?$/i.exec(match[1]);\n  if (!authority) fail(code);\n  const hostname = authority[1].toLowerCase(), labels = hostname.split('.');\n  if (hostname.length > 253 || labels.length < 2 || labels.some(label => !/^[a-z\\d](?:[a-z\\d-]{0,61}[a-z\\d])?$/.test(label))\n    || !/^[a-z][a-z\\d-]*$/.test(labels.at(-1))\n    || labels.some(label => ['localhost', 'local', 'localdomain', 'internal', 'intranet', 'lan', 'home'].includes(label))) fail(code);\n  const pathname = match[2] || '/', search = match[3] || '';\n  const origin = 'https://' + hostname;\n  return { origin, hostname, pathname, search, href: origin + pathname + search };\n}\nfunction configValues(config) {\n  if (!object(config)) fail('whatsapp_config_invalid');\n  const accountId = id(config.accountId, 'whatsapp_account_config_invalid');\n  const inboxId = id(config.inboxId, 'whatsapp_inbox_config_invalid');\n  if (!Array.isArray(config.authorizedSenders) || !config.authorizedSenders.length || config.authorizedSenders.length > 20) fail('whatsapp_senders_config_invalid');\n  if (config.allowBrazilLegacyMobileAlias !== undefined && typeof config.allowBrazilLegacyMobileAlias !== 'boolean') fail('whatsapp_alias_config_invalid');\n  const senders = config.authorizedSenders.map(value => {\n    const phone = normalizeBrazilPhone(value);\n    if (!phone || phone.length !== 13) fail('whatsapp_senders_config_invalid');\n    return phone;\n  });\n  const base = publicOrigin(config.chatwootBaseUrl, 'whatsapp_base_url_config_invalid');\n  if (base.pathname !== '/' || base.search) fail('whatsapp_base_url_config_invalid');\n  if (config.allowedAttachmentOrigins !== undefined && (!Array.isArray(config.allowedAttachmentOrigins) || config.allowedAttachmentOrigins.length > 20)) fail('whatsapp_attachment_origins_config_invalid');\n  const origins = new Set([base.origin]);\n  for (const value of config.allowedAttachmentOrigins || []) {\n    const url = publicOrigin(value, 'whatsapp_attachment_origins_config_invalid');\n    if (url.pathname !== '/' || url.search) fail('whatsapp_attachment_origins_config_invalid');\n    origins.add(url.origin);\n  }\n  const maxBytes = config.maxBytes ?? MAX_BYTES;\n  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) fail('whatsapp_max_bytes_invalid');\n  let cutoff = null;\n  if (config.intakeCutoff !== undefined) {\n    if (typeof config.intakeCutoff !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(config.intakeCutoff)) fail('whatsapp_cutoff_invalid');\n    cutoff = Date.parse(config.intakeCutoff);\n    if (!Number.isFinite(cutoff)) fail('whatsapp_cutoff_invalid');\n  }\n  return { accountId, inboxId, senders, origins, maxBytes, cutoff, legacy: config.allowBrazilLegacyMobileAlias === true };\n}\nfunction attachmentUrl(value, origins) {\n  if (typeof value !== 'string' || !value.length || value.length > 8192 || /[\\x00-\\x20\\x7f]/.test(value)) return null;\n  try {\n    const url = publicOrigin(value, 'whatsapp_attachment_url_not_allowed');\n    return origins.has(url.origin) ? url.href : null;\n  } catch { return null; }\n}\n\n/** Follow only an absolute HTTPS URL or an origin-rooted path, always within the media allowlist. */\nfunction resolveChatwootRedirect(location, currentUrl, origins) {\n  if (typeof location !== 'string' || !location.length || typeof origins?.has !== 'function') fail('whatsapp_media_redirect_not_allowed');\n  let candidate;\n  if (/^https:\\/\\//i.test(location)) candidate = location;\n  else if (location.startsWith('/') && !location.startsWith('//')) candidate = publicOrigin(currentUrl, 'whatsapp_media_redirect_not_allowed').origin + location;\n  else fail('whatsapp_media_redirect_not_allowed');\n  const url = attachmentUrl(candidate, origins);\n  if (!url) fail('whatsapp_media_redirect_not_allowed');\n  return url;\n}\nfunction isGroup(payload) {\n  const conversation = payload.conversation, sender = payload.sender, contact = conversation?.meta?.sender;\n  const objects = [payload, conversation, sender, contact, payload.additional_attributes, conversation?.additional_attributes,\n    sender?.additional_attributes, contact?.additional_attributes, conversation?.custom_attributes, sender?.custom_attributes, contact?.custom_attributes];\n  if (objects.some(value => object(value) && (value.is_group === true || value.group === true || value.type === 'group' || value.contact_type === 'group'\n    || (typeof value.group_type === 'string' && value.group_type.toLowerCase() === 'group') || value.group_id != null))) return true;\n  const identifiers = [conversation?.contact_inbox?.source_id, sender?.identifier, sender?.phone_number, contact?.identifier, contact?.phone_number,\n    ...objects.filter(object).flatMap(value => [value.chat_id, value.remote_jid, value.jid, value.identifier, value.source_id])];\n  return identifiers.some(value => typeof value === 'string' && /@(?:g\\.us|broadcast)$/i.test(value));\n}\n\nfunction safeProviderId(value, code) {\n  const normalized = id(value, code), numeric = Number(normalized);\n  if (!Number.isSafeInteger(numeric) || numeric >= Number.MAX_SAFE_INTEGER) fail(code);\n  return normalized;\n}\nfunction unwrapChatwootResponse(response, code) {\n  if (!object(response)) fail(code);\n  if (Object.hasOwn(response, 'statusCode')) {\n    if (response.statusCode !== 200 || !object(response.body)) fail(code);\n    return response.body;\n  }\n  return response;\n}\nfunction cloneJson(value) { return JSON.parse(JSON.stringify(value)); }\n\n/** Webhook hints only choose API reads; they never authorize a sender or a file URL. */\nfunction inspectChatwootWebhook(payload, config) {\n  const cfg = configValues(config);\n  if (!object(payload)) fail('whatsapp_webhook_payload_invalid');\n  if (payload.event !== 'message_created') return { excluded: true, reason: 'not_message_created' };\n  if (![0, 'incoming'].includes(payload.message_type) || payload.private !== false) return { excluded: true, reason: 'not_external_incoming' };\n  if (isGroup(payload)) return { excluded: true, reason: 'group_or_broadcast' };\n  if (isMirror(payload)) return { excluded: true, reason: 'internal_exam_message' };\n  const accountId = safeProviderId(payload.account?.id, 'whatsapp_webhook_account_invalid');\n  const inboxId = safeProviderId(payload.inbox?.id, 'whatsapp_webhook_inbox_invalid');\n  if (accountId !== cfg.accountId || inboxId !== cfg.inboxId) return { excluded: true, reason: 'wrong_account_or_inbox' };\n  const conversationId = safeProviderId(payload.conversation?.id, 'whatsapp_webhook_conversation_invalid');\n  if (safeProviderId(payload.conversation?.inbox_id, 'whatsapp_webhook_conversation_inbox_invalid') !== inboxId) fail('whatsapp_webhook_conversation_inbox_mismatch');\n  if (payload.conversation.account_id != null && safeProviderId(payload.conversation.account_id, 'whatsapp_webhook_conversation_account_invalid') !== accountId) fail('whatsapp_webhook_conversation_account_mismatch');\n  const messageId = safeProviderId(payload.id, 'whatsapp_webhook_message_invalid');\n  return { excluded: false, request: { accountId, inboxId, conversationId, messageId, beforeMessageId: String(Number(messageId) + 1) } };\n}\n\n/** Reconstruct an event solely from matching API objects, never from webhook sender/attachments. */\nfunction canonicalChatwootEvent(request, conversationResponse, messagesResponse, config) {\n  const cfg = configValues(config);\n  if (!object(request) || safeProviderId(request.accountId, 'whatsapp_canonical_request_invalid') !== cfg.accountId\n    || safeProviderId(request.inboxId, 'whatsapp_canonical_request_invalid') !== cfg.inboxId) fail('whatsapp_canonical_request_mismatch');\n  const conversationId = safeProviderId(request.conversationId, 'whatsapp_canonical_request_invalid');\n  const messageId = safeProviderId(request.messageId, 'whatsapp_canonical_request_invalid');\n  if (request.beforeMessageId !== String(Number(messageId) + 1)) fail('whatsapp_canonical_request_window_mismatch');\n  const conversation = unwrapChatwootResponse(conversationResponse, 'whatsapp_conversation_response_unproven');\n  if (safeProviderId(conversation.id, 'whatsapp_canonical_conversation_invalid') !== conversationId\n    || safeProviderId(conversation.inbox_id, 'whatsapp_canonical_inbox_invalid') !== cfg.inboxId) fail('whatsapp_canonical_conversation_mismatch');\n  if (conversation.account_id != null && safeProviderId(conversation.account_id, 'whatsapp_canonical_account_invalid') !== cfg.accountId) fail('whatsapp_canonical_account_mismatch');\n  const messages = unwrapChatwootResponse(messagesResponse, 'whatsapp_messages_response_unproven');\n  if (!Array.isArray(messages.payload) || messages.payload.length > 20) fail('whatsapp_messages_payload_invalid');\n  const matches = messages.payload.filter(item => object(item) && safeProviderId(item.id, 'whatsapp_canonical_message_invalid') === messageId);\n  if (matches.length !== 1) fail('whatsapp_canonical_message_not_unique');\n  const message = matches[0];\n  for (const [field, expected] of [['conversation_id', conversationId], ['account_id', cfg.accountId], ['inbox_id', cfg.inboxId]]) {\n    if (message[field] != null && safeProviderId(message[field], 'whatsapp_canonical_message_' + field + '_invalid') !== expected) fail('whatsapp_canonical_message_' + field + '_mismatch');\n  }\n  if (![0, 'incoming'].includes(message.message_type) || message.private !== false) fail('whatsapp_canonical_not_external_incoming');\n  const sender = message.sender, contact = conversation.meta?.sender;\n  const probe = { ...message, conversation };\n  if (isGroup(probe)) fail('whatsapp_canonical_group_or_broadcast');\n  if (isMirror(probe)) fail('whatsapp_canonical_internal_exam_message');\n  if (!object(sender) || !object(contact) || (sender.type != null && sender.type !== 'contact') || (contact.type != null && contact.type !== 'contact')\n    || safeProviderId(sender.id, 'whatsapp_canonical_sender_id_invalid') !== safeProviderId(contact.id, 'whatsapp_canonical_contact_id_invalid')) fail('whatsapp_canonical_sender_mismatch');\n  const phone = normalizeBrazilPhone(sender.phone_number), contactPhone = normalizeBrazilPhone(contact.phone_number);\n  const phonesAgree = phone && contactPhone && (phone === contactPhone || (cfg.legacy && cfg.senders.some(value => {\n    const aliases = phoneAliases(value, true); return aliases.includes(phone) && aliases.includes(contactPhone);\n  })));\n  if (!phonesAgree) fail('whatsapp_canonical_sender_phone_mismatch');\n  // Some Chatwoot serializers omit contact_inbox. Only the two independently returned,\n  // convergent API contact identities permit reconstructing that individual source.\n  let contactInbox = conversation.contact_inbox;\n  if (contactInbox == null) contactInbox = { source_id: phone };\n  else if (!object(contactInbox) || ![phone, contactPhone].includes(providerPhone(contactInbox.source_id))) fail('whatsapp_canonical_contact_inbox_mismatch');\n  return { event: 'message_created', id: messageId, account: { id: cfg.accountId }, inbox: { id: cfg.inboxId },\n    message_type: message.message_type, private: message.private, created_at: message.created_at,\n    sender: cloneJson(sender), content: message.content,\n    content_attributes: cloneJson(message.content_attributes || {}), additional_attributes: cloneJson(message.additional_attributes || {}),\n    attachments: cloneJson(message.attachments || []), conversation: { ...cloneJson(conversation), contact_inbox: cloneJson(contactInbox) } };\n}\nfunction isMirror(payload) {\n  const attributes = [payload.content_attributes, payload.additional_attributes, payload.conversation?.additional_attributes];\n  return attributes.some(value => object(value) && Object.keys(value).some(key => /^pamvet_exam_/.test(key)))\n    || (typeof payload.content === 'string' && /\\[EXAM:[a-f\\d-]+:DELIVERY:[a-f\\d-]+\\]/i.test(payload.content));\n}\nfunction receivedTime(value) {\n  let time;\n  if (typeof value === 'number' && Number.isFinite(value) && value > 0) time = value < 1e12 ? value * 1000 : value;\n  else if (typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) time = Date.parse(value);\n  if (!Number.isFinite(time) || time <= 0) fail('whatsapp_received_at_invalid');\n  return new Date(time).toISOString();\n}\nfunction originalName(attachment) {\n  for (const value of [attachment.file_name, attachment.filename, attachment.name, attachment.fallback_title]) {\n    if (typeof value === 'string' && value.trim() && value.length <= 512 && !/[\\x00-\\x1f\\x7f]/.test(value)) return value.trim().replace(/[\\\\/]/g, '_');\n  }\n  if (typeof attachment.data_url === 'string') {\n    try {\n      const name = decodeURIComponent(publicOrigin(attachment.data_url, 'whatsapp_attachment_url_not_allowed').pathname.split('/').pop() || '');\n      if (/\\.pdf$/i.test(name) && name.length <= 512 && !/[\\x00-\\x1f\\x7f]/.test(name)) return name.replace(/[\\\\/]/g, '_');\n    } catch { /* An invalid URL becomes a pending source below. */ }\n  }\n  return 'Exame.pdf';\n}\nfunction pdfCandidate(attachment) {\n  const mime = attachment.content_type || attachment.mime_type;\n  if (typeof mime === 'string' && mime.split(';')[0].trim().toLowerCase() === 'application/pdf') return true;\n  if (typeof attachment.extension === 'string' && attachment.extension.toLowerCase().replace(/^\\./, '') === 'pdf') return true;\n  if ([attachment.file_name, attachment.filename, attachment.name, attachment.fallback_title].some(value => typeof value === 'string' && /\\.pdf$/i.test(value))) return true;\n  try { return typeof attachment.data_url === 'string' && /\\.pdf$/i.test(decodeURIComponent(publicOrigin(attachment.data_url, 'whatsapp_attachment_url_not_allowed').pathname)); } catch { return false; }\n}\n\n/** Normalize only provider metadata; the returned download URL is transient and never part of source metadata. */\nfunction inspectChatwootMessage(payload, config) {\n  const cfg = configValues(config);\n  if (!object(payload)) fail('whatsapp_payload_invalid');\n  if (payload.event !== 'message_created') return { excluded: true, reason: 'not_message_created', origins: [] };\n  if (![0, 'incoming'].includes(payload.message_type) || payload.private !== false) return { excluded: true, reason: 'not_external_incoming', origins: [] };\n  if (isGroup(payload)) return { excluded: true, reason: 'group_or_broadcast', origins: [] };\n  if (isMirror(payload)) return { excluded: true, reason: 'internal_exam_message', origins: [] };\n  if (id(payload.account?.id, 'whatsapp_account_missing') !== cfg.accountId || id(payload.inbox?.id, 'whatsapp_inbox_missing') !== cfg.inboxId) return { excluded: true, reason: 'wrong_account_or_inbox', origins: [] };\n  const messageId = id(payload.id, 'whatsapp_message_id_invalid');\n  const conversationId = id(payload.conversation?.id, 'whatsapp_conversation_id_invalid');\n  if (id(payload.conversation?.inbox_id, 'whatsapp_conversation_inbox_missing') !== cfg.inboxId) fail('whatsapp_conversation_inbox_mismatch');\n  if (payload.conversation.account_id != null && id(payload.conversation.account_id, 'whatsapp_conversation_account_invalid') !== cfg.accountId) fail('whatsapp_conversation_account_mismatch');\n  if (!object(payload.sender) || (payload.sender.type != null && payload.sender.type !== 'contact')) return { excluded: true, reason: 'not_contact_sender', origins: [] };\n  const phone = normalizeBrazilPhone(payload.sender.phone_number);\n  if (!phone) return { excluded: true, reason: 'sender_phone_unproven', origins: [] };\n  const sender = cfg.senders.find(value => phoneAliases(value, cfg.legacy).includes(phone));\n  if (!sender) return { excluded: true, reason: 'sender_not_authorized', origins: [] };\n  const allowedPhones = phoneAliases(sender, cfg.legacy);\n  // A contact_inbox source is required to prove this is the individual conversation, not its group participant.\n  const conversationPhone = providerPhone(payload.conversation.contact_inbox?.source_id);\n  if (!conversationPhone || !allowedPhones.includes(conversationPhone)) return { excluded: true, reason: 'individual_conversation_unproven', origins: [] };\n  const contact = payload.conversation.meta?.sender;\n  if (object(contact)) {\n    if (contact.type != null && contact.type !== 'contact') fail('whatsapp_contact_sender_mismatch');\n    if (contact.phone_number != null && !allowedPhones.includes(normalizeBrazilPhone(contact.phone_number))) fail('whatsapp_contact_sender_mismatch');\n    if (contact.id != null && payload.sender.id != null && id(contact.id, 'whatsapp_contact_id_invalid') !== id(payload.sender.id, 'whatsapp_sender_id_invalid')) fail('whatsapp_contact_sender_mismatch');\n  }\n  const receivedAt = receivedTime(payload.created_at);\n  if (cfg.cutoff !== null && Date.parse(receivedAt) < cfg.cutoff) return { excluded: true, reason: 'before_intake_cutoff', origins: [] };\n  if (!Array.isArray(payload.attachments) || !payload.attachments.length) return { excluded: true, reason: 'no_pdf', origins: [] };\n  if (payload.attachments.length > MAX_ATTACHMENTS) fail('whatsapp_attachment_limit');\n  const origins = [], seen = new Set();\n  for (const attachment of payload.attachments) {\n    if (!object(attachment)) fail('whatsapp_attachment_invalid');\n    if (!pdfCandidate(attachment)) continue;\n    const attachmentId = id(attachment.id, 'whatsapp_attachment_id_invalid');\n    if (seen.has(attachmentId)) fail('whatsapp_duplicate_attachment_id');\n    seen.add(attachmentId);\n    if (attachment.account_id != null && id(attachment.account_id, 'whatsapp_attachment_account_invalid') !== cfg.accountId) fail('whatsapp_attachment_account_mismatch');\n    if (attachment.message_id != null && id(attachment.message_id, 'whatsapp_attachment_message_invalid') !== messageId) fail('whatsapp_attachment_message_mismatch');\n    const key = 'chatwoot-attachment:' + attachmentId;\n    const name = originalName(attachment);\n    const downloadUrl = attachmentUrl(attachment.data_url, cfg.origins);\n    const size = attachment.file_size == null ? null : (typeof attachment.file_size === 'number'\n      || (typeof attachment.file_size === 'string' && /^\\d+$/.test(attachment.file_size))) ? Number(attachment.file_size) : NaN;\n    const badSize = size !== null && (!Number.isSafeInteger(size) || size <= 0 || size > cfg.maxBytes);\n    const mime = attachment.content_type || attachment.mime_type;\n    const badMime = mime != null && (typeof mime !== 'string' || !['application/pdf', 'application/octet-stream'].includes(mime.split(';')[0].trim().toLowerCase()));\n    const reason = badSize ? 'pdf_size_invalid_or_exceeds_limit' : badMime ? 'pdf_metadata_mismatch' : !downloadUrl ? 'pdf_url_missing_or_untrusted' : null;\n    const source = { channel: 'whatsapp', account_id: 'chatwoot:' + cfg.accountId + ':inbox:' + cfg.inboxId, message_id: messageId,\n      attachment_id: key, original_name: name, mime_type: 'application/pdf', received_at: receivedAt,\n      metadata: { provider: 'chatwoot', chatwoot_account_id: cfg.accountId, chatwoot_inbox_id: cfg.inboxId,\n        chatwoot_conversation_id: conversationId, chatwoot_message_id: messageId, chatwoot_attachment_id: attachmentId,\n        sender_phone: sender, sender_allowlisted: true, unknown_sender: false, exam_candidate: true,\n        attachment_url_sha256: downloadUrl ? crypto.createHash('sha256').update(downloadUrl).digest('hex') : null,\n        missing_attachment: !downloadUrl, unsupported_attachment: badSize || badMime, pending_reason: reason } };\n    origins.push({ message: { id: messageId, receivedDateTime: receivedAt, sender, conversationId },\n      attachment: { id: key, chatwootAttachmentId: attachmentId, name, contentType: 'application/pdf', size, downloadUrl: reason ? null : downloadUrl },\n      source, missing: reason !== null, needsReview: false, pendingReason: reason });\n  }\n  return origins.length ? { excluded: false, origins } : { excluded: true, reason: 'no_pdf', origins: [] };\n}\n\n/** Verify already-downloaded original bytes, only after the durable origin reservation. */\nfunction decodeChatwootOriginal(bytes, response, origin, config) {\n  const cfg = configValues(config);\n  if (!object(origin) || typeof origin.documentId !== 'string' || !UUID.test(origin.documentId) || origin.skip || origin.missing\n    || origin.reservation?.document_id !== origin.documentId\n    || (origin.reservation.document && origin.reservation.document.id !== origin.documentId)\n    || origin.source?.channel !== 'whatsapp' || origin.source?.metadata?.provider !== 'chatwoot'\n    || origin.source.account_id !== 'chatwoot:' + cfg.accountId + ':inbox:' + cfg.inboxId\n    || origin.source.message_id !== origin.source.metadata.chatwoot_message_id\n    || origin.source.attachment_id !== origin.attachment?.id\n    || origin.attachment.id !== 'chatwoot-attachment:' + origin.source.metadata.chatwoot_attachment_id) fail('whatsapp_original_not_reserved');\n  const url = attachmentUrl(origin.attachment.downloadUrl, cfg.origins);\n  if (!url || origin.source.metadata.attachment_url_sha256 !== crypto.createHash('sha256').update(url).digest('hex')) fail('whatsapp_original_url_mismatch');\n  if (!object(response) || response.statusCode !== 200 || !object(response.headers)) fail('whatsapp_original_http_response_unproven');\n  const types = Object.entries(response.headers).filter(([key]) => key.toLowerCase() === 'content-type');\n  if (types.length !== 1 || typeof types[0][1] !== 'string' || !['application/pdf', 'application/octet-stream'].includes(types[0][1].split(';')[0].trim().toLowerCase())) fail('whatsapp_pdf_mime_unproven');\n  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > cfg.maxBytes) fail('whatsapp_pdf_size_invalid');\n  if (origin.attachment.size !== null && origin.attachment.size !== bytes.length) fail('whatsapp_pdf_size_mismatch');\n  if (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) fail('whatsapp_pdf_signature_missing');\n  if (typeof config.driveFolderId !== 'string' || !config.driveFolderId.length) fail('whatsapp_destination_folder_missing');\n  return { bytes, json: { ...origin, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), sizeBytes: bytes.length, folderId: config.driveFolderId } };\n}\n\nconst cfg=$('Configuração').first().json;const canonical=canonicalChatwootEvent(cfg.request,$('Chatwoot - conferir conversa de origem').first().json,$json,cfg);const result=inspectChatwootMessage(canonical,cfg);return result.excluded?[{json:{messageExcluded:true,reason:result.reason}}]:result.origins.map(json=>({json:{...json,resetAttachments:true}}));"
+      }
+    },
+    {
+      "id": "7062f1ea-ba34-54c8-a839-03ed22acf436",
+      "name": "PDF autorizado disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ !$json.messageExcluded }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d369e9c5-8a70-5c94-acdb-0b34a23974e0",
+      "name": "Chatwoot - baixar PDF reservado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const crypto=require(\"crypto\");\n// Chatwoot metadata/bytes adapter. Pure functions: no network, credentials or writes.\nconst MAX_BYTES = 20 * 1024 * 1024;\nconst MAX_ATTACHMENTS = 100;\nconst UUID = /^[a-f\\d]{8}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{4}-[a-f\\d]{12}$/i;\nfunction fail(code) { throw new Error(code); }\nfunction object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }\nfunction id(value, code) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9]\\d{0,19}$/.test(value)) return value;\n  fail(code);\n}\n\n/** Canonical Brazilian phone digits. A legacy mobile alias is never inferred here. */\nfunction normalizeBrazilPhone(value) {\n  if (typeof value !== 'string' || value.length > 64 || !/^\\+?[\\d\\s().-]+$/.test(value)) return null;\n  const digits = value.replace(/\\D/g, '');\n  const national = digits.length === 12 || digits.length === 13 ? (digits.startsWith('55') ? digits.slice(2) : '') : digits;\n  // 10-digit numbers are retained as such; matching a 9-digit mobile needs explicit config.\n  if (!/^[1-9]\\d[2-9]\\d{7,8}$/.test(national)) return null;\n  if (national.length === 11 && national[2] !== '9') return null;\n  return '55' + national;\n}\n\nfunction providerPhone(value) {\n  if (typeof value !== 'string') return null;\n  return normalizeBrazilPhone(value.replace(/@(s\\.whatsapp\\.net|c\\.us)$/, ''));\n}\nfunction phoneAliases(phone, legacy) {\n  const values = [phone];\n  if (legacy && /^55[1-9]\\d9[6-9]\\d{7}$/.test(phone)) values.push(phone.slice(0, 4) + phone.slice(5));\n  return values;\n}\nfunction publicOrigin(value, code) {\n  // Deliberately narrow HTTPS grammar for n8n's Code sandbox, which exposes neither\n  // the URL global nor the url builtin. Do not turn this into a general URL resolver.\n  if (typeof value !== 'string' || !value.length || value.length > 8192 || /[\\x00-\\x20\\x7f\\\\#]/.test(value)\n    || /%(?![a-f\\d]{2})/i.test(value) || /%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)/i.test(value)) fail(code);\n  const match = /^https:\\/\\/([^/?#]+)(\\/[^?#]*)?(\\?[^#]*)?$/i.exec(value);\n  if (!match) fail(code);\n  const authority = /^([a-z\\d.-]+)(?::443)?$/i.exec(match[1]);\n  if (!authority) fail(code);\n  const hostname = authority[1].toLowerCase(), labels = hostname.split('.');\n  if (hostname.length > 253 || labels.length < 2 || labels.some(label => !/^[a-z\\d](?:[a-z\\d-]{0,61}[a-z\\d])?$/.test(label))\n    || !/^[a-z][a-z\\d-]*$/.test(labels.at(-1))\n    || labels.some(label => ['localhost', 'local', 'localdomain', 'internal', 'intranet', 'lan', 'home'].includes(label))) fail(code);\n  const pathname = match[2] || '/', search = match[3] || '';\n  const origin = 'https://' + hostname;\n  return { origin, hostname, pathname, search, href: origin + pathname + search };\n}\nfunction configValues(config) {\n  if (!object(config)) fail('whatsapp_config_invalid');\n  const accountId = id(config.accountId, 'whatsapp_account_config_invalid');\n  const inboxId = id(config.inboxId, 'whatsapp_inbox_config_invalid');\n  if (!Array.isArray(config.authorizedSenders) || !config.authorizedSenders.length || config.authorizedSenders.length > 20) fail('whatsapp_senders_config_invalid');\n  if (config.allowBrazilLegacyMobileAlias !== undefined && typeof config.allowBrazilLegacyMobileAlias !== 'boolean') fail('whatsapp_alias_config_invalid');\n  const senders = config.authorizedSenders.map(value => {\n    const phone = normalizeBrazilPhone(value);\n    if (!phone || phone.length !== 13) fail('whatsapp_senders_config_invalid');\n    return phone;\n  });\n  const base = publicOrigin(config.chatwootBaseUrl, 'whatsapp_base_url_config_invalid');\n  if (base.pathname !== '/' || base.search) fail('whatsapp_base_url_config_invalid');\n  if (config.allowedAttachmentOrigins !== undefined && (!Array.isArray(config.allowedAttachmentOrigins) || config.allowedAttachmentOrigins.length > 20)) fail('whatsapp_attachment_origins_config_invalid');\n  const origins = new Set([base.origin]);\n  for (const value of config.allowedAttachmentOrigins || []) {\n    const url = publicOrigin(value, 'whatsapp_attachment_origins_config_invalid');\n    if (url.pathname !== '/' || url.search) fail('whatsapp_attachment_origins_config_invalid');\n    origins.add(url.origin);\n  }\n  const maxBytes = config.maxBytes ?? MAX_BYTES;\n  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) fail('whatsapp_max_bytes_invalid');\n  let cutoff = null;\n  if (config.intakeCutoff !== undefined) {\n    if (typeof config.intakeCutoff !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(config.intakeCutoff)) fail('whatsapp_cutoff_invalid');\n    cutoff = Date.parse(config.intakeCutoff);\n    if (!Number.isFinite(cutoff)) fail('whatsapp_cutoff_invalid');\n  }\n  return { accountId, inboxId, senders, origins, maxBytes, cutoff, legacy: config.allowBrazilLegacyMobileAlias === true };\n}\nfunction attachmentUrl(value, origins) {\n  if (typeof value !== 'string' || !value.length || value.length > 8192 || /[\\x00-\\x20\\x7f]/.test(value)) return null;\n  try {\n    const url = publicOrigin(value, 'whatsapp_attachment_url_not_allowed');\n    return origins.has(url.origin) ? url.href : null;\n  } catch { return null; }\n}\n\n/** Follow only an absolute HTTPS URL or an origin-rooted path, always within the media allowlist. */\nfunction resolveChatwootRedirect(location, currentUrl, origins) {\n  if (typeof location !== 'string' || !location.length || typeof origins?.has !== 'function') fail('whatsapp_media_redirect_not_allowed');\n  let candidate;\n  if (/^https:\\/\\//i.test(location)) candidate = location;\n  else if (location.startsWith('/') && !location.startsWith('//')) candidate = publicOrigin(currentUrl, 'whatsapp_media_redirect_not_allowed').origin + location;\n  else fail('whatsapp_media_redirect_not_allowed');\n  const url = attachmentUrl(candidate, origins);\n  if (!url) fail('whatsapp_media_redirect_not_allowed');\n  return url;\n}\nfunction isGroup(payload) {\n  const conversation = payload.conversation, sender = payload.sender, contact = conversation?.meta?.sender;\n  const objects = [payload, conversation, sender, contact, payload.additional_attributes, conversation?.additional_attributes,\n    sender?.additional_attributes, contact?.additional_attributes, conversation?.custom_attributes, sender?.custom_attributes, contact?.custom_attributes];\n  if (objects.some(value => object(value) && (value.is_group === true || value.group === true || value.type === 'group' || value.contact_type === 'group'\n    || (typeof value.group_type === 'string' && value.group_type.toLowerCase() === 'group') || value.group_id != null))) return true;\n  const identifiers = [conversation?.contact_inbox?.source_id, sender?.identifier, sender?.phone_number, contact?.identifier, contact?.phone_number,\n    ...objects.filter(object).flatMap(value => [value.chat_id, value.remote_jid, value.jid, value.identifier, value.source_id])];\n  return identifiers.some(value => typeof value === 'string' && /@(?:g\\.us|broadcast)$/i.test(value));\n}\n\nfunction safeProviderId(value, code) {\n  const normalized = id(value, code), numeric = Number(normalized);\n  if (!Number.isSafeInteger(numeric) || numeric >= Number.MAX_SAFE_INTEGER) fail(code);\n  return normalized;\n}\nfunction unwrapChatwootResponse(response, code) {\n  if (!object(response)) fail(code);\n  if (Object.hasOwn(response, 'statusCode')) {\n    if (response.statusCode !== 200 || !object(response.body)) fail(code);\n    return response.body;\n  }\n  return response;\n}\nfunction cloneJson(value) { return JSON.parse(JSON.stringify(value)); }\n\n/** Webhook hints only choose API reads; they never authorize a sender or a file URL. */\nfunction inspectChatwootWebhook(payload, config) {\n  const cfg = configValues(config);\n  if (!object(payload)) fail('whatsapp_webhook_payload_invalid');\n  if (payload.event !== 'message_created') return { excluded: true, reason: 'not_message_created' };\n  if (![0, 'incoming'].includes(payload.message_type) || payload.private !== false) return { excluded: true, reason: 'not_external_incoming' };\n  if (isGroup(payload)) return { excluded: true, reason: 'group_or_broadcast' };\n  if (isMirror(payload)) return { excluded: true, reason: 'internal_exam_message' };\n  const accountId = safeProviderId(payload.account?.id, 'whatsapp_webhook_account_invalid');\n  const inboxId = safeProviderId(payload.inbox?.id, 'whatsapp_webhook_inbox_invalid');\n  if (accountId !== cfg.accountId || inboxId !== cfg.inboxId) return { excluded: true, reason: 'wrong_account_or_inbox' };\n  const conversationId = safeProviderId(payload.conversation?.id, 'whatsapp_webhook_conversation_invalid');\n  if (safeProviderId(payload.conversation?.inbox_id, 'whatsapp_webhook_conversation_inbox_invalid') !== inboxId) fail('whatsapp_webhook_conversation_inbox_mismatch');\n  if (payload.conversation.account_id != null && safeProviderId(payload.conversation.account_id, 'whatsapp_webhook_conversation_account_invalid') !== accountId) fail('whatsapp_webhook_conversation_account_mismatch');\n  const messageId = safeProviderId(payload.id, 'whatsapp_webhook_message_invalid');\n  return { excluded: false, request: { accountId, inboxId, conversationId, messageId, beforeMessageId: String(Number(messageId) + 1) } };\n}\n\n/** Reconstruct an event solely from matching API objects, never from webhook sender/attachments. */\nfunction canonicalChatwootEvent(request, conversationResponse, messagesResponse, config) {\n  const cfg = configValues(config);\n  if (!object(request) || safeProviderId(request.accountId, 'whatsapp_canonical_request_invalid') !== cfg.accountId\n    || safeProviderId(request.inboxId, 'whatsapp_canonical_request_invalid') !== cfg.inboxId) fail('whatsapp_canonical_request_mismatch');\n  const conversationId = safeProviderId(request.conversationId, 'whatsapp_canonical_request_invalid');\n  const messageId = safeProviderId(request.messageId, 'whatsapp_canonical_request_invalid');\n  if (request.beforeMessageId !== String(Number(messageId) + 1)) fail('whatsapp_canonical_request_window_mismatch');\n  const conversation = unwrapChatwootResponse(conversationResponse, 'whatsapp_conversation_response_unproven');\n  if (safeProviderId(conversation.id, 'whatsapp_canonical_conversation_invalid') !== conversationId\n    || safeProviderId(conversation.inbox_id, 'whatsapp_canonical_inbox_invalid') !== cfg.inboxId) fail('whatsapp_canonical_conversation_mismatch');\n  if (conversation.account_id != null && safeProviderId(conversation.account_id, 'whatsapp_canonical_account_invalid') !== cfg.accountId) fail('whatsapp_canonical_account_mismatch');\n  const messages = unwrapChatwootResponse(messagesResponse, 'whatsapp_messages_response_unproven');\n  if (!Array.isArray(messages.payload) || messages.payload.length > 20) fail('whatsapp_messages_payload_invalid');\n  const matches = messages.payload.filter(item => object(item) && safeProviderId(item.id, 'whatsapp_canonical_message_invalid') === messageId);\n  if (matches.length !== 1) fail('whatsapp_canonical_message_not_unique');\n  const message = matches[0];\n  for (const [field, expected] of [['conversation_id', conversationId], ['account_id', cfg.accountId], ['inbox_id', cfg.inboxId]]) {\n    if (message[field] != null && safeProviderId(message[field], 'whatsapp_canonical_message_' + field + '_invalid') !== expected) fail('whatsapp_canonical_message_' + field + '_mismatch');\n  }\n  if (![0, 'incoming'].includes(message.message_type) || message.private !== false) fail('whatsapp_canonical_not_external_incoming');\n  const sender = message.sender, contact = conversation.meta?.sender;\n  const probe = { ...message, conversation };\n  if (isGroup(probe)) fail('whatsapp_canonical_group_or_broadcast');\n  if (isMirror(probe)) fail('whatsapp_canonical_internal_exam_message');\n  if (!object(sender) || !object(contact) || (sender.type != null && sender.type !== 'contact') || (contact.type != null && contact.type !== 'contact')\n    || safeProviderId(sender.id, 'whatsapp_canonical_sender_id_invalid') !== safeProviderId(contact.id, 'whatsapp_canonical_contact_id_invalid')) fail('whatsapp_canonical_sender_mismatch');\n  const phone = normalizeBrazilPhone(sender.phone_number), contactPhone = normalizeBrazilPhone(contact.phone_number);\n  const phonesAgree = phone && contactPhone && (phone === contactPhone || (cfg.legacy && cfg.senders.some(value => {\n    const aliases = phoneAliases(value, true); return aliases.includes(phone) && aliases.includes(contactPhone);\n  })));\n  if (!phonesAgree) fail('whatsapp_canonical_sender_phone_mismatch');\n  // Some Chatwoot serializers omit contact_inbox. Only the two independently returned,\n  // convergent API contact identities permit reconstructing that individual source.\n  let contactInbox = conversation.contact_inbox;\n  if (contactInbox == null) contactInbox = { source_id: phone };\n  else if (!object(contactInbox) || ![phone, contactPhone].includes(providerPhone(contactInbox.source_id))) fail('whatsapp_canonical_contact_inbox_mismatch');\n  return { event: 'message_created', id: messageId, account: { id: cfg.accountId }, inbox: { id: cfg.inboxId },\n    message_type: message.message_type, private: message.private, created_at: message.created_at,\n    sender: cloneJson(sender), content: message.content,\n    content_attributes: cloneJson(message.content_attributes || {}), additional_attributes: cloneJson(message.additional_attributes || {}),\n    attachments: cloneJson(message.attachments || []), conversation: { ...cloneJson(conversation), contact_inbox: cloneJson(contactInbox) } };\n}\nfunction isMirror(payload) {\n  const attributes = [payload.content_attributes, payload.additional_attributes, payload.conversation?.additional_attributes];\n  return attributes.some(value => object(value) && Object.keys(value).some(key => /^pamvet_exam_/.test(key)))\n    || (typeof payload.content === 'string' && /\\[EXAM:[a-f\\d-]+:DELIVERY:[a-f\\d-]+\\]/i.test(payload.content));\n}\nfunction receivedTime(value) {\n  let time;\n  if (typeof value === 'number' && Number.isFinite(value) && value > 0) time = value < 1e12 ? value * 1000 : value;\n  else if (typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) time = Date.parse(value);\n  if (!Number.isFinite(time) || time <= 0) fail('whatsapp_received_at_invalid');\n  return new Date(time).toISOString();\n}\nfunction originalName(attachment) {\n  for (const value of [attachment.file_name, attachment.filename, attachment.name, attachment.fallback_title]) {\n    if (typeof value === 'string' && value.trim() && value.length <= 512 && !/[\\x00-\\x1f\\x7f]/.test(value)) return value.trim().replace(/[\\\\/]/g, '_');\n  }\n  if (typeof attachment.data_url === 'string') {\n    try {\n      const name = decodeURIComponent(publicOrigin(attachment.data_url, 'whatsapp_attachment_url_not_allowed').pathname.split('/').pop() || '');\n      if (/\\.pdf$/i.test(name) && name.length <= 512 && !/[\\x00-\\x1f\\x7f]/.test(name)) return name.replace(/[\\\\/]/g, '_');\n    } catch { /* An invalid URL becomes a pending source below. */ }\n  }\n  return 'Exame.pdf';\n}\nfunction pdfCandidate(attachment) {\n  const mime = attachment.content_type || attachment.mime_type;\n  if (typeof mime === 'string' && mime.split(';')[0].trim().toLowerCase() === 'application/pdf') return true;\n  if (typeof attachment.extension === 'string' && attachment.extension.toLowerCase().replace(/^\\./, '') === 'pdf') return true;\n  if ([attachment.file_name, attachment.filename, attachment.name, attachment.fallback_title].some(value => typeof value === 'string' && /\\.pdf$/i.test(value))) return true;\n  try { return typeof attachment.data_url === 'string' && /\\.pdf$/i.test(decodeURIComponent(publicOrigin(attachment.data_url, 'whatsapp_attachment_url_not_allowed').pathname)); } catch { return false; }\n}\n\n/** Normalize only provider metadata; the returned download URL is transient and never part of source metadata. */\nfunction inspectChatwootMessage(payload, config) {\n  const cfg = configValues(config);\n  if (!object(payload)) fail('whatsapp_payload_invalid');\n  if (payload.event !== 'message_created') return { excluded: true, reason: 'not_message_created', origins: [] };\n  if (![0, 'incoming'].includes(payload.message_type) || payload.private !== false) return { excluded: true, reason: 'not_external_incoming', origins: [] };\n  if (isGroup(payload)) return { excluded: true, reason: 'group_or_broadcast', origins: [] };\n  if (isMirror(payload)) return { excluded: true, reason: 'internal_exam_message', origins: [] };\n  if (id(payload.account?.id, 'whatsapp_account_missing') !== cfg.accountId || id(payload.inbox?.id, 'whatsapp_inbox_missing') !== cfg.inboxId) return { excluded: true, reason: 'wrong_account_or_inbox', origins: [] };\n  const messageId = id(payload.id, 'whatsapp_message_id_invalid');\n  const conversationId = id(payload.conversation?.id, 'whatsapp_conversation_id_invalid');\n  if (id(payload.conversation?.inbox_id, 'whatsapp_conversation_inbox_missing') !== cfg.inboxId) fail('whatsapp_conversation_inbox_mismatch');\n  if (payload.conversation.account_id != null && id(payload.conversation.account_id, 'whatsapp_conversation_account_invalid') !== cfg.accountId) fail('whatsapp_conversation_account_mismatch');\n  if (!object(payload.sender) || (payload.sender.type != null && payload.sender.type !== 'contact')) return { excluded: true, reason: 'not_contact_sender', origins: [] };\n  const phone = normalizeBrazilPhone(payload.sender.phone_number);\n  if (!phone) return { excluded: true, reason: 'sender_phone_unproven', origins: [] };\n  const sender = cfg.senders.find(value => phoneAliases(value, cfg.legacy).includes(phone));\n  if (!sender) return { excluded: true, reason: 'sender_not_authorized', origins: [] };\n  const allowedPhones = phoneAliases(sender, cfg.legacy);\n  // A contact_inbox source is required to prove this is the individual conversation, not its group participant.\n  const conversationPhone = providerPhone(payload.conversation.contact_inbox?.source_id);\n  if (!conversationPhone || !allowedPhones.includes(conversationPhone)) return { excluded: true, reason: 'individual_conversation_unproven', origins: [] };\n  const contact = payload.conversation.meta?.sender;\n  if (object(contact)) {\n    if (contact.type != null && contact.type !== 'contact') fail('whatsapp_contact_sender_mismatch');\n    if (contact.phone_number != null && !allowedPhones.includes(normalizeBrazilPhone(contact.phone_number))) fail('whatsapp_contact_sender_mismatch');\n    if (contact.id != null && payload.sender.id != null && id(contact.id, 'whatsapp_contact_id_invalid') !== id(payload.sender.id, 'whatsapp_sender_id_invalid')) fail('whatsapp_contact_sender_mismatch');\n  }\n  const receivedAt = receivedTime(payload.created_at);\n  if (cfg.cutoff !== null && Date.parse(receivedAt) < cfg.cutoff) return { excluded: true, reason: 'before_intake_cutoff', origins: [] };\n  if (!Array.isArray(payload.attachments) || !payload.attachments.length) return { excluded: true, reason: 'no_pdf', origins: [] };\n  if (payload.attachments.length > MAX_ATTACHMENTS) fail('whatsapp_attachment_limit');\n  const origins = [], seen = new Set();\n  for (const attachment of payload.attachments) {\n    if (!object(attachment)) fail('whatsapp_attachment_invalid');\n    if (!pdfCandidate(attachment)) continue;\n    const attachmentId = id(attachment.id, 'whatsapp_attachment_id_invalid');\n    if (seen.has(attachmentId)) fail('whatsapp_duplicate_attachment_id');\n    seen.add(attachmentId);\n    if (attachment.account_id != null && id(attachment.account_id, 'whatsapp_attachment_account_invalid') !== cfg.accountId) fail('whatsapp_attachment_account_mismatch');\n    if (attachment.message_id != null && id(attachment.message_id, 'whatsapp_attachment_message_invalid') !== messageId) fail('whatsapp_attachment_message_mismatch');\n    const key = 'chatwoot-attachment:' + attachmentId;\n    const name = originalName(attachment);\n    const downloadUrl = attachmentUrl(attachment.data_url, cfg.origins);\n    const size = attachment.file_size == null ? null : (typeof attachment.file_size === 'number'\n      || (typeof attachment.file_size === 'string' && /^\\d+$/.test(attachment.file_size))) ? Number(attachment.file_size) : NaN;\n    const badSize = size !== null && (!Number.isSafeInteger(size) || size <= 0 || size > cfg.maxBytes);\n    const mime = attachment.content_type || attachment.mime_type;\n    const badMime = mime != null && (typeof mime !== 'string' || !['application/pdf', 'application/octet-stream'].includes(mime.split(';')[0].trim().toLowerCase()));\n    const reason = badSize ? 'pdf_size_invalid_or_exceeds_limit' : badMime ? 'pdf_metadata_mismatch' : !downloadUrl ? 'pdf_url_missing_or_untrusted' : null;\n    const source = { channel: 'whatsapp', account_id: 'chatwoot:' + cfg.accountId + ':inbox:' + cfg.inboxId, message_id: messageId,\n      attachment_id: key, original_name: name, mime_type: 'application/pdf', received_at: receivedAt,\n      metadata: { provider: 'chatwoot', chatwoot_account_id: cfg.accountId, chatwoot_inbox_id: cfg.inboxId,\n        chatwoot_conversation_id: conversationId, chatwoot_message_id: messageId, chatwoot_attachment_id: attachmentId,\n        sender_phone: sender, sender_allowlisted: true, unknown_sender: false, exam_candidate: true,\n        attachment_url_sha256: downloadUrl ? crypto.createHash('sha256').update(downloadUrl).digest('hex') : null,\n        missing_attachment: !downloadUrl, unsupported_attachment: badSize || badMime, pending_reason: reason } };\n    origins.push({ message: { id: messageId, receivedDateTime: receivedAt, sender, conversationId },\n      attachment: { id: key, chatwootAttachmentId: attachmentId, name, contentType: 'application/pdf', size, downloadUrl: reason ? null : downloadUrl },\n      source, missing: reason !== null, needsReview: false, pendingReason: reason });\n  }\n  return origins.length ? { excluded: false, origins } : { excluded: true, reason: 'no_pdf', origins: [] };\n}\n\n/** Verify already-downloaded original bytes, only after the durable origin reservation. */\nfunction decodeChatwootOriginal(bytes, response, origin, config) {\n  const cfg = configValues(config);\n  if (!object(origin) || typeof origin.documentId !== 'string' || !UUID.test(origin.documentId) || origin.skip || origin.missing\n    || origin.reservation?.document_id !== origin.documentId\n    || (origin.reservation.document && origin.reservation.document.id !== origin.documentId)\n    || origin.source?.channel !== 'whatsapp' || origin.source?.metadata?.provider !== 'chatwoot'\n    || origin.source.account_id !== 'chatwoot:' + cfg.accountId + ':inbox:' + cfg.inboxId\n    || origin.source.message_id !== origin.source.metadata.chatwoot_message_id\n    || origin.source.attachment_id !== origin.attachment?.id\n    || origin.attachment.id !== 'chatwoot-attachment:' + origin.source.metadata.chatwoot_attachment_id) fail('whatsapp_original_not_reserved');\n  const url = attachmentUrl(origin.attachment.downloadUrl, cfg.origins);\n  if (!url || origin.source.metadata.attachment_url_sha256 !== crypto.createHash('sha256').update(url).digest('hex')) fail('whatsapp_original_url_mismatch');\n  if (!object(response) || response.statusCode !== 200 || !object(response.headers)) fail('whatsapp_original_http_response_unproven');\n  const types = Object.entries(response.headers).filter(([key]) => key.toLowerCase() === 'content-type');\n  if (types.length !== 1 || typeof types[0][1] !== 'string' || !['application/pdf', 'application/octet-stream'].includes(types[0][1].split(';')[0].trim().toLowerCase())) fail('whatsapp_pdf_mime_unproven');\n  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > cfg.maxBytes) fail('whatsapp_pdf_size_invalid');\n  if (origin.attachment.size !== null && origin.attachment.size !== bytes.length) fail('whatsapp_pdf_size_mismatch');\n  if (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) fail('whatsapp_pdf_signature_missing');\n  if (typeof config.driveFolderId !== 'string' || !config.driveFolderId.length) fail('whatsapp_destination_folder_missing');\n  return { bytes, json: { ...origin, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), sizeBytes: bytes.length, folderId: config.driveFolderId } };\n}\n\nconst origin=$json,cfg=$('Configuração').first().json;\nconst verifiedConfig=configValues(cfg);\n// The same origin/receipt/URL binding checked after download must hold before the first GET.\nif(!object(origin)||typeof origin.documentId!=='string'||!UUID.test(origin.documentId)||origin.skip||origin.missing\n ||origin.reservation?.document_id!==origin.documentId||(origin.reservation.document&&origin.reservation.document.id!==origin.documentId)\n ||origin.source?.channel!=='whatsapp'||origin.source?.metadata?.provider!=='chatwoot'\n ||origin.source.account_id!=='chatwoot:'+verifiedConfig.accountId+':inbox:'+verifiedConfig.inboxId\n ||origin.source.message_id!==origin.source.metadata.chatwoot_message_id\n ||!object(origin.attachment)||origin.source.attachment_id!==origin.attachment.id\n ||origin.attachment.id!=='chatwoot-attachment:'+origin.source.metadata.chatwoot_attachment_id)throw new Error('whatsapp_original_not_reserved');\nlet url=attachmentUrl(origin.attachment.downloadUrl,verifiedConfig.origins);\nif(!url||origin.source.metadata.attachment_url_sha256!==crypto.createHash('sha256').update(url).digest('hex'))throw new Error('whatsapp_original_url_mismatch');\nconst allowed=verifiedConfig.origins;const visited=new Set();let response,bytes;\nfor(let hop=0;hop<4;hop++){\n if(!attachmentUrl(url,allowed)||visited.has(url))throw new Error('whatsapp_media_redirect_not_allowed');visited.add(url);\n response=await this.helpers.httpRequest({method:'GET',url,returnFullResponse:true,encoding:'arraybuffer',disableFollowRedirect:true,ignoreHttpStatusErrors:true,timeout:30000});\n if(response.statusCode===200){bytes=Buffer.from(response.body);break;}\n if(![301,302,303,307,308].includes(response.statusCode))throw new Error('whatsapp_media_download_failed');\n const location=response.headers?.location||response.headers?.Location;if(typeof location!=='string')throw new Error('whatsapp_media_redirect_missing');\n url=resolveChatwootRedirect(location,url,allowed);\n}\nif(!bytes)throw new Error('whatsapp_media_redirect_limit');\nconst decoded=decodeChatwootOriginal(bytes,response,origin,cfg);\nreturn [{json:decoded.json,binary:{data:await this.helpers.prepareBinaryData(decoded.bytes,decoded.json.source.original_name,'application/pdf')}}];\n"
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "8075499e-efb5-529d-aec2-5bbe80c87aec",
+      "name": "Recebimento encerrado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        -260
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{accepted:true,processed:true}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Evento para conferir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Um anexo por vez": {
+      "main": [
+        [
+          {
+            "node": "Recebimento encerrado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reservar origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar origem": {
+      "main": [
+        [
+          {
+            "node": "Decidir recebimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir recebimento": {
+      "main": [
+        [
+          {
+            "node": "Precisa baixar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Precisa baixar": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - baixar PDF reservado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Próximo anexo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar bytes e SHA-256": {
+      "main": [
+        [
+          {
+            "node": "Original baixado e validado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gerar ID de arquivo": {
+      "main": [
+        [
+          {
+            "node": "Reservar ID e upload Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar ID e upload Drive": {
+      "main": [
+        [
+          {
+            "node": "Upload reservado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload reservado": {
+      "main": [
+        [
+          {
+            "node": "Drive - consultar ID reservado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adiar sweep quando upload pendente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adiar sweep quando upload pendente": {
+      "main": [
+        [
+          {
+            "node": "Próximo anexo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - consultar ID reservado": {
+      "main": [
+        [
+          {
+            "node": "Validar estado do objeto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar estado do objeto": {
+      "main": [
+        [
+          {
+            "node": "Metadados ausentes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Metadados ausentes": {
+      "main": [
+        [
+          {
+            "node": "Drive - criar metadados com ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Restaurar contexto Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - criar metadados com ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Restaurar contexto Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar contexto Drive": {
+      "main": [
+        [
+          {
+            "node": "Objeto já tem bytes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Objeto já tem bytes": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir bytes salvos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Drive - gravar bytes no ID fixo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - gravar bytes no ID fixo": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir bytes salvos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - conferir bytes salvos": {
+      "main": [
+        [
+          {
+            "node": "Conferir integridade do original",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir integridade do original": {
+      "main": [
+        [
+          {
+            "node": "Confirmar armazenamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar armazenamento": {
+      "main": [
+        [
+          {
+            "node": "Validar confirmação salva",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Original baixado e validado": {
+      "main": [
+        [
+          {
+            "node": "Drive - gerar ID de arquivo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar falha de origem": {
+      "main": [
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manter janela para recuperação": {
+      "main": [
+        [
+          {
+            "node": "Próximo anexo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive - conferir pasta privada": {
+      "main": [
+        [
+          {
+            "node": "Validar pasta privada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar pasta privada": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - conferir conversa de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar confirmação salva": {
+      "main": [
+        [
+          {
+            "node": "Próximo anexo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Manter janela para recuperação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Próximo anexo": {
+      "main": [
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada WhatsApp da equipe": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Testar mensagem selecionada": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evento para conferir": {
+      "main": [
+        [
+          {
+            "node": "Drive - conferir pasta privada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Recebimento encerrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - conferir conversa de origem": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - reler mensagem de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - reler mensagem de origem": {
+      "main": [
+        [
+          {
+            "node": "Conferir remetente e todos os PDFs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir remetente e todos os PDFs": {
+      "main": [
+        [
+          {
+            "node": "PDF autorizado disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF autorizado disponível": {
+      "main": [
+        [
+          {
+            "node": "Um anexo por vez",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Recebimento encerrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - baixar PDF reservado": {
+      "main": [
+        [
+          {
+            "node": "Validar bytes e SHA-256",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar falha de origem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900,
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

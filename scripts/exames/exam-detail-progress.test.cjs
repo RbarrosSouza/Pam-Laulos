@@ -43,6 +43,32 @@ test('group proof and email source stay distinct from API submission and other i
   assert.equal(getExamDetailProgress(doc({ sources: [], received_at: received }), now).emailReceived, false);
 });
 
+test('WhatsApp and manual receipts are real intake evidence without pretending they arrived by email', () => {
+  for (const channel of ['whatsapp', 'manual']) {
+    const result = getExamDetailProgress(doc({ sources: [{ id: channel, channel, received_at: received }] }), now);
+    assert.equal(result.emailReceived, false);
+    assert.equal(result.originReceived, true);
+    assert.equal(result.originChannel, channel);
+    assert.equal(result.groupSent, true);
+  }
+  const noOrigin = getExamDetailProgress(doc({ sources: [] }), now);
+  assert.equal(noOrigin.originReceived, false);
+  assert.equal(noOrigin.originChannel, null);
+  assert.equal(getExamDetailProgress(doc({ sources: [{ id: 'unknown', channel: 'unsupported', received_at: received }] }), now).originReceived, false);
+  assert.equal(getExamDetailProgress(doc({ sources: [{ id: 'invalid', channel: 'whatsapp', received_at: 'invalid' }] }), now).originReceived, false);
+  assert.equal(getExamDetailProgress(doc({ sources: [{ id: 'fallback', source_channel: 'whatsapp' }] }), now).originChannel, 'whatsapp');
+});
+
+test('deduplicated multi-channel receipts prioritize email, then WhatsApp, independent of source order', () => {
+  const entries = ['manual', 'whatsapp', 'email'].map(channel => ({ id: channel, channel, received_at: received }));
+  for (const sources of [entries, [...entries].reverse()]) {
+    const result = getExamDetailProgress(doc({ sources }), now);
+    assert.equal(result.originChannel, 'email');
+    assert.equal(result.emailReceived, true);
+  }
+  assert.equal(getExamDetailProgress(doc({ sources: entries.slice(0, 2) }), now).originChannel, 'whatsapp');
+});
+
 test('assuming a document never completes contact; mixed item outcomes remain partial', () => {
   const result = getExamDetailProgress(doc({
     assigned_to: 'vet', contact_status: 'assigned',
@@ -74,6 +100,19 @@ test('only a missing patient link receives the waiting-to-link summary', () => {
   ]) {
     assert.notEqual(getExamDetailProgress({ ...ready, ...extra }, now).summary, 'Aguardando vincular cliente');
   }
+});
+
+test('completed WhatsApp contact can await only the patient link, while missing group proof cannot', () => {
+  const whatsapp = doc({
+    sources: [{ id: 'whatsapp', channel: 'whatsapp', received_at: received }],
+    contact_status: 'completed', items: doneItems,
+  });
+  const waiting = getExamDetailProgress(whatsapp, now);
+  assert.equal(waiting.emailReceived, false);
+  assert.equal(waiting.originReceived, true);
+  assert.equal(waiting.summary, 'Aguardando vincular cliente');
+  assert.equal(getExamDetailProgress({ ...whatsapp, group_status: 'submitted' }, now).summary, 'Em andamento');
+  assert.equal(getExamDetailProgress({ ...whatsapp, file_status: 'pending' }, now).summary, 'Em andamento');
 });
 
 test('patient selection is not a completed attachment, and an attachment failure is not mislabeled as missing client', () => {

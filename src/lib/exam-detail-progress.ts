@@ -10,6 +10,8 @@ export type ExamDetailSummary =
 
 export interface ExamDetailProgress {
   emailReceived: boolean
+  originReceived: boolean
+  originChannel: 'email' | 'whatsapp' | 'manual' | null
   groupSent: boolean
   nexusLinked: boolean
   contactCompleted: boolean
@@ -39,10 +41,17 @@ function groupAge(sentAt: string | null, now: number): string | null {
 
 /** Present persisted pipeline evidence; assignment never implies contact. */
 export function getExamDetailProgress(doc: ExamDocument, now = Date.now()): ExamDetailProgress {
-  const emailReceived = doc.sources.some(source =>
-    (source.channel || source.source_channel) === 'email'
+  const receivedThrough = (channel: string) => doc.sources.some(source =>
+    (source.channel || source.source_channel) === channel
     && timestamp(source.received_at || doc.received_at) !== null,
   )
+  const emailReceived = receivedThrough('email')
+  // One canonical document may have been received through several channels.
+  // Keep the established email presentation when that evidence also exists.
+  const originChannel = emailReceived ? 'email'
+    : receivedThrough('whatsapp') ? 'whatsapp'
+      : receivedThrough('manual') ? 'manual' : null
+  const originReceived = originChannel !== null
   // SQL accepts group 'sent' only with provider proof or a team confirmation.
   // 'submitted', 'uncertain', 'completed' and a waiver do not prove an upload.
   const groupSent = doc.group_status === 'sent'
@@ -59,7 +68,7 @@ export function getExamDetailProgress(doc: ExamDocument, now = Date.now()): Exam
   // The database also accounts for storage and authorized group exceptions.
   // Four local indicators alone must not invent an overall completion.
   if (doc.completed) summary = 'Concluído'
-  else if (contactCompleted && emailReceived && groupSent && doc.file_status === 'saved') {
+  else if (contactCompleted && originReceived && groupSent && doc.file_status === 'saved') {
     if (!doc.pet_id && ['awaiting_link', 'waiting_link', 'pending'].includes(doc.nexus_status)) {
       summary = 'Aguardando vincular cliente'
     } else if (doc.pet_id && doc.identification_status === 'confirmed' && doc.nexus_status === 'pending') {
@@ -70,6 +79,8 @@ export function getExamDetailProgress(doc: ExamDocument, now = Date.now()): Exam
 
   return {
     emailReceived,
+    originReceived,
+    originChannel,
     groupSent,
     nexusLinked,
     contactCompleted,
