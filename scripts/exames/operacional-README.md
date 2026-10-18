@@ -109,4 +109,6 @@ Novos PDFs podem identificar a solicitante por trecho documental explícito. A a
 
 A migração `20261018000012_exam_document_responsibility.sql` preserva os contratos implantados e acrescenta os campos `responsible_vet_*` à consulta e à tarefa do grupo. Não reprocessa documentos antigos nem reinicia entregas. Após instalar essa migração, atualizar os nós revisados de OP02/OP03 e a interface. Não executar novamente os envios para testar uma legenda.
 
+O seletor antigo do CRM pode conter um nome diferente do seu ID clínico. Essa divergência também exige seleção manual na página do exame; a automação não escolhe silenciosamente um dos dois valores. A escolha na página do exame grava ID e nome juntos, registra o autor e preserva o veterinário original da venda.
+
 Validação direcionada: `npm run test:exames:responsavel`.
