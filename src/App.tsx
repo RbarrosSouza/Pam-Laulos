@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AnimatePresence } from 'framer-motion'
@@ -9,7 +10,7 @@ import { ShipSamples } from '@/pages/ShipSamples'
 import { LateExams } from '@/pages/LateExams'
 import { ShipmentHistory } from '@/pages/ShipmentHistory'
 import { NewExams } from '@/pages/NewExams'
-import { ExamDocumentDetail } from '@/pages/ExamDocumentDetail'
+const ExamDocumentDetail = lazy(() => import('@/pages/ExamDocumentDetail').then(module => ({ default: module.ExamDocumentDetail })))
 import { ExamShortLink } from '@/pages/ExamShortLink'
 import { SignIn } from '@/pages/SignIn'
 import { ExamAuthProvider } from '@/contexts/ExamAuthProvider'
@@ -30,7 +31,7 @@ function AnimatedRoutes() {
         <Route element={<RequireExamAccess><Shell /></RequireExamAccess>}>
           <Route path="/e/:shortId" element={<ExamShortLink />} />
           <Route path="/novos-exames" element={<NewExams />} />
-          <Route path="/novos-exames/:documentId" element={<ExamDocumentDetail />} />
+          <Route path="/novos-exames/:documentId" element={<Suspense fallback={<div role="status" className="p-8 text-center">Carregando exame…</div>}><ExamDocumentDetail /></Suspense>} />
           <Route path="/" element={<Dashboard />} />
           <Route path="/tracking" element={<Tracking />} />
           <Route path="/ship" element={<ShipSamples />} />

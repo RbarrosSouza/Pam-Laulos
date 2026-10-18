@@ -1,93 +1,131 @@
-import { useEffect, useState, useDeferredValue } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Download, FileText, Loader2 } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, FileText, History, Link2, Loader2, Mail, MoreVertical, Phone, Settings2, UserRound, UserRoundPlus } from 'lucide-react'
+import { WhatsappLogo } from '@phosphor-icons/react/dist/csr/WhatsappLogo'
 import { toast } from 'sonner'
 import { useExamAuth } from '@/contexts/exam-auth'
-import { callDocumentService, useDocumentAction, useDocumentCandidates, useDocumentEvents, useExamDocument } from '@/hooks/useExamDocuments'
-import { DocumentBadge } from '@/components/documents/DocumentBadge'
+import { useDocumentAction, useExamDocument } from '@/hooks/useExamDocuments'
 import { DocumentCorrection, DocumentGroupConfirmation, DocumentProvenance } from '@/components/documents/DocumentControls'
-import { documentDisplayId, documentEditSnapshot, documentIsOverdue } from '@/lib/document-status'
-import type { DocumentCandidate, DocumentFields, ExamDocument } from '@/types/exam-document'
+import { DocumentForm, DocumentHistory, DocumentPreview, DocumentSteps } from '@/components/documents/ExamDocumentPanels'
+import { ExamDetailSheet } from '@/components/documents/ExamDetailSheet'
+import { documentDisplayId, documentLabel } from '@/lib/document-status'
+import { getExamDetailProgress } from '@/lib/exam-detail-progress'
+import type { ExamDocument } from '@/types/exam-document'
+import '@fontsource/manrope/latin-800.css'
+import '@fontsource/dm-sans/latin-400.css'
+import '@fontsource/dm-sans/latin-500.css'
+import '@fontsource/dm-sans/latin-600.css'
+import './exam-document-detail.css'
 
-const inputClass = 'w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--card))] px-3 py-2 text-sm'
-const buttonClass = 'rounded-lg bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white disabled:opacity-50'
-const sectionClass = 'rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 space-y-4'
-const fieldLabels: [keyof DocumentFields, string][] = [['client_name', 'Tutor'], ['pet_name', 'Pet'], ['exam_type', 'Tipo do exame'], ['exam_date', 'Data do exame'], ['lab_name', 'Laboratório']]
-const destinationLabels: Record<string, string> = { drive: 'Cópia no Drive', processing: 'Leitura do PDF', group: 'Aviso ao grupo', nexus: 'Anexação no PAM Nexus' }
-const eventLabels: Record<string, string> = { received: 'Documento recebido', file_saved: 'Original salvo', extracted: 'Dados extraídos', extraction_updated: 'Dados extraídos', reviewed: 'Conferência registrada', link_confirmed: 'Cadastro confirmado', link_auto_confirmed: 'Cadastro identificado automaticamente', identification_pending: 'Cadastro pendente de seleção', assigned: 'Responsável definido', contact_recorded: 'Contato registrado', correction_linked: 'Versão corrigida vinculada', group_released: 'Aviso ao grupo liberado', group_confirmed_by_team: 'Entrega conferida pela equipe', delivery_completed: 'Etapa atualizada', retry_requested: 'Nova tentativa solicitada', group_exception: 'Exceção de grupo registrada' }
-
-function DocumentPreview({ doc }: { doc: ExamDocument }) {
-  const [url, setUrl] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
-  const open = async () => {
-    setLoading(true); setError(null)
-    try { const blob = await callDocumentService('file', { document_id: doc.id }) as Blob; setUrl(URL.createObjectURL(blob)) }
-    catch (err) { setError(err instanceof Error ? err.message : 'PDF indisponível.') }
-    finally { setLoading(false) }
-  }
-  return <section className={sectionClass}><div className="flex flex-wrap gap-3 justify-between items-center"><h2 className="font-semibold">PDF original</h2>{url ? <a className="flex gap-2 items-center text-sm text-[hsl(var(--primary))]" href={url} download={doc.original_name}><Download className="w-4 h-4" />Baixar PDF</a> : <button type="button" className={buttonClass} disabled={loading} onClick={() => void open()}>{loading ? 'Abrindo…' : 'Abrir PDF'}</button>}</div><p className="text-xs text-[hsl(var(--muted-foreground))] break-all">{doc.original_name}</p>{error && <p role="alert" className="text-sm text-red-600">{error}</p>}{url && <iframe title="PDF original do exame" src={url} className="w-full h-[65vh] rounded-lg border border-[hsl(var(--border))]" />}<p className="text-xs text-[hsl(var(--muted-foreground))]">Confira o tutor, o pet e a data no arquivo antes de confirmar o cadastro.</p></section>
+type Panel = 'responsible' | 'contact' | 'patient' | 'pdf' | 'more' | 'identity' | 'steps' | 'history' | 'success' | null
+const panelTitles: Record<Exclude<Panel, null>, string> = {
+  responsible: 'Responsável pelo exame', contact: 'Contato com o tutor', patient: 'Adicionar exame ao cadastro',
+  pdf: 'PDF do exame', more: 'Opções do exame', identity: 'Dados do exame', steps: 'Etapas e pendências', history: 'Histórico do exame', success: 'Contato registrado',
+}
+function displayDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value)
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value === '—' ? 'Data a conferir' : value
 }
 
-function DocumentWork({ doc }: { doc: ExamDocument }) {
+export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refresh: () => Promise<unknown> }) {
   const auth = useExamAuth()
   const action = useDocumentAction()
-  const [fields, setFields] = useState<DocumentFields>(() => ({ ...doc.extracted_data, ...doc.confirmed_data }))
-  const [editingSnapshot, setEditingSnapshot] = useState(() => documentEditSnapshot(doc))
-  const [classification, setClassification] = useState(() => ['review', 'not_exam'].includes(doc.identification_status) ? doc.identification_status : 'exam')
-  const canContact = auth.role === 'vet' || auth.role === 'admin'
-  const locked = doc.deliveries.some(delivery => delivery.destination === 'nexus' && delivery.status === 'completed')
-  const stale = editingSnapshot !== documentEditSnapshot(doc)
-  const [reason, setReason] = useState('')
-  const [search, setSearch] = useState('')
-  const candidates = useDocumentCandidates(useDeferredValue(search))
-  const [selected, setSelected] = useState<DocumentCandidate | null>(null)
-  const [itemIds, setItemIds] = useState<string[]>([])
-  const [confirmed, setConfirmed] = useState(false)
-  const [contactIds, setContactIds] = useState<string[]>([])
-  const [channel, setChannel] = useState('whatsapp')
-  const [note, setNote] = useState('')
-  const run = async (name: string, args: Record<string, unknown>, message: string) => {
+  const [panel, setPanel] = useState<Panel>(null)
+  const [now, setNow] = useState(Date.now)
+  const progress = getExamDetailProgress(doc, now)
+  useEffect(() => {
+    if (doc.group_status !== 'sent' || doc.contact_status === 'completed' || doc.completed) return
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [doc.group_status, doc.contact_status, doc.completed])
+  const user = auth.session?.user
+  const ownName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || 'Você'
+  const assignedToMe = !!user && doc.assigned_to === user.id
+  const responsible = assignedToMe ? ownName : doc.assigned_name || (doc.assigned_to ? 'Responsável definido' : 'Selecionar responsável')
+  const contactAllowed = auth.role === 'admin' || auth.role === 'vet'
+  const pet = documentLabel(doc, 'pet_name')
+  const tutor = documentLabel(doc, 'client_name')
+  const close = () => setPanel(null)
+  const assign = async () => {
+    if (!user || action.isPending) return
     try {
-      const result = await action.mutateAsync({ name, args })
-      const saved = result?.document || result
-      if (['review_exam_document', 'confirm_exam_document_link'].includes(name) && saved?.version) setEditingSnapshot(documentEditSnapshot({ ...doc, ...saved }))
-      toast.success(message)
-    }
-    catch (err) { toast.error(err instanceof Error ? err.message : 'Não foi possível salvar.') }
+      await action.mutateAsync({ name: 'assign_exam_document', args: { p_document_id: doc.id, p_assignee_id: user.id } })
+      await refresh()
+      toast.success('Responsável salvo.')
+      close()
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o responsável.') }
   }
-  const toggle = (values: string[], id: string) => values.includes(id) ? values.filter(value => value !== id) : [...values, id]
-  const items = doc.items.map(item => ({ ...item, id: item.exam_item_id || item.item_id || '' })).filter(item => item.id)
-
-  return <div className="space-y-4">
-    <section className={sectionClass}><h2 className="font-semibold">Conferir identificação</h2>{stale && <div role="status" className="text-sm rounded-lg bg-amber-50 dark:bg-amber-950/20 p-3 space-y-2"><p>A identificação foi atualizada em outra etapa. Seus campos foram preservados. Recarregue os dados antes de confirmar.</p><button className="underline" onClick={() => { setFields({ ...doc.extracted_data, ...doc.confirmed_data }); setClassification(['review', 'not_exam'].includes(doc.identification_status) ? doc.identification_status : 'exam'); setReason(doc.review_reason || ''); setSelected(null); setItemIds([]); setConfirmed(false); setEditingSnapshot(documentEditSnapshot(doc)) }}>Recarregar identificação</button></div>}{locked && <p className="text-sm text-[hsl(var(--muted-foreground))]">Os dados já foram anexados ao cadastro. Uma alteração exige nova versão do exame.</p>}<div className="grid sm:grid-cols-2 gap-3">{fieldLabels.map(([field, label]) => <label key={field} className="space-y-1 text-sm"><span>{label}</span><input type={field === 'exam_date' ? 'date' : 'text'} className={inputClass} disabled={locked} value={fields[field] || ''} onChange={e => setFields(current => ({ ...current, [field]: e.target.value || null }))} /></label>)}</div><label className="block text-sm space-y-1"><span>Classificação</span><select className={inputClass} disabled={locked} value={classification} onChange={e => setClassification(e.target.value)}><option value="exam">É um exame</option><option value="review">Precisa de conferência</option>{!doc.pet_id && <option value="not_exam">Não é exame</option>}</select></label>{classification !== 'exam' && <label className="block text-sm space-y-1"><span>Motivo da classificação</span><textarea className={inputClass} value={reason} onChange={e => setReason(e.target.value)} /></label>}<p className="text-xs text-[hsl(var(--muted-foreground))]">O aviso ao grupo é automático quando o arquivo é reconhecido como exame. Esta conferência atualiza a identificação. Se o cadastro continuar pendente, selecione o tutor e o pet abaixo.</p><button type="button" disabled={action.isPending || locked || stale || (classification !== 'exam' && !reason.trim())} className={buttonClass} onClick={() => void run('review_exam_document', { p_document_id: doc.id, p_expected_version: doc.version, p_fields: fields, p_classification: classification, p_reason: reason || null }, 'Conferência salva.')}>{classification === 'exam' ? 'Salvar identificação' : 'Salvar conferência'}</button></section>
-
-    <section className={sectionClass}><h2 className="font-semibold">Vincular ao cadastro no PAM Nexus</h2>{doc.pet_id ? <p className="text-sm">{doc.nexus_status === 'completed' ? 'Exame anexado ao cadastro no PAM Nexus.' : fields.exam_date ? 'Cadastro identificado. A anexação no PAM Nexus será feita automaticamente; acompanhe em Etapas e pendências.' : 'Cadastro identificado. Preencha a data do exame e salve a identificação para concluir a anexação automática.'}</p> : <><p className="text-sm text-[hsl(var(--muted-foreground))]">Pendente de seleção do cadastro. Busque o tutor ou o pet e confira no PDF. Após sua confirmação, o exame será anexado automaticamente ao PAM Nexus. Selecione somente os itens cobertos por este arquivo.</p><label className="block"><span className="sr-only">Buscar cadastro do tutor ou pet</span><input className={inputClass} value={search} placeholder="Nome do tutor ou pet (mínimo 2 letras)" onChange={e => { setSearch(e.target.value); setSelected(null); setItemIds([]); setConfirmed(false) }} /></label>{candidates.isLoading && <p className="text-sm">Buscando…</p>}{candidates.error && <p role="alert" className="text-sm text-red-600">Não foi possível buscar os cadastros.</p>}{!candidates.isLoading && search.trim().length >= 2 && candidates.data?.length === 0 && <p className="text-sm">Nenhum cadastro encontrado. Confira a grafia ou cadastre o paciente no PAM Nexus.</p>}<div className="max-h-56 overflow-auto space-y-2" role="radiogroup" aria-label="Cadastros encontrados">{candidates.data?.map(candidate => <label key={candidate.pet_id} className="flex gap-3 items-start rounded-lg border border-[hsl(var(--border))] p-3 text-sm"><input type="radio" name="patient" checked={selected?.pet_id === candidate.pet_id} onChange={() => { setSelected(candidate); setItemIds([]); setConfirmed(false); setFields(current => ({ ...current, pet_name: candidate.pet_name, client_name: candidate.client_name, species: candidate.species })) }} /><span><strong>{candidate.pet_name}</strong> · {candidate.species || 'Espécie não informada'}<br />Tutor: {candidate.client_name} · código {candidate.client_code}</span></label>)}</div>{selected && <div className="space-y-3"><p className="text-sm font-medium">Itens do rastreamento</p>{selected.items?.map(item => <label key={item.id} className="flex gap-2 items-center text-sm"><input type="checkbox" checked={itemIds.includes(item.id)} onChange={() => setItemIds(current => toggle(current, item.id))} />{item.exam_type}{item.result_received ? ' · já possui resultado' : ''}</label>)}<p className="text-xs text-[hsl(var(--muted-foreground))]">Sem um item selecionado, será criado um resultado externo para este paciente. Informe o tipo do exame acima. Preencha também a data do exame para concluir a anexação automática.</p><label className="flex gap-2 items-start text-sm"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />Conferi o PDF e confirmo que pertence a {selected.pet_name}, tutor {selected.client_name}, e aos itens selecionados.</label><button type="button" className={buttonClass} disabled={!confirmed || !fields.exam_type || stale || doc.file_status !== 'saved' || action.isPending} onClick={() => void run('confirm_exam_document_link', { p_document_id: doc.id, p_pet_id: selected.pet_id, p_item_ids: itemIds, p_expected_version: doc.version, p_confirmed: fields }, fields.exam_date ? 'Cadastro confirmado. A anexação será feita automaticamente.' : 'Cadastro confirmado. Preencha a data e salve a identificação para concluir a anexação automática.')}>{fields.exam_date ? 'Confirmar cadastro e anexar' : 'Confirmar cadastro'}</button>{doc.file_status !== 'saved' && <p className="text-xs text-amber-700">A confirmação fica disponível depois de salvar o original no Drive.</p>}</div>}</>}</section>
-
-    <section className={sectionClass}><div className="flex flex-wrap gap-3 items-center justify-between"><h2 className="font-semibold">Contato com o tutor</h2><button type="button" disabled={action.isPending || doc.assigned_to === auth.session?.user.id} className={buttonClass} onClick={() => void run('assign_exam_document', { p_document_id: doc.id, p_assignee_id: auth.session?.user.id }, 'Responsabilidade assumida.')}>{doc.assigned_to === auth.session?.user.id ? 'Assumido por você' : 'Assumir exame'}</button></div>{doc.assigned_to && doc.assigned_to !== auth.session?.user.id && <p className="text-sm">Este documento já tem um responsável. Assuma apenas se o atendimento foi transferido para você.</p>}<DocumentBadge status={doc.contact_status} />{!canContact && <p className="text-sm text-[hsl(var(--muted-foreground))]">O registro de contato é feito por uma veterinária ou pela gestão.</p>}{doc.contact_status === 'completed' ? <p className="text-sm">Contato registrado para todos os itens deste documento.</p> : !doc.pet_id ? <p className="text-sm text-[hsl(var(--muted-foreground))]">Confirme o paciente antes de registrar o contato.</p> : <><p className="text-sm text-[hsl(var(--muted-foreground))]">Registre depois de falar com o tutor. O aviso ao grupo e mensagens comuns de WhatsApp não concluem esta etapa.</p>{items.map(item => <label key={item.id} className="flex gap-2 text-sm items-center"><input type="checkbox" disabled={!!item.contacted_at} checked={!!item.contacted_at || contactIds.includes(item.id)} onChange={() => setContactIds(current => toggle(current, item.id))} />{item.exam_type || 'Exame'}{item.contacted_at && ' · contato realizado'}</label>)}<label className="block text-sm space-y-1"><span>Canal do contato</span><select className={inputClass} value={channel} onChange={e => setChannel(e.target.value)}><option value="whatsapp">WhatsApp</option><option value="phone">Telefone</option><option value="email">Email</option><option value="in_person">Presencial</option></select></label><label className="block text-sm space-y-1"><span>Anotação do contato</span><textarea className={inputClass} rows={3} value={note} onChange={e => setNote(e.target.value)} placeholder="Registre o contato realizado e o encaminhamento combinado." /></label><button type="button" className={buttonClass} disabled={!canContact || action.isPending || contactIds.length === 0 || !note.trim()} onClick={() => void run('record_exam_document_contact', { p_document_id: doc.id, p_item_ids: contactIds, p_channel: channel, p_note: note.trim(), p_contacted_at: new Date().toISOString() }, 'Contato registrado.')}>Registrar contato realizado</button></>}</section>
+  const copyLink = () => navigator.clipboard.writeText(`${window.location.origin}/novos-exames/${doc.id}`).then(() => toast.success('Link copiado.')).catch(() => toast.error('Não foi possível copiar o link.'))
+  const stages = [
+    { label: 'E-mail', description: progress.emailReceived ? 'Recebido por e-mail' : 'Origem por e-mail não registrada', done: progress.emailReceived, icon: Mail, panel: 'history' as const },
+    { label: 'Grupo', description: progress.groupSent ? 'Enviado ao grupo de WhatsApp' : 'Envio ao grupo ainda não confirmado', done: progress.groupSent, icon: WhatsappLogo, panel: 'steps' as const },
+    { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : 'Exame ainda não anexado ao cadastro', done: progress.nexusLinked, icon: Link2, panel: 'patient' as const },
+    { label: 'Contato', description: progress.contactCompleted ? 'Contato com tutor concluído' : 'Contato com tutor pendente', done: progress.contactCompleted, icon: Phone, panel: 'contact' as const },
+  ]
+  return <div className="exam-detail-page">
+    <div className="exam-detail-container">
+      <header className="exam-detail-header">
+        <Link to="/novos-exames" className="exam-detail-icon-button" aria-label="Voltar para Novos exames"><ArrowLeft size={26} /></Link>
+        <span>Pam Laudos</span>
+        <button className="exam-detail-icon-button" aria-label="Opções do exame" onClick={() => setPanel('more')}><MoreVertical size={25} /></button>
+      </header>
+      <main className="exam-detail-main">
+        <section className="exam-detail-identity" aria-label="Identificação do exame">
+          <p className="exam-detail-type">{documentLabel(doc, 'exam_type') === '—' ? 'Exame recebido' : documentLabel(doc, 'exam_type')}</p>
+          <h1>{pet === '—' ? 'Pet a identificar' : pet}</h1>
+          <p className="exam-detail-tutor">{tutor === '—' ? 'Tutor a identificar' : tutor}</p>
+          <div className="exam-detail-meta">
+            <span><CalendarDays size={25} aria-hidden="true" />{displayDate(documentLabel(doc, 'exam_date'))}</span>
+            <button onClick={() => setPanel('pdf')}><FileText size={25} aria-hidden="true" />Abrir PDF</button>
+          </div>
+        </section>
+        <button className="exam-detail-responsible" onClick={() => setPanel('responsible')} aria-haspopup="dialog">
+          <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Responsável</span><strong>{responsible}</strong>{assignedToMe && <span className="exam-detail-you">Você</span>}</span>
+          <span className="exam-detail-responsible-icon" aria-hidden="true"><UserRound size={29} /><ChevronDown size={15} /></span>
+        </button>
+        <button className={`exam-detail-contact${progress.contactCompleted ? ' is-complete' : ''}`} onClick={() => setPanel('contact')} aria-haspopup="dialog" aria-label={progress.contactCompleted ? 'Contato realizado. Ver registro' : 'Registrar contato com o tutor'}>
+          <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Contato com o tutor</span><strong>{progress.contactCompleted ? 'Realizado' : progress.contactedCount ? `${progress.contactedCount} de ${progress.itemCount} exames` : 'Entrei em contato'}</strong></span>
+          <span className="exam-detail-contact-check" aria-hidden="true">{progress.contactCompleted && <Check size={21} />}</span>
+        </button>
+        <section className="exam-detail-progress" aria-label="Progresso do exame">
+          <ul>{stages.map(({ label, description, done, icon: Icon, panel: target }) => <li key={label}><button title={description} aria-label={description} onClick={() => setPanel(target)}><span className={`exam-detail-stage-icon${done ? ' is-done' : ''}${label === 'Contato' ? done ? ' contact-done' : ' contact-pending' : ''}`}><Icon size={23} aria-hidden="true" />{done && <span className="exam-detail-stage-check"><Check size={10} strokeWidth={3} /></span>}</span><span>{label}</span></button></li>)}</ul>
+          <p className={`exam-detail-progress-caption${doc.completed ? ' is-complete' : ''}`} role="status">{doc.completed ? <Check size={15} /> : progress.groupAgeLabel ? <Clock3 size={14} /> : null}{progress.groupAgeLabel || progress.summary}</p>
+        </section>
+      </main>
+      <footer className="exam-detail-footer"><button className="exam-detail-primary" onClick={() => setPanel('patient')}><UserRoundPlus size={25} /><span>{progress.nexusLinked ? 'Ver exame no cadastro' : doc.pet_id ? 'Acompanhar cadastro' : 'Adicionar exame ao cadastro'}</span><ChevronRight size={21} /></button></footer>
+    </div>
+    <ExamDetailSheet open={panel !== null} onOpenChange={open => { if (!open) close() }} title={panel ? panelTitles[panel] : ''} wide={panel === 'pdf'}>
+      {panel === 'responsible' && <div className="exam-detail-team">
+        {doc.assigned_to && !assignedToMe && <p className="exam-detail-hint">{responsible}. Assuma somente se o atendimento foi transferido para você.</p>}
+        <button className={`exam-detail-vet${assignedToMe ? ' is-selected' : ''}`} disabled={action.isPending || assignedToMe} onClick={() => void assign()}>
+          <span className="exam-detail-avatar"><UserRound size={27} /></span>
+          <span><strong>{ownName}</strong><small>{assignedToMe ? 'Você · responsável atual' : doc.assigned_to ? 'Transferir para mim' : 'Assumir este exame'}</small></span>
+          {action.isPending ? <Loader2 size={21} className="animate-spin" /> : assignedToMe ? <Check size={22} /> : <ChevronRight size={20} />}
+        </button><p className="exam-detail-hint">A responsabilidade é registrada na conta da equipe que possui acesso ao exame.</p>
+      </div>}
+      {panel === 'contact' && (progress.contactCompleted ? <DocumentProvenance doc={doc} /> : !contactAllowed ? <p className="exam-detail-hint">O registro de contato é feito por uma veterinária ou pela gestão.</p> : !doc.pet_id && !progress.contactCompleted ? <div className="exam-detail-empty"><UserRoundPlus size={35} /><h3>Confirme o paciente primeiro</h3><p>Selecione o cadastro para registrar o contato com o tutor correto.</p><button className="exam-detail-primary" onClick={() => setPanel('patient')}>Selecionar paciente<ChevronRight size={20} /></button></div> : <DocumentForm key={`${doc.id}:contact`} doc={doc} mode="contact" onContactSaved={async () => { await refresh(); setPanel('success') }} />)}
+      {panel === 'patient' && <div className="space-y-5"><DocumentForm key={`${doc.id}:patient`} doc={doc} mode="patient" />{progress.nexusLinked && <button className="exam-detail-primary" onClick={() => setPanel('pdf')}><FileText size={22} />Abrir exame anexado</button>}</div>}
+      {panel === 'identity' && <DocumentForm key={`${doc.id}:identity`} doc={doc} mode="identity" />}
+      {panel === 'pdf' && <DocumentPreview doc={doc} />}
+      {panel === 'steps' && <div className="space-y-4"><DocumentSteps doc={doc} /><DocumentGroupConfirmation doc={doc} /></div>}
+      {panel === 'history' && <div className="space-y-4"><DocumentProvenance doc={doc} /><DocumentHistory id={doc.id} /></div>}
+      {panel === 'more' && <div className="exam-detail-options">
+        <button onClick={() => setPanel('identity')}><Settings2 size={21} />Conferir dados do exame<ChevronRight size={18} /></button>
+        <button onClick={() => setPanel('steps')}><Link2 size={21} />Etapas e pendências<ChevronRight size={18} /></button>
+        <button onClick={() => setPanel('history')}><History size={21} />Histórico e origem<ChevronRight size={18} /></button>
+        <button onClick={() => void copyLink()}><Copy size={21} />Copiar link do exame</button>
+        <details><summary>Versão corrigida</summary>{doc.previous_document_id ? <p>Original preservado: <Link to={`/novos-exames/${doc.previous_document_id}`} onClick={close}>{documentDisplayId(doc.previous_document_id)}</Link></p> : <DocumentCorrection doc={doc} />}</details>
+        <p className="exam-detail-reference">{documentDisplayId(doc.id)} · recebido em {new Date(doc.received_at).toLocaleString('pt-BR')}</p>
+      </div>}
+      {panel === 'success' && <div className="exam-detail-success" role="status"><span className="exam-detail-success-mark"><Check size={42} strokeWidth={2.5} /></span><h3>{progress.contactCompleted ? 'Contato concluído' : 'Contato registrado'}</h3><p>{doc.completed ? 'Todas as etapas deste exame estão concluídas.' : progress.contactCompleted ? 'O contato com o tutor foi registrado. Acompanhe as etapas restantes na tela do exame.' : 'O registro foi salvo. Os demais itens continuam pendentes de contato.'}</p><button className="exam-detail-primary" onClick={close}>Voltar ao exame<Check size={20} /></button></div>}
+    </ExamDetailSheet>
   </div>
-}
-
-function DocumentSteps({ doc }: { doc: ExamDocument }) {
-  const action = useDocumentAction()
-  const [retryReason, setRetryReason] = useState('')
-  const retry = async (id: string) => {
-    try { await action.mutateAsync({ name: 'retry_exam_document_delivery', args: { p_delivery_id: id, p_reason: retryReason } }); toast.success('Nova tentativa solicitada.'); setRetryReason('') }
-    catch (err) { toast.error(err instanceof Error ? err.message : 'Não foi possível repetir.') }
-  }
-  return <section className={sectionClass}><h2 className="font-semibold">Etapas e pendências</h2>{doc.deliveries.map(delivery => <div key={delivery.id} className="border-t border-[hsl(var(--border))] pt-3 space-y-2"><div className="flex justify-between items-center gap-2"><span className="text-sm">{destinationLabels[delivery.destination] || delivery.destination}</span><DocumentBadge status={delivery.destination === 'nexus' && delivery.status === 'completed' ? 'attached' : delivery.status} /></div>{delivery.last_error && <p className="text-xs text-red-600 break-words">{delivery.last_error}</p>}{delivery.status === 'uncertain' && <p className="text-xs text-amber-700">Confira a entrega antes de tentar reenviar. A automação vai buscar confirmação.</p>}{delivery.status === 'failed' && <div className="space-y-2"><label className="block"><span className="sr-only">Motivo para tentar novamente</span><input className={inputClass} value={retryReason} onChange={e => setRetryReason(e.target.value)} placeholder="Correção realizada antes de repetir" /></label><button type="button" className={buttonClass} disabled={action.isPending || !retryReason.trim()} onClick={() => void retry(delivery.id)}>Tentar esta etapa novamente</button></div>}</div>)}{!doc.deliveries.length && <p className="text-sm text-[hsl(var(--muted-foreground))]">Nenhuma tarefa registrada.</p>}{doc.group_exception_reason && <p className="text-xs">Aviso ao grupo dispensado: {doc.group_exception_reason}</p>}</section>
-}
-
-function DocumentHistory({ id }: { id: string }) {
-  const events = useDocumentEvents(id)
-  return <section className={sectionClass}><h2 className="font-semibold">Histórico</h2>{events.isLoading ? <p className="text-sm">Carregando…</p> : events.error ? <p role="alert" className="text-sm text-red-600">Não foi possível carregar o histórico.</p> : <ol className="space-y-3">{events.data?.map(event => <li key={event.id} className="text-sm"><p>{eventLabels[event.event_type] || event.event_type}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{new Date(event.created_at).toLocaleString('pt-BR')}{event.actor_id && ' · ação registrada pela equipe'}</p></li>)}</ol>}</section>
 }
 
 export function ExamDocumentDetail() {
   const { documentId = '' } = useParams()
   const validId = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(documentId)
   const query = useExamDocument(validId ? documentId : '')
-  const doc = query.data
-  return <div className="space-y-5"><Link to="/novos-exames" className="inline-flex gap-2 text-sm text-[hsl(var(--primary))] items-center"><ArrowLeft className="w-4 h-4" />Novos exames</Link>{!validId ? <p role="alert">Link de documento inválido.</p> : query.isLoading ? <div className="flex gap-2 py-12 justify-center"><Loader2 className="w-5 h-5 animate-spin" />Carregando documento…</div> : query.error || !doc ? <section className={sectionClass}><FileText className="w-7 h-7" /><p role="alert">Documento não encontrado ou indisponível para sua conta.</p><button className="underline text-sm" onClick={() => void query.refetch()}>Tentar novamente</button></section> : <><div><h1 className="text-2xl font-bold">{documentDisplayId(doc.id)}</h1><p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Recebido em {new Date(doc.received_at).toLocaleString('pt-BR')}</p><button type="button" className="text-xs underline mt-2" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/novos-exames/${doc.id}`).then(() => toast.success("Link copiado.")).catch(() => toast.error("Não foi possível copiar o link.")) }}>Copiar link do documento</button><div className="flex gap-2 mt-3"><DocumentBadge status={doc.identification_status} />{doc.completed && <span className="text-sm text-green-700 font-medium">Processo concluído</span>}</div>{doc.previous_document_id && <p className="text-sm mt-2">Versão corrigida de <Link className="underline" to={`/novos-exames/${doc.previous_document_id}`}>{documentDisplayId(doc.previous_document_id)}</Link>. O original foi preservado.</p>}{documentIsOverdue(doc) && <p role="status" className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/20 p-3 text-sm text-red-600">Há mais de 24h no grupo, sem contato registrado.</p>}</div><div className="grid xl:grid-cols-2 gap-5 items-start"><div className="space-y-4"><DocumentPreview key={doc.id} doc={doc} /><DocumentSteps doc={doc} /><DocumentGroupConfirmation doc={doc} /><DocumentProvenance doc={doc} /><DocumentCorrection doc={doc} /><DocumentHistory id={doc.id} /></div><DocumentWork key={doc.id} doc={doc} /></div></>}</div>
+  if (query.data) return <ExamDocumentContent key={documentId} doc={query.data} refresh={query.refetch} />
+  return <div className="exam-detail-page"><div className="exam-detail-container exam-detail-loading"><Link to="/novos-exames"><ArrowLeft size={20} />Novos exames</Link>{query.isLoading ? <p role="status"><Loader2 size={24} className="animate-spin" />Carregando exame…</p> : <><FileText size={38} /><h1>{validId ? 'Exame indisponível' : 'Link inválido'}</h1><p role="alert">{validId ? 'Confira sua conta ou tente novamente.' : 'Abra novamente o link enviado no grupo.'}</p>{validId && <button className="exam-detail-primary" onClick={() => void query.refetch()}>Tentar novamente</button>}</>}</div></div>
 }

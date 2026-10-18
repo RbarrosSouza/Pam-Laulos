@@ -1,4 +1,4 @@
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import {
   Stethoscope,
   LayoutDashboard,
@@ -27,6 +27,7 @@ const navItems = [
 ]
 
 export function Shell() {
+  const { pathname } = useLocation()
   const { isDark, toggle } = useTheme()
   const [isCollapsed, setIsCollapsed] = useState(() =>
     localStorage.getItem('pamvet-sidebar') === 'collapsed'
@@ -39,6 +40,9 @@ export function Shell() {
       return next
     })
   }
+
+  // A focused document page owns its mobile navigation and safe-area spacing.
+  if (/^\/novos-exames\/[^/]+\/?$/.test(pathname)) return <Outlet />
 
   return (
     <div className="flex min-h-screen bg-[hsl(var(--background))]">

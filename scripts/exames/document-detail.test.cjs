@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const ts = require('typescript');
 const jsx = require('react/jsx-runtime');
 const root = path.resolve(__dirname, '../..');
-let states = [], index = 0, mutations = [], currentDocument;
+let states = [], index = 0, mutations = [], currentDocument, mutateBehavior;
 const candidate = { pet_id: 'pet-1', pet_name: 'Nina', client_name: 'Maria Silva', client_code: '42', items: [] };
 const notices = [];
 const load = (file, mocks = {}) => {
@@ -21,6 +21,7 @@ const status = load('src/lib/document-status.ts');
 const hooks = {
   useDocumentAction: () => ({ isPending: false, mutateAsync: async entry => {
     mutations.push(entry);
+    if (mutateBehavior) return mutateBehavior(entry);
     const saved = { ...currentDocument, version: currentDocument.version + 1, confirmed_data: entry.args.p_fields || entry.args.p_confirmed || currentDocument.confirmed_data, identification_status: entry.name === 'review_exam_document' ? 'suggested' : 'confirmed', pet_id: entry.args.p_pet_id || currentDocument.pet_id };
     currentDocument = saved;
     return saved;
@@ -30,30 +31,25 @@ const hooks = {
   useExamDocument: () => ({ data: currentDocument }),
   callDocumentService: () => { throw new Error('Unexpected PDF request'); },
 };
-const { ExamDocumentDetail } = load('src/pages/ExamDocumentDetail.tsx', {
+const { DocumentForm, DocumentHistory } = load('src/components/documents/ExamDocumentPanels.tsx', {
   react: { useState: initial => {
     const slot = index++;
     if (!(slot in states)) states[slot] = typeof initial === 'function' ? initial() : initial;
     return [states[slot], value => { states[slot] = typeof value === 'function' ? value(states[slot]) : value; }];
   }, useEffect: () => {}, useDeferredValue: value => value },
   'react/jsx-runtime': jsx,
-  'react-router-dom': { Link: 'Link', useParams: () => ({ documentId: currentDocument.id }) },
-  'lucide-react': { ArrowLeft: 'ArrowLeft', Download: 'Download', FileText: 'FileText', Loader2: 'Loader2' },
+  'lucide-react': { Download: 'Download', ExternalLink: 'ExternalLink' },
   sonner: { toast: { success: value => notices.push(value), error: value => notices.push(value) } },
   '@/contexts/exam-auth': { useExamAuth: () => ({ role: 'admin', session: { user: { id: 'user-1' } } }) },
   '@/hooks/useExamDocuments': hooks,
   '@/components/documents/DocumentBadge': { DocumentBadge: 'DocumentBadge' },
-  '@/components/documents/DocumentControls': { DocumentCorrection: 'DocumentCorrection', DocumentGroupConfirmation: 'DocumentGroupConfirmation', DocumentProvenance: 'DocumentProvenance' },
   '@/lib/document-status': status,
 });
 function nodes(tree) { const result = []; const walk = value => { if (Array.isArray(value)) return value.forEach(walk); if (!value || typeof value !== 'object') return; result.push(value); walk(value.props?.children); }; walk(tree); return result; }
 function text(value) { return Array.isArray(value) ? value.map(text).join('') : value && typeof value === 'object' ? text(value.props?.children) : value == null || value === false ? '' : String(value); }
 const doc = () => ({ id: '10000000-0000-4000-8000-000000000001', version: 1, original_name: 'Exame.pdf', received_at: '2026-10-16T12:00:00Z', file_status: 'saved', identification_status: 'unidentified', extracted_data: { pet_name: 'Nina', exam_type: 'Hemograma', exam_date: '2026-10-16' }, confirmed_data: {}, pet_id: null, review_reason: null, previous_document_id: null, assigned_to: null, contact_status: 'pending', nexus_status: 'awaiting_link', group_status: 'pending', sources: [], items: [], deliveries: [] });
 currentDocument = doc();
-const page = nodes(ExamDocumentDetail());
-const Work = page.find(node => node.type?.name === 'DocumentWork').type;
-const History = page.find(node => node.type?.name === 'DocumentHistory').type;
-const render = () => { index = 0; return nodes(Work({ doc: currentDocument })); };
+const render = (props = {}) => { index = 0; return nodes(DocumentForm({ doc: currentDocument, mode: 'patient', ...props })); };
 const button = (tree, label) => tree.find(node => node.type === 'button' && text(node) === label);
 const field = (tree, label) => nodes(tree.find(node => node.type === 'label' && text(node).startsWith(label))).find(node => node.type === 'input');
 let checks = 0;
@@ -61,10 +57,11 @@ const check = (name, run) => { run(); checks++; console.log('ok ' + checks + ' -
 (async () => {
   let tree = render();
   check('pending document offers manual selection without holding the group notification', () => {
-    assert.match(text(tree[0]), /Pendente de seleção do cadastro/);
-    assert.match(text(tree[0]), /aviso ao grupo é enviado automaticamente/);
+    assert.match(text(tree[0]), /Selecionar paciente/);
+    assert.match(text(tree[0]), /Busque o pet ou tutor e confira no PDF/);
     assert.equal(button(tree, 'Salvar identificação').props.disabled, false);
     assert.doesNotMatch(text(tree[0]), /Salvar e liberar aviso/);
+    assert.equal(mutations.length, 0);
   });
   field(tree, 'Tutor').props.onChange({ target: { value: 'Maria Silva' } });
   currentDocument = { ...currentDocument, version: 2, group_status: 'sent', assigned_to: 'user-2', deliveries: [{ id: 'group-1', destination: 'group', status: 'sent' }] };
@@ -96,6 +93,16 @@ const check = (name, run) => { run(); checks++; console.log('ok ' + checks + ' -
   });
   tree.find(node => node.type === 'input' && node.props.type === 'radio').props.onChange();
   tree = render();
+  check('changing the patient search clears the previous selection and confirmation', () => {
+    const search = tree.find(node => node.type === 'input' && node.props.placeholder === 'Nome do tutor ou pet (mínimo 2 letras)');
+    search.props.onChange({ target: { value: 'Outro nome' } });
+    const searched = render();
+    assert.equal(searched.find(node => node.type === 'input' && node.props.type === 'radio').props.checked, false);
+    assert.equal(button(searched, 'Confirmar cadastro e anexar'), undefined);
+  });
+  tree = render();
+  tree.find(node => node.type === 'input' && node.props.type === 'radio').props.onChange();
+  tree = render();
   nodes(tree.find(node => node.type === 'label' && text(node).startsWith('Conferi o PDF'))).find(node => node.type === 'input').props.onChange({ target: { checked: true } });
   tree = render();
   button(tree, 'Confirmar cadastro e anexar').props.onClick();
@@ -115,9 +122,83 @@ const check = (name, run) => { run(); checks++; console.log('ok ' + checks + ' -
     assert.equal(button(tree, 'Salvar identificação').props.disabled, true);
   });
   check('automatic match history does not attribute the action to the team', () => {
-    const history = History({ id: currentDocument.id });
+    const history = DocumentHistory({ id: currentDocument.id });
     assert.match(text(history), /Cadastro identificado automaticamente/);
     assert.doesNotMatch(text(history), /ação registrada pela equipe/);
   });
+
+  const contactDoc = () => ({
+    ...doc(), pet_id: 'pet-1', identification_status: 'confirmed', assigned_to: 'user-2',
+    nexus_status: 'completed', deliveries: [{ id: 'nexus-1', destination: 'nexus', status: 'completed' }],
+    items: [
+      { exam_item_id: 'already-contacted', exam_type: 'Exame anterior', contacted_at: '2026-10-16T12:30:00Z' },
+      { exam_item_id: 'pending-item', exam_type: 'Hemograma', contacted_at: null },
+    ],
+  });
+  states = []; currentDocument = contactDoc();
+  tree = render({ mode: 'contact' });
+  check('contact form preserves previously completed items and requires a real note', () => {
+    const inputs = tree.filter(node => node.type === 'input' && node.props.type === 'checkbox');
+    assert.equal(inputs.length, 2);
+    assert.equal(inputs[0].props.checked, true);
+    assert.equal(inputs[0].props.disabled, true);
+    assert.equal(inputs[1].props.checked, true);
+    assert.equal(Boolean(inputs[1].props.disabled), false);
+    assert.equal(button(tree, 'Registrar contato realizado').props.disabled, true);
+  });
+
+  let resolveWrite;
+  const pendingWrite = new Promise(resolve => { resolveWrite = resolve; });
+  const order = [];
+  let successCallbacks = 0;
+  mutateBehavior = async () => { order.push('write-started'); const saved = await pendingWrite; order.push('write-resolved'); return saved; };
+  const onContactSaved = async () => { successCallbacks++; order.push('success-callback'); };
+  tree.find(node => node.type === 'textarea').props.onChange({ target: { value: 'Tutor orientado sobre o resultado e retorno.' } });
+  tree.find(node => node.type === 'select').props.onChange({ target: { value: 'phone' } });
+  tree = render({ mode: 'contact', onContactSaved });
+  const noticesBeforeSuccess = notices.length;
+  const mutationsBeforeSuccess = mutations.length;
+  button(tree, 'Registrar contato realizado').props.onClick();
+  check('contact success is withheld while the persistence request is unresolved', () => {
+    assert.equal(button(tree, 'Registrar contato realizado').props.disabled, false);
+    assert.equal(successCallbacks, 0);
+    assert.equal(notices.length, noticesBeforeSuccess);
+    assert.deepEqual(order, ['write-started']);
+    assert.equal(mutations.length, mutationsBeforeSuccess + 1);
+  });
+  resolveWrite({ document: { ...currentDocument, version: 2 } });
+  await new Promise(resolve => setImmediate(resolve));
+  check('contact callback runs once after persistence and keeps the actual item and channel payload', () => {
+    assert.deepEqual(order, ['write-started', 'write-resolved', 'success-callback']);
+    assert.equal(successCallbacks, 1);
+    const entry = mutations.at(-1);
+    assert.equal(entry.name, 'record_exam_document_contact');
+    assert.equal(entry.args.p_document_id, currentDocument.id);
+    assert.deepEqual(entry.args.p_item_ids, ['pending-item']);
+    assert.equal(entry.args.p_channel, 'phone');
+    assert.equal(entry.args.p_note, 'Tutor orientado sobre o resultado e retorno.');
+    assert.ok(Number.isFinite(Date.parse(entry.args.p_contacted_at)));
+    assert.equal(Object.hasOwn(entry.args, 'p_contacted_by'), false);
+    assert.equal(notices.at(-1), 'Contato registrado.');
+  });
+
+  states = []; currentDocument = contactDoc();
+  let failedCallbacks = 0;
+  mutateBehavior = async () => { throw new Error('Não foi possível persistir o contato.'); };
+  const failedCallback = async () => { failedCallbacks++; };
+  tree = render({ mode: 'contact', onContactSaved: failedCallback });
+  tree.find(node => node.type === 'textarea').props.onChange({ target: { value: 'Contato real ainda não salvo.' } });
+  tree = render({ mode: 'contact', onContactSaved: failedCallback });
+  const failedMutationsBefore = mutations.length;
+  const noticesBeforeFailure = notices.length;
+  button(tree, 'Registrar contato realizado').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  check('contact persistence failure never opens success, retries the write or erases the note', () => {
+    assert.equal(failedCallbacks, 0);
+    assert.equal(mutations.length, failedMutationsBefore + 1);
+    assert.deepEqual(notices.slice(noticesBeforeFailure), ['Não foi possível persistir o contato.']);
+    assert.equal(render({ mode: 'contact', onContactSaved: failedCallback }).find(node => node.type === 'textarea').props.value, 'Contato real ainda não salvo.');
+  });
+  mutateBehavior = undefined;
   console.log(checks + ' document detail regression checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
