@@ -1,5 +1,7 @@
 # Pam Laudos — primeira rodada web e mobile
 
+**Estado de 19/10/2026, 01:24 BRT:** rodadas01–03 publicadas em main `fcca2f4` após autorização. Rodada04 (Início) em avaliação somente local na mesma branch de testes; nenhuma nova publicação do app nesta etapa.
+
 Pedido de 18/10/2026, concluído localmente em 19/10/2026. Branch `codex/pam-laudos-web-mobile`, criada de `origin/main` em `f70791c`.
 
 ## Direção e limites
@@ -67,3 +69,19 @@ Verificações locais: build TypeScript/Vite, lint dos arquivos alterados e diff
 Capturas locais na pasta `design-web-mobile-20261019`: `04-amostras-revisao-mobile.png`, `05-historico-mobile.png`, `06-amostras-web.png`, `07-historico-web.png` e `08-amostras-mobile.png`.
 
 Resultado somente local na branch de testes; nenhuma chamada clínica, envio ao grupo, alteração Supabase/n8n, push/merge/deploy do app nesta rodada. Revisão visual destas duas telas, tema escuro, iPhone físico e operações autenticadas reais ficam pendentes. Próxima etapa visual: Início e Conta, após revisão.
+
+## Rodada 04 — Início, 19/10/2026
+
+Rodrigo pediu refinar o Início na branch de testes, mantendo o padrão visual aprovado para web/mobile. Base desta rodada: `main fcca2f4`, já publicada; alterações abaixo somente locais em `codex/pam-laudos-web-mobile`.
+
+- Cabeçalho Início com atualização explícita; três seletores de fila — No grupo, Prontos e Aguardando lab — e um resumo discreto dos contatos realizados. O gráfico de pizza e os blocos repetidos deixam de integrar a página. Totais representam fichas globais, sem período ou promessa de “concluídos hoje”.
+- Lista de trabalho única em mobile/web. No grupo abre por padrão e ordena a maior espera confirmada primeiro; botão “Mais de24h” filtra somente o subconjunto crítico válido. Seis fichas inicialmente, com Mostrar mais em blocos de seis, sem esconder definitivamente os demais resultados da consulta.
+- Pet/tutor completos, tipos de exames, laboratório e nome inteiro da veterinária/ausência de responsável. Relógio só para espera no grupo com timestamp válido, sem usar criação/recebimento como substituto; datas ausentes/inválidas/futuras mostram Envio sem data. Contato concluído não mostra relógio nem entra na prioridade. Relógio de UI atualizado a cada minuto, sem criar consultas ou mensagens.
+- Prontos pode ter resultados parciais, explicitado na interface e nos itens; Aguardando lab também inclui amostras a enviar. Atalhos para Rastreamento e Enviar amostras mantidos. Não há conclusão, atribuição ou envio direto ao clicar nos resumos.
+- Totais RPC e consulta da fila são independentes: a interface identifica a quantidade “nesta lista”, sem prometer universo completo. Carregamento/erro/última consulta/vazio distintos; ausência de total mostra indisponibilidade, não zero inventado.
+- Adapter mantém as mesmas consultas/realtime e abre o TrackingDetail existente. Seleção por ID acompanha o registro atual, inclusive mudança de fila; remoção bem-sucedida invalida o ID para não reabrir futuramente, erro não apaga a seleção. Fechar manualmente devolve foco ao botão conectado. Permanece o limite do detalhe existente: fechamento causado apenas por remoção realtime não tem recuperação explícita de foco.
+- View e helper separados, sem auth/backend. HomePreview usa fichas inteiramente fictícias e diálogo Radix somente leitura; seletor Início e navegação da prévia apontam para `http://127.0.0.1:4192/design-preview.html?screen=home`. Fixtures e entrada DEV ausentes do build.
+
+Verificações locais: build TypeScript/Vite, lint dos arquivos alterados e diffcheck passaram. **53 testes**: 24 novos de semântica/adapter/SSR,16 de rastreamento e13 do detalhe documental. Casos incluem24h exato, limite superior, flag backend, datas ausentes/inválidas/futuras, conclusão/parcial, seleção atualizada, refresh somente leitura e erros sem falso vazio/zero. QA de navegador em320/390/768/1440 px sem rolagem horizontal; troca de filas, prioridade, Mostrar mais, exemplo sem data, resultados parciais, abertura/fechamento com Escape e retorno de foco, teclado e atalhos conferidos. Capturas `10-inicio-mobile.png` e `11-inicio-web.png` na pasta local `design-web-mobile-20261019`.
+
+Sem mudança em hooks de dados, tipos, banco, Edge, n8n, rotas protegidas ou permissões; sem gravação clínica/contato/envio, push ou deploy do aplicativo. Produção não recebeu esta rodada. Revisão visual do Início, tema escuro, aparelho físico e fluxo autenticado real continuam pendentes. Conta permanece para a etapa seguinte.

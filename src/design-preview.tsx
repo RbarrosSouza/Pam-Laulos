@@ -8,6 +8,7 @@ import { AppFrame } from '@/components/layout/AppFrame'
 import { DocumentQueue } from '@/components/documents/DocumentQueue'
 import { TrackingPreview } from '@/design/TrackingPreview'
 import { SamplesPreview } from '@/design/SamplesPreview'
+import { HomePreview } from '@/design/HomePreview'
 import type { DocumentFilter } from '@/hooks/useExamDocuments'
 import type { ExamDocument } from '@/types/exam-document'
 import '@fontsource/dm-sans/latin-400.css'
@@ -47,6 +48,7 @@ export function PreviewContent() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<DocumentFilter>('open')
   const [page, setPage] = useState(0)
+  if (pathname === '/') return <HomePreview />
   if (pathname === '/tracking') return <TrackingPreview />
   if (pathname === '/ship' || pathname === '/shipments') return <SamplesPreview />
   if (pathname === '/novos-exames') {
@@ -77,11 +79,11 @@ export function PreviewBoard() {
   const [device, setDevice] = useState('mobile')
   return <main className="study-board">
     <header className="study-toolbar"><div><h1>Pam Laudos <span>Estudo 01</span></h1><p>Prévia local · dados fictícios</p></div>
-      <div className="study-controls"><div className="study-segments" aria-label="Tela da prévia">{[['login', 'Login'], ['app', 'Recebidos'], ['tracking', 'Rastreamento'], ['samples', 'Amostras'], ['shipments', 'Histórico']].map(([id, label]) => <button key={id} aria-pressed={screen === id} onClick={() => setScreen(id)}>{label}</button>)}</div>
+      <div className="study-controls"><div className="study-segments" aria-label="Tela da prévia">{[['home', 'Início'], ['login', 'Login'], ['app', 'Recebidos'], ['tracking', 'Rastreamento'], ['samples', 'Amostras'], ['shipments', 'Histórico']].map(([id, label]) => <button key={id} aria-pressed={screen === id} onClick={() => setScreen(id)}>{label}</button>)}</div>
         <div className="study-segments" aria-label="Tamanho da prévia">{[['mobile', 'Celular'], ['desktop', 'Web']].map(([id, label]) => <button key={id} aria-pressed={device === id} onClick={() => setDevice(id)}>{label}</button>)}</div></div>
     </header>
     <div className={`study-device ${device}`}><iframe key={`${screen}-${device}`} title={`Prévia ${screen === 'login' ? 'do login' : 'da aplicação'} em ${device === 'mobile' ? 'celular' : 'web'}`} src={`/design-preview.html?frame=${screen}`} /></div>
   </main>
 }
 const frame = new URLSearchParams(window.location.search).get('frame')
-if (import.meta.env.DEV) createRoot(document.getElementById('root')!).render(frame === 'login' ? <PreviewLogin /> : frame && ['app', 'tracking', 'samples', 'shipments'].includes(frame) ? <PreviewApplication initialPath={frame === 'tracking' ? '/tracking' : frame === 'samples' ? '/ship' : frame === 'shipments' ? '/shipments' : '/novos-exames'} /> : <PreviewBoard />)
+if (import.meta.env.DEV) createRoot(document.getElementById('root')!).render(frame === 'login' ? <PreviewLogin /> : frame && ['home', 'app', 'tracking', 'samples', 'shipments'].includes(frame) ? <PreviewApplication initialPath={frame === 'home' ? '/' : frame === 'tracking' ? '/tracking' : frame === 'samples' ? '/ship' : frame === 'shipments' ? '/shipments' : '/novos-exames'} /> : <PreviewBoard />)
