@@ -1,15 +1,16 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AnimatePresence } from 'framer-motion'
+import { AnimatePresence, MotionConfig } from 'framer-motion'
 import { Shell } from '@/components/layout/Shell'
-import { Dashboard } from '@/pages/Dashboard'
-import { Tracking } from '@/pages/Tracking'
-import { Settings } from '@/pages/Settings'
-import { ShipSamples } from '@/pages/ShipSamples'
-import { LateExams } from '@/pages/LateExams'
-import { ShipmentHistory } from '@/pages/ShipmentHistory'
-import { NewExams } from '@/pages/NewExams'
+import { RouteBoundary } from '@/components/layout/RouteBoundary'
+const Dashboard = lazy(() => import('@/pages/Dashboard').then(module => ({ default: module.Dashboard })))
+const Tracking = lazy(() => import('@/pages/Tracking').then(module => ({ default: module.Tracking })))
+const Settings = lazy(() => import('@/pages/Settings').then(module => ({ default: module.Settings })))
+const ShipSamples = lazy(() => import('@/pages/ShipSamples').then(module => ({ default: module.ShipSamples })))
+const LateExams = lazy(() => import('@/pages/LateExams').then(module => ({ default: module.LateExams })))
+const ShipmentHistory = lazy(() => import('@/pages/ShipmentHistory').then(module => ({ default: module.ShipmentHistory })))
+const NewExams = lazy(() => import('@/pages/NewExams').then(module => ({ default: module.NewExams })))
 const ExamDocumentDetail = lazy(() => import('@/pages/ExamDocumentDetail').then(module => ({ default: module.ExamDocumentDetail })))
 import { ExamShortLink } from '@/pages/ExamShortLink'
 import { SignIn } from '@/pages/SignIn'
@@ -22,6 +23,10 @@ const queryClient = new QueryClient({
   },
 })
 
+function Page({ children }: { children: ReactNode }) {
+  return <RouteBoundary><Suspense fallback={<div role="status" className="py-16 text-center text-sm text-[hsl(var(--muted-foreground))]">Carregando…</div>}>{children}</Suspense></RouteBoundary>
+}
+
 function AnimatedRoutes() {
   const location = useLocation()
   return (
@@ -30,14 +35,14 @@ function AnimatedRoutes() {
         <Route path="/entrar" element={<SignIn />} />
         <Route element={<RequireExamAccess><Shell /></RequireExamAccess>}>
           <Route path="/e/:shortId" element={<ExamShortLink />} />
-          <Route path="/novos-exames" element={<NewExams />} />
-          <Route path="/novos-exames/:documentId" element={<Suspense fallback={<div role="status" className="p-8 text-center">Carregando exame…</div>}><ExamDocumentDetail /></Suspense>} />
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/tracking" element={<Tracking />} />
-          <Route path="/ship" element={<ShipSamples />} />
-          <Route path="/shipments" element={<ShipmentHistory />} />
-          <Route path="/late" element={<LateExams />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/novos-exames" element={<Page><NewExams /></Page>} />
+          <Route path="/novos-exames/:documentId" element={<Page><ExamDocumentDetail /></Page>} />
+          <Route path="/" element={<Page><Dashboard /></Page>} />
+          <Route path="/tracking" element={<Page><Tracking /></Page>} />
+          <Route path="/ship" element={<Page><ShipSamples /></Page>} />
+          <Route path="/shipments" element={<Page><ShipmentHistory /></Page>} />
+          <Route path="/late" element={<Page><LateExams /></Page>} />
+          <Route path="/settings" element={<Page><Settings /></Page>} />
         </Route>
       </Routes>
     </AnimatePresence>
@@ -47,9 +52,9 @@ function AnimatedRoutes() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ExamAuthProvider><BrowserRouter>
+      <MotionConfig reducedMotion="user"><ExamAuthProvider><BrowserRouter>
         <AnimatedRoutes />
-      </BrowserRouter></ExamAuthProvider>
+      </BrowserRouter></ExamAuthProvider></MotionConfig>
     </QueryClientProvider>
   )
 }

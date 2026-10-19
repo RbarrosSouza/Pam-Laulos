@@ -225,8 +225,8 @@ export function Tracking() {
           </div>
         </div>
 
-        {/* Bulk actions */}
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2.5 shadow-sm">
+        {/* Bulk actions appear only when there is a selection. */}
+        {selectedCards.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2.5 shadow-sm">
           <span className="text-xs text-[hsl(var(--muted-foreground))]">
             {selectedCards.length} selecionado{selectedCards.length === 1 ? '' : 's'}
           </span>
@@ -259,7 +259,7 @@ export function Tracking() {
               <Trash2 className="w-3.5 h-3.5" /> Excluir
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* Filters Bar — always visible on desktop, collapsible on mobile */}
         <div className={cn('flex flex-col gap-3', !filtersOpen && 'hidden md:flex')}>

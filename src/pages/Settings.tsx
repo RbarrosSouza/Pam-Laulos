@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Camera, Sun, Moon, Stethoscope, Check, Loader2 } from 'lucide-react'
+import { Camera, Sun, Moon, Stethoscope, Check, Loader2, LogOut } from 'lucide-react'
 import { useVets, type Vet } from '@/hooks/useVets'
 import { useTheme } from '@/hooks/useTheme'
 import { useQueryClient } from '@tanstack/react-query'
@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase'
 import { fadeUp } from '@/lib/animations'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useExamAuth } from '@/contexts/exam-auth'
 
 export function Settings() {
   const { isDark, toggle } = useTheme()
@@ -22,8 +23,10 @@ export function Settings() {
       className="space-y-6 max-w-xl mx-auto"
     >
       <h1 className="text-lg md:text-2xl font-bold text-[hsl(var(--foreground))] tracking-tight">
-        Configurações
+        Conta
       </h1>
+
+      <AccountPanel />
 
       {/* Theme toggle */}
       <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
@@ -117,8 +120,8 @@ function VetRow({ vet }: { vet: Vet }) {
       queryClient.invalidateQueries({ queryKey: ['exam-cards'] })
 
       toast.success('Foto atualizada')
-    } catch (err: any) {
-      toast.error('Erro ao enviar foto: ' + (err.message || 'Tente novamente'))
+    } catch (err: unknown) {
+      toast.error('Erro ao enviar foto: ' + (err instanceof Error ? err.message : 'Tente novamente'))
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -158,7 +161,7 @@ function VetRow({ vet }: { vet: Vet }) {
       {/* Info */}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-[hsl(var(--foreground))] truncate">{vet.nome}</p>
-        <p className="text-xs text-[hsl(var(--muted-foreground))]">CRMV — acessar perfil</p>
+        <p className="text-xs text-[hsl(var(--muted-foreground))]">Equipe veterinária</p>
       </div>
 
       {vet.avatar_url && (
@@ -166,6 +169,27 @@ function VetRow({ vet }: { vet: Vet }) {
       )}
     </div>
   )
+}
+
+function AccountPanel() {
+  const auth = useExamAuth()
+  const pending = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  return <section className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5">
+    <h2 className="text-sm font-semibold">Sua conta</h2>
+    <p className="mt-2 break-all text-sm text-[hsl(var(--muted-foreground))]">{auth.session?.user.email}</p>
+    {error && <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{error}</p>}
+    <button type="button" disabled={busy} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium text-[hsl(var(--primary))] hover:bg-[hsl(var(--accent))] disabled:opacity-50" onClick={async () => {
+      if (pending.current) return
+      pending.current = true; setBusy(true); setError(null)
+      try {
+        const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' })
+        if (signOutError) throw signOutError
+      } catch { setError('Não foi possível sair. Tente novamente.') }
+      finally { pending.current = false; setBusy(false) }
+    }}><LogOut size={18} aria-hidden="true" />{busy ? 'Saindo…' : 'Sair da conta'}</button>
+  </section>
 }
 
 async function resizeImage(file: File, maxSize: number): Promise<Blob> {

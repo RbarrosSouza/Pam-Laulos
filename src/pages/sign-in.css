@@ -1,0 +1,66 @@
+.login-page {
+  --login-paper: #fdfefc;
+  --login-ink: #202720;
+  --login-muted: #646574;
+  --login-olive: #56612c;
+  --login-line: #dfe2d8;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: max(32px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  color: var(--login-ink);
+  background: var(--login-paper);
+  font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: light;
+}
+
+.login-page *, .login-page *::before, .login-page *::after { box-sizing: border-box; }
+.login-page h1, .login-page p { margin: 0; }
+.login-page h1 { text-wrap: balance; }
+.login-page p { text-wrap: pretty; }
+.login-page button, .login-page input { font: inherit; }
+.login-page button { cursor: pointer; }
+.login-page button:disabled { cursor: wait; opacity: .6; }
+.login-page :focus-visible { outline: 2px solid var(--login-olive); outline-offset: 4px; }
+.login-panel { width: 100%; max-width: 360px; }
+.login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 48px; color: var(--login-olive); }
+.login-brand span { color: var(--login-ink); font: 800 19px/1.3 'Manrope', sans-serif; }
+.login-heading { margin-bottom: 32px; }
+.login-heading h1 { font: 800 34px/1.2 'Manrope', sans-serif; }
+.login-heading p { color: var(--login-muted); margin-top: 12px; font-size: 16px; line-height: 1.6; }
+.login-form { display: flex; flex-direction: column; gap: 24px; }
+.login-field { display: flex; flex-direction: column; gap: 10px; }
+.login-field label { font-size: 14px; line-height: 1.4; font-weight: 600; }
+.login-field input { display: block; width: 100%; min-height: 56px; border: 1px solid var(--login-line); border-radius: 12px; padding: 14px 16px; background: #fff; color: var(--login-ink); font-size: 16px; line-height: 1.5; }
+.login-field input:disabled { background: #f5f6f2; opacity: .7; }
+.login-password { position: relative; }
+.login-password input { padding-right: 60px; }
+.login-password-toggle { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--login-muted); }
+.login-primary { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 56px; border: 0; border-radius: 14px; padding: 16px; background: var(--login-ink); color: #fff; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.login-form .login-primary { margin-top: 8px; }
+.login-error { color: #9b3028; font-size: 14px; line-height: 1.6; padding: 12px 14px; border: 1px solid #ecd3cf; border-radius: 10px; background: #fff8f6; }
+.login-access .login-heading { margin-bottom: 20px; }
+.login-access .login-heading h1 { font-size: 30px; }
+.login-account span { overflow-wrap: anywhere; }
+.login-access-description { color: var(--login-muted); font-size: 16px; line-height: 1.6; }
+.login-access .login-error { margin-top: 20px; }
+.login-access-actions { margin-top: 28px; display: flex; flex-direction: column; gap: 12px; }
+.login-secondary { min-height: 48px; padding: 12px; border: 0; background: transparent; color: var(--login-olive); font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
+
+@media (hover: hover) {
+  .login-primary:not(:disabled):hover { background: #333c30; }
+  .login-password-toggle:not(:disabled):hover { background: #f3f5ee; color: var(--login-olive); }
+}
+
+@media (min-width: 768px) {
+  .login-page { padding-block: 64px; }
+  .login-panel { max-width: 400px; }
+  .login-brand { margin-bottom: 56px; }
+  .login-heading h1 { font-size: 38px; }
+}
+
+.login-primary, .login-password-toggle { transition: background-color 150ms ease-out, transform 120ms ease-out; }
+.login-primary:active:not(:disabled) { transform: scale(.99); }
+.login-field input { transition: border-color 150ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .login-page * { transition: none !important; } }
