@@ -4,8 +4,8 @@
 .study-toolbar h1 span { font: 500 12px/1.4 'DM Sans', sans-serif; margin-left: 10px; color: #646574; }
 .study-toolbar p { margin: 5px 0 0; color: #646574; font-size: 12px; }
 .study-controls { display: flex; flex-wrap: wrap; gap: 10px; }
-.study-segments { display: flex; border: 1px solid #d9ddd3; border-radius: 10px; padding: 3px; gap: 3px; }
-.study-segments button { border: 0; border-radius: 7px; min-height: 38px; padding: 8px 14px; font-size: 13px; color: #646574; cursor: pointer; }
+.study-segments { display: flex; flex-wrap: wrap; border: 1px solid #d9ddd3; border-radius: 10px; padding: 3px; gap: 3px; }
+.study-segments button { border: 0; border-radius: 7px; min-height: 44px; padding: 8px 14px; font-size: 13px; color: #646574; cursor: pointer; }
 .study-segments button[aria-pressed=true] { background: #fff; color: #202720; box-shadow: 0 1px 3px #2027200c; }
 .study-device { margin: 0 auto; overflow: hidden; background: #fdfefc; border: 1px solid #d9ddd3; box-shadow: 0 12px 38px #2027200a; }
 .study-device.mobile { max-width: 100%; width: 390px; height: 844px; border-radius: 28px; }

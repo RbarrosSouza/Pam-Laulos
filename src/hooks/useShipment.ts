@@ -157,6 +157,8 @@ export function useCreateManualSample() {
 export function useShipmentHistory(filters?: {
   dateFrom?: string
   dateTo?: string
+  startAt?: string
+  endBefore?: string
 }) {
   return useQuery({
     queryKey: ['shipment-history', filters],
@@ -166,10 +168,14 @@ export function useShipmentHistory(filters?: {
         .select('*')
         .order('sent_at', { ascending: false })
 
-      if (filters?.dateFrom) {
+      if (filters?.startAt) {
+        query = query.gte('sent_at', filters.startAt)
+      } else if (filters?.dateFrom) {
         query = query.gte('sent_at', filters.dateFrom)
       }
-      if (filters?.dateTo) {
+      if (filters?.endBefore) {
+        query = query.lt('sent_at', filters.endBefore)
+      } else if (filters?.dateTo) {
         query = query.lte('sent_at', filters.dateTo + 'T23:59:59')
       }
 

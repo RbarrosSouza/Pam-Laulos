@@ -1,0 +1,86 @@
+.shipment-history { width: 100%; min-width: 0; color: hsl(var(--foreground)); }
+.shipment-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.shipment-history-heading h1 { margin: 0; font: 800 30px/1.2 'Manrope', sans-serif; text-wrap: balance; }
+.shipment-history-heading p { margin: 6px 0 0; color: hsl(var(--muted-foreground)); font-size: 14px; }
+.shipment-history button { cursor: pointer; transition: background-color 150ms ease-out, opacity 150ms ease-out; }
+.shipment-history button:disabled { cursor: default; opacity: .45; }
+.shipment-history button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }
+.shipment-history-refresh { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 14px; border: 1px solid hsl(var(--border)); border-radius: 13px; background: hsl(var(--card)); color: hsl(var(--primary)); font-size: 14px; font-weight: 500; flex-shrink: 0; }
+.shipment-history-period { display: flex; width: min(100%, 360px); gap: 4px; padding: 4px; margin-bottom: 24px; border: 1px solid hsl(var(--border)); border-radius: 15px; background: hsl(var(--muted) / .55); }
+.shipment-history-period button { flex: 1; min-width: 0; min-height: 44px; padding: 9px 14px; border: 1px solid transparent; border-radius: 11px; color: hsl(var(--muted-foreground)); font-size: 14px; font-weight: 500; }
+.shipment-history-period button[aria-pressed='true'] { color: hsl(var(--primary)); border-color: hsl(var(--border)); background: hsl(var(--card)); }
+.shipment-history-list { list-style: none; display: grid; gap: 12px; margin: 0; padding: 0; }
+.shipment-history-record { min-width: 0; border: 1px solid hsl(var(--border)); border-radius: 19px; background: hsl(var(--card)); }
+.shipment-history-record.is-expanded { border-color: hsl(var(--primary) / .38); }
+.shipment-history-summary { display: grid; grid-template-columns: 44px minmax(0, 1fr) minmax(200px, .6fr) 18px; width: 100%; align-items: center; gap: 18px; padding: 22px; text-align: left; border-radius: 18px; }
+.shipment-history-summary:hover { background: hsl(var(--accent) / .35); }
+.shipment-history-symbol { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; border-radius: 14px; background: hsl(var(--accent)); color: hsl(var(--primary)); }
+.shipment-history-destination { display: flex; flex-direction: column; min-width: 0; gap: 6px; }
+.shipment-history-destination > strong { font-size: 17px; line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
+.shipment-history-destination > span { display: flex; align-items: center; gap: 6px; color: hsl(var(--muted-foreground)); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.shipment-history-destination > span > svg { flex-shrink: 0; }
+.shipment-history-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; min-width: 0; align-items: center; }
+.shipment-history-time { display: flex; align-items: flex-start; gap: 8px; color: hsl(var(--muted-foreground)); min-width: 0; font-size: 13px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.shipment-history-time > svg { flex-shrink: 0; margin-top: 2px; }
+.shipment-history-time time { overflow-wrap: anywhere; }
+.shipment-history-time time > span { display: block; }
+.shipment-history-count { color: hsl(var(--primary)); font-size: 16px; line-height: 1.5; font-weight: 600; font-variant-numeric: tabular-nums; }
+.shipment-history-count > span { font-size: 13px; font-weight: 400; }
+.shipment-history-chevron { color: hsl(var(--muted-foreground)); transition: transform 150ms ease-out; }
+.shipment-history-record.is-expanded .shipment-history-chevron { transform: rotate(180deg); }
+.shipment-history-details { margin: 0 22px; border-top: 1px solid hsl(var(--border)); }
+.shipment-history-items { list-style: none; margin: 0; padding: 4px 0; }
+.shipment-history-items > li { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(100px, .65fr); align-items: center; gap: 12px; padding: 18px 0; }
+.shipment-history-items > li + li { border-top: 1px solid hsl(var(--border) / .65); }
+.shipment-history-item-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
+.shipment-history-patient { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.shipment-history-patient strong { font-size: 16px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.shipment-history-patient > span { color: hsl(var(--muted-foreground)); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.shipment-history-exam { justify-self: end; max-width: 100%; text-align: right; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.shipment-history-no-items { margin: 0; padding: 22px 0; font-size: 14px; line-height: 1.6; color: hsl(var(--muted-foreground)); text-wrap: pretty; }
+.shipment-history-notes { padding: 16px 0 22px; border-top: 1px solid hsl(var(--border)); }
+.shipment-history-notes h2 { margin: 0 0 6px; font-size: 13px; line-height: 1.4; font-weight: 600; text-wrap: balance; }
+.shipment-history-notes p { margin: 0; font-size: 14px; line-height: 1.6; color: hsl(var(--muted-foreground)); white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; }
+.shipment-history-error { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 18px; margin-bottom: 18px; border: 1px solid hsl(var(--border)); border-radius: 15px; background: hsl(var(--card)); font-size: 14px; line-height: 1.5; }
+.shipment-history-error strong { font-weight: 500; }
+.shipment-history-error p { margin: 4px 0 0; color: hsl(var(--muted-foreground)); }
+.shipment-history-error button, .shipment-history-empty button { min-height: 44px; padding: 10px 16px; border: 1px solid hsl(var(--border)); border-radius: 12px; color: hsl(var(--primary)); font-size: 14px; font-weight: 500; }
+.shipment-history-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 290px; padding: 30px 20px; border: 1px solid hsl(var(--border)); border-radius: 19px; background: hsl(var(--card)); color: hsl(var(--muted-foreground)); text-align: center; }
+.shipment-history-empty h2 { margin: 6px 0 0; color: hsl(var(--foreground)); font-size: 18px; font-weight: 600; text-wrap: balance; }
+.shipment-history-empty p { margin: 0 0 8px; font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+.shipment-history-skeletons { display: grid; gap: 12px; }
+.shipment-history-skeletons > div { display: flex; align-items: center; gap: 18px; min-height: 114px; padding: 22px; border: 1px solid hsl(var(--border)); border-radius: 19px; background: hsl(var(--card)); }
+.shipment-history-skeletons > div > span:first-child { width: 44px; height: 44px; border-radius: 14px; background: hsl(var(--muted)); }
+.shipment-history-skeletons > div > div { display: grid; gap: 10px; flex: 1; }
+.shipment-history-skeletons > div > div > span { display: block; width: 60%; max-width: 260px; height: 14px; border-radius: 5px; background: hsl(var(--muted)); }
+.shipment-history-skeletons > div > div > span + span { width: 40%; max-width: 160px; height: 10px; }
+.shipment-history-skeletons > div > span:last-child { width: 45px; height: 14px; border-radius: 5px; background: hsl(var(--muted)); }
+@media (max-width: 1099px) {
+  .shipment-history-summary { grid-template-columns: 40px minmax(0, 1fr) 18px; gap: 15px 12px; padding: 20px; }
+  .shipment-history-symbol { width: 40px; height: 40px; border-radius: 13px; }
+  .shipment-history-destination { grid-column: 2; grid-row: 1; }
+  .shipment-history-chevron { grid-column: 3; grid-row: 1; }
+  .shipment-history-meta { grid-column: 1 / -1; grid-row: 2; gap: 8px 12px; }
+  .shipment-history-time { gap: 7px; }
+  .shipment-history-time time > span { display: inline; margin-left: 8px; }
+  .shipment-history-count { font-size: 14px; }
+  .shipment-history-details { margin-inline: 20px; }
+}
+@media (max-width: 520px) {
+  .shipment-history-heading { align-items: flex-start; margin-bottom: 20px; }
+  .shipment-history-heading h1 { font-size: 28px; }
+  .shipment-history-refresh { width: 44px; padding-inline: 0; }
+  .shipment-history-refresh span { display: none; }
+  .shipment-history-period { margin-bottom: 18px; width: 100%; }
+  .shipment-history-summary { padding: 18px; gap: 16px 10px; }
+  .shipment-history-destination > strong { font-size: 16px; }
+  .shipment-history-time { font-size: 12px; }
+  .shipment-history-details { margin-inline: 18px; }
+  .shipment-history-items > li { grid-template-columns: 28px minmax(0, 1fr); gap: 5px 10px; }
+  .shipment-history-item-icon { width: 28px; height: 28px; grid-row: 1 / 3; align-self: start; margin-top: 2px; }
+  .shipment-history-patient { grid-column: 2; }
+  .shipment-history-exam { grid-column: 2; justify-self: start; text-align: left; color: hsl(var(--muted-foreground)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shipment-history button, .shipment-history-chevron { transition: none; }
+}

@@ -49,3 +49,21 @@ Rodrigo confirmou que a prévia abriu, aprovou o caminho visual e autorizou cont
 Verificações: build, lint dos arquivos alterados e diffcheck aprovados; 16 regressões existentes do rastreamento e seis novos casos de colisão passaram. Revisão offline adicional conferiu seleção filtrada, payloads de avanço/DnD, confirmação da veterinária, estados de consulta e diálogo. QA no navegador em 320/390/768/1440 px sem rolagem horizontal; lista/quadro, filtros combinados, período, vazio, seleção e cancelamento de exclusão conferidos. Um arraste real pela UI mobile moveu somente uma ficha fictícia para `stage-no_grupo`.
 
 Nenhuma alteração em hooks, tipos, banco, Supabase, n8n, detalhe documental, envio de amostras ou histórico. A entrada da prévia e os fixtures continuam fora do build de produção. Tema escuro, aparelho físico, mutações clínicas reais e operação autenticada em produção não foram validados nesta rodada.
+
+## Rodada 03 — Enviar amostras e Histórico de envios, 19/10/2026
+
+Rodrigo aprovou o caminho do Rastreamento e autorizou refinar as duas telas de amostras na mesma branch de testes. Sem autorização de publicar o aplicativo.
+
+- Amostras aparecem primeiro, agrupadas por pet e tutor completo. Busca consulta pet, tutor, exame e laboratório, sem distinguir acentos. Seleção por exame, por pet ou por resultados visíveis; itens já enviados/com resultado ficam fora. A seleção não some ao buscar: a barra informa quantos selecionados ficaram fora da busca.
+- Revisão em painel Radix com todas as amostras, remetente obrigatório e laboratório opcional. No celular a ação fixa aparece somente após selecionar; no desktop há resumo lateral. Registro concluído abre o Histórico, em vez de voltar ao Início.
+- Amostra avulsa usa painel separado, exige pet/exame e aceita tutor/laboratório opcionais. A inclusão coloca a amostra nos pendentes; não registra um envio automaticamente.
+- Adaptador envia um snapshot dos IDs elegíveis e dos cartões afetados, com nomes aparados e guarda síncrona contra dois envios/criação simultâneos. Mutações existentes preservadas. Como o backend grava em etapas, falha orienta conferir o histórico e não provoca repetição automática; esta rodada não torna o backend transacional.
+- Histórico com Hoje, 7 dias (hoje e seis datas anteriores) e Todos; limites e apresentação usam America/Sao_Paulo. O hook de **leitura** recebeu início inclusivo/fim exclusivo UTC, mantendo os parâmetros antigos como alternativa. Nenhuma alteração nas mutações do hook, banco ou permissões.
+- Cartões de envio abrem detalhes com pet/tutor completos, exame e observações; resumo mantém laboratório, remetente, quantidade original e data/hora/ano. Ausência de detalhes não apaga a contagem. Erro, dados anteriores, vazio e carregamento são distintos.
+- A prévia DEV passou a incluir Amostras e Histórico, com inclusão e envio **simulados em estado local**. Sem autenticação, rede operacional ou gravações: `http://127.0.0.1:4192/design-preview.html?screen=samples`. O histórico pode ser aberto pela navegação interna ou pelo seletor da prévia.
+
+Verificações locais: build TypeScript/Vite, lint dos arquivos alterados e diffcheck aprovados. Revisões offline dos callbacks e consultas verificaram IDs obsoletos, payload congelado, clique duplo, criação avulsa, erros sem retry, limites UTC/SP, sete dias, virada do ano e ano bissexto. Estados e semântica do histórico conferidos isoladamente. QA via navegador em 320/390/768/1440 px sem rolagem horizontal; seleção escondida pela busca, revisão completa, foco ao fechar, lote simulado → histórico, inclusão avulsa sem envio, filtros e expansão de detalhes/observações/ausência de itens exercitados. Entrada e fixtures DEV ausentes do build.
+
+Capturas locais na pasta `design-web-mobile-20261019`: `04-amostras-revisao-mobile.png`, `05-historico-mobile.png`, `06-amostras-web.png`, `07-historico-web.png` e `08-amostras-mobile.png`.
+
+Resultado somente local na branch de testes; nenhuma chamada clínica, envio ao grupo, alteração Supabase/n8n, push/merge/deploy do app nesta rodada. Revisão visual destas duas telas, tema escuro, iPhone físico e operações autenticadas reais ficam pendentes. Próxima etapa visual: Início e Conta, após revisão.
