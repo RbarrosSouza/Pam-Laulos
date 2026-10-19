@@ -16,7 +16,7 @@ const status = load('src/lib/document-status.ts')
 let state = [], index = 0, pending = false, behavior, current, candidates = []
 const writes = [], notices = []
 const { DocumentForm } = load('src/components/documents/ExamDocumentPanels.tsx', {
-  react: { useState: initial => { const slot = index++; if (!(slot in state)) state[slot] = typeof initial === 'function' ? initial() : initial; return [state[slot], value => { state[slot] = typeof value === 'function' ? value(state[slot]) : value }] }, useEffect: () => {}, useDeferredValue: value => value },
+  react: { useState: initial => { const slot = index++; if (!(slot in state)) state[slot] = typeof initial === 'function' ? initial() : initial; return [state[slot], value => { state[slot] = typeof value === 'function' ? value(state[slot]) : value }] }, useRef: initial => { const slot = index++; if (!(slot in state)) state[slot] = { current: initial }; return state[slot] }, useEffect: () => {}, useDeferredValue: value => value },
   'react/jsx-runtime': jsx, 'lucide-react': { Download: 'Download', ExternalLink: 'ExternalLink' },
   sonner: { toast: { success: message => notices.push(['success', message]), error: message => notices.push(['error', message]) } },
   '@/contexts/exam-auth': { useExamAuth: () => ({ role: 'admin', session: { user: { id: 'fixture-user' } } }) },

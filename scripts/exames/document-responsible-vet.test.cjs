@@ -105,7 +105,7 @@ function harness(options = {}) {
   });
   const render = () => {
     index = 0;
-    return nodes(ExamDocumentContent({ doc, refresh: async () => { refreshes++; return { data: doc }; } }));
+    return nodes(ExamDocumentContent({ doc, refresh: async () => { refreshes++; if (options.refresh) await options.refresh(); return { data: doc }; } }));
   };
   const open = () => {
     render().find(node => node.type === 'button' && node.props.className === 'exam-detail-responsible').props.onClick();
@@ -212,6 +212,51 @@ test('a completed request does not close a different panel opened while it was s
   const sheet = h.render().find(node => node.type === 'ExamDetailSheet');
   assert.equal(sheet.props.open, true);
   assert.equal(sheet.props.title, 'PDF do exame');
+});
+
+test('identity and patient save callbacks dismiss their containing modal', () => {
+  const h = harness();
+  let tree = h.render();
+  tree.find(node => node.type === 'button' && node.props['aria-label'] === 'Opções do exame').props.onClick();
+  h.render().find(node => node.type === 'button' && text(node) === 'Conferir dados do exame').props.onClick();
+  tree = h.render();
+  assert.equal(tree.find(node => node.type === 'ExamDetailSheet').props.title, 'Dados do exame');
+  tree.find(node => node.type === 'DocumentForm').props.onSaved();
+  assert.equal(h.render().find(node => node.type === 'ExamDetailSheet').props.open, false);
+  tree = h.render();
+  tree.find(node => node.type === 'button' && text(node).includes('Adicionar exame ao cadastro')).props.onClick();
+  h.render().find(node => node.type === 'DocumentForm').props.onSaved();
+  assert.equal(h.render().find(node => node.type === 'ExamDetailSheet').props.open, false);
+});
+
+test('a late identity save does not dismiss a newer panel', () => {
+  const h = harness();
+  h.render().find(node => node.type === 'button' && node.props['aria-label'] === 'Opções do exame').props.onClick();
+  h.render().find(node => node.type === 'button' && text(node) === 'Conferir dados do exame').props.onClick();
+  const saved = h.render().find(node => node.type === 'DocumentForm').props.onSaved;
+  h.render().find(node => node.type === 'ExamDetailSheet').props.onOpenChange(false);
+  h.render().find(node => node.type === 'button' && text(node) === 'Abrir PDF').props.onClick();
+  saved();
+  const sheet = h.render().find(node => node.type === 'ExamDetailSheet');
+  assert.equal(sheet.props.open, true);
+  assert.equal(sheet.props.title, 'PDF do exame');
+});
+
+test('a persisted contact opens one centered confirmation even if its follow-up read fails', async () => {
+  const h = harness({ doc: { pet_id: 'pet-fixture' }, refresh: () => Promise.reject(new Error('Read unavailable')) });
+  h.render().find(node => node.type === 'button' && node.props['aria-label'] === 'Registrar contato com o tutor').props.onClick();
+  await h.render().find(node => node.type === 'DocumentForm').props.onContactSaved();
+  let tree = h.render();
+  const sheet = tree.find(node => node.type === 'ExamDetailSheet');
+  assert.equal(sheet.props.title, 'Contato registrado');
+  assert.equal(sheet.props.centered, true);
+  assert.equal(h.refreshes, 1);
+  assert.deepEqual(h.notices, []);
+  assert.match(text(tree[0]), /O contato foi salvo para os itens selecionados/);
+  assert.doesNotMatch(text(tree[0]), /demais itens continuam pendentes/);
+  tree.find(node => node.type === 'button' && text(node).includes('Voltar ao exame')).props.onClick();
+  tree = h.render();
+  assert.equal(tree.find(node => node.type === 'ExamDetailSheet').props.open, false);
 });
 
 test('the unassigned list excludes both clinical and legacy assignments', async () => {

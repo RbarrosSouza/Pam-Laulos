@@ -99,9 +99,9 @@ export async function mutateFixture(name: string, args: Record<string, unknown>)
       publish(attached)
     }, 900)
   } else if (name === 'record_exam_document_contact') {
-    if (!next.pet_id || !(args.p_note as string)?.trim()) throw new Error('Paciente e anotação são obrigatórios.')
+    if (!next.pet_id) throw new Error('Confirme o paciente antes de registrar o contato.')
     const ids = args.p_item_ids as string[]
-    next.items = next.items.map(item => ids.includes(item.exam_item_id || item.item_id || '') ? { ...item, contacted_at: String(args.p_contacted_at), contacted_by: USER_ID, contact_channel: String(args.p_channel), contact_note: String(args.p_note) } : item)
+    next.items = next.items.map(item => ids.includes(item.exam_item_id || item.item_id || '') ? { ...item, contacted_at: String(args.p_contacted_at), contacted_by: USER_ID, contact_channel: String(args.p_channel), contact_note: typeof args.p_note === 'string' ? args.p_note.trim() || null : null } : item)
     next.contact_status = next.items.length > 0 && next.items.every(item => item.contacted_at) ? 'completed' : 'partial'
     next.completed = next.contact_status === 'completed' && next.nexus_status === 'completed'
     eventType = 'contact_recorded'

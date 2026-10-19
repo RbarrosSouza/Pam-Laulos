@@ -1,0 +1,58 @@
+.app-notifications[data-sonner-toaster][data-x-position] {
+  top: 50%;
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  width: min(360px, calc(100vw - max(40px, env(safe-area-inset-left) * 2, env(safe-area-inset-right) * 2)));
+  height: var(--front-toast-height, 0px);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 70;
+  transition: none;
+}
+
+.app-notifications[data-sonner-toaster] [data-sonner-toast][data-styled] {
+  width: 100%;
+  min-height: 76px;
+  padding: 18px 60px 18px 20px;
+  border-radius: 18px;
+  font-size: 15px;
+  line-height: 1.5;
+  gap: 12px;
+  pointer-events: auto;
+  transition: transform 180ms ease-out, opacity 180ms ease-out;
+}
+
+.app-notifications[data-sonner-toaster] [data-sonner-toast][data-visible='false'] {
+  pointer-events: none;
+}
+
+.app-notifications[data-sonner-toaster] [data-sonner-toast] [data-content] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-notifications[data-sonner-toaster] [data-sonner-toast][data-type='success'] [data-icon] {
+  color: #218247;
+}
+
+.app-notifications[data-sonner-toaster] [data-sonner-toast] [data-close-button] {
+  top: 50%;
+  right: 8px;
+  left: auto;
+  width: 44px;
+  height: 44px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-notifications[data-sonner-toaster] [data-sonner-toast] {
+    animation: none;
+    transition: none;
+  }
+}

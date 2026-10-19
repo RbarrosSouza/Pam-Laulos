@@ -36,7 +36,7 @@ const { DocumentForm, DocumentHistory } = load('src/components/documents/ExamDoc
     const slot = index++;
     if (!(slot in states)) states[slot] = typeof initial === 'function' ? initial() : initial;
     return [states[slot], value => { states[slot] = typeof value === 'function' ? value(states[slot]) : value; }];
-  }, useEffect: () => {}, useDeferredValue: value => value },
+  }, useRef: initial => { const slot = index++; if (!(slot in states)) states[slot] = { current: initial }; return states[slot]; }, useEffect: () => {}, useDeferredValue: value => value },
   'react/jsx-runtime': jsx,
   'lucide-react': { Download: 'Download', ExternalLink: 'ExternalLink' },
   sonner: { toast: { success: value => notices.push(value), error: value => notices.push(value) } },
@@ -137,14 +137,14 @@ const check = (name, run) => { run(); checks++; console.log('ok ' + checks + ' -
   });
   states = []; currentDocument = contactDoc();
   tree = render({ mode: 'contact' });
-  check('contact form preserves previously completed items and requires a real note', () => {
+  check('contact form preserves previously completed items and accepts an optional note', () => {
     const inputs = tree.filter(node => node.type === 'input' && node.props.type === 'checkbox');
     assert.equal(inputs.length, 2);
     assert.equal(inputs[0].props.checked, true);
     assert.equal(inputs[0].props.disabled, true);
     assert.equal(inputs[1].props.checked, true);
     assert.equal(Boolean(inputs[1].props.disabled), false);
-    assert.equal(button(tree, 'Registrar contato realizado').props.disabled, true);
+    assert.equal(button(tree, 'Registrar contato realizado').props.disabled, false);
   });
 
   let resolveWrite;
@@ -179,7 +179,7 @@ const check = (name, run) => { run(); checks++; console.log('ok ' + checks + ' -
     assert.equal(entry.args.p_note, 'Tutor orientado sobre o resultado e retorno.');
     assert.ok(Number.isFinite(Date.parse(entry.args.p_contacted_at)));
     assert.equal(Object.hasOwn(entry.args, 'p_contacted_by'), false);
-    assert.equal(notices.at(-1), 'Contato registrado.');
+    assert.equal(notices.length, noticesBeforeSuccess, 'The parent success panel replaces the contact toast.');
   });
 
   states = []; currentDocument = contactDoc();

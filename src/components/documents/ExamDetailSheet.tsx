@@ -1,6 +1,7 @@
 import { useId, useRef, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface ExamDetailSheetProps {
   open: boolean
@@ -9,6 +10,7 @@ interface ExamDetailSheetProps {
   description?: string
   children: ReactNode
   wide?: boolean
+  centered?: boolean
 }
 
 export function ExamDetailSheet({
@@ -18,6 +20,7 @@ export function ExamDetailSheet({
   description,
   children,
   wide = false,
+  centered = false,
 }: ExamDetailSheetProps) {
   const descriptionId = useId()
   const returnFocusRef = useRef<HTMLElement | null>(null)
@@ -28,8 +31,15 @@ export function ExamDetailSheet({
       <Dialog.Portal>
         <Dialog.Overlay className="exam-detail-overlay" />
         <Dialog.Content
-          className={`exam-detail-sheet${wide ? ' exam-detail-sheet--wide' : ''}`}
+          className={cn('exam-detail-sheet', wide && 'exam-detail-sheet--wide', centered && 'exam-detail-sheet--centered')}
           aria-describedby={hasDescription ? descriptionId : undefined}
+          onInteractOutside={(event) => {
+            // Dismissing feedback is not a request to dismiss the editor behind
+            // it. Sonner lives in its own portal outside this dialog.
+            if (event.target instanceof Element && event.target.closest('[data-sonner-toaster]')) {
+              event.preventDefault()
+            }
+          }}
           onOpenAutoFocus={() => {
             returnFocusRef.current = document.activeElement instanceof HTMLElement
               ? document.activeElement

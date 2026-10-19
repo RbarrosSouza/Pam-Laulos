@@ -18,6 +18,7 @@ const businessMessages = new Map<string, string>([
   ['Veterinária não encontrada ou inativa', 'A veterinária selecionada não está mais ativa. Atualize a equipe e escolha novamente.'],
   ['Confirme o paciente e preserve o resultado antes do contato', 'Confirme o paciente e aguarde o PDF ser salvo antes de registrar o contato.'],
   ['Canal, data e anotação de contato válidos são obrigatórios', 'Confira o canal, a data e a anotação do contato.'],
+  ['Canal e data de contato válidos são obrigatórios', 'Confira o canal e a data do contato. A observação é opcional.'],
   ['Selecione somente itens abrangidos por este documento', 'Selecione somente os itens que pertencem a este exame.'],
   ['Envio ao grupo ainda não foi confirmado', 'A entrega no grupo ainda não foi confirmada. Confira a etapa do aviso.'],
   ['Mensagem não corresponde ao envio a conferir', 'A mensagem selecionada não corresponde ao aviso deste exame. Confira o envio no grupo.'],

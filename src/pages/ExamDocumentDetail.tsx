@@ -109,7 +109,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
       </main>
       <footer className="exam-detail-footer"><button className="exam-detail-primary" onClick={() => setPanel('patient')}><UserRoundPlus size={25} /><span>{progress.nexusLinked ? 'Ver exame no cadastro' : doc.pet_id ? 'Acompanhar cadastro' : 'Adicionar exame ao cadastro'}</span><ChevronRight size={21} /></button></footer>
     </div>
-    <ExamDetailSheet open={panel !== null} onOpenChange={open => { if (!open) close() }} title={panel ? panelTitles[panel] : ''} wide={panel === 'pdf'}>
+    <ExamDetailSheet open={panel !== null} onOpenChange={open => { if (!open) close() }} title={panel ? panelTitles[panel] : ''} wide={panel === 'pdf'} centered={panel === 'success'}>
       {panel === 'responsible' && <div className="exam-detail-team">
         {doc.responsible_vet_source === 'conflict' && !doc.responsible_vet_id && <p className="exam-detail-hint">Responsável a conferir. Selecione uma veterinária da equipe.</p>}
         {vets.isLoading ? <p className="exam-detail-hint flex items-center gap-2" role="status"><Loader2 size={20} className="animate-spin" />Carregando equipe…</p> : vets.error ? <div role="alert"><p className="exam-detail-hint">Não foi possível carregar a equipe.</p><button className="exam-detail-primary" onClick={() => void vets.refetch()}>Tentar novamente</button></div> : !vets.data?.length ? <p className="exam-detail-hint" role="status">Nenhuma veterinária ativa disponível.</p> : <ul className="exam-detail-team-list" aria-label="Veterinárias ativas">{vets.data.map(vet => {
@@ -121,9 +121,14 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
           </button></li>
         })}</ul>}
       </div>}
-      {panel === 'contact' && (progress.contactCompleted ? <DocumentProvenance doc={doc} /> : !contactAllowed ? <p className="exam-detail-hint">O registro de contato é feito por uma veterinária ou pela gestão.</p> : !doc.pet_id && !progress.contactCompleted ? <div className="exam-detail-empty"><UserRoundPlus size={35} /><h3>Confirme o paciente primeiro</h3><p>Selecione o cadastro para registrar o contato com o tutor correto.</p><button className="exam-detail-primary" onClick={() => setPanel('patient')}>Selecionar paciente<ChevronRight size={20} /></button></div> : <DocumentForm key={`${doc.id}:contact`} doc={doc} mode="contact" onContactSaved={async () => { await refresh(); setPanel('success') }} />)}
-      {panel === 'patient' && <div className="space-y-5"><DocumentForm key={`${doc.id}:patient`} doc={doc} mode="patient" />{progress.nexusLinked && <button className="exam-detail-primary" onClick={() => setPanel('pdf')}><FileText size={22} />Abrir exame anexado</button>}</div>}
-      {panel === 'identity' && <DocumentForm key={`${doc.id}:identity`} doc={doc} mode="identity" />}
+      {panel === 'contact' && (progress.contactCompleted ? <DocumentProvenance doc={doc} /> : !contactAllowed ? <p className="exam-detail-hint">O registro de contato é feito por uma veterinária ou pela gestão.</p> : !doc.pet_id && !progress.contactCompleted ? <div className="exam-detail-empty"><UserRoundPlus size={35} /><h3>Confirme o paciente primeiro</h3><p>Selecione o cadastro para registrar o contato com o tutor correto.</p><button className="exam-detail-primary" onClick={() => setPanel('patient')}>Selecionar paciente<ChevronRight size={20} /></button></div> : <DocumentForm key={`${doc.id}:contact`} doc={doc} mode="contact" onContactSaved={async () => {
+        // The contact RPC has already succeeded. A refresh failure must not
+        // turn a saved contact into an apparent write failure or invite retry.
+        try { await refresh() } catch { /* Query state retains any read error. */ }
+        setPanel(current => current === 'contact' ? 'success' : current)
+      }} />)}
+      {panel === 'patient' && <div className="space-y-5"><DocumentForm key={`${doc.id}:patient`} doc={doc} mode="patient" onSaved={() => setPanel(current => current === 'patient' ? null : current)} />{progress.nexusLinked && <button className="exam-detail-primary" onClick={() => setPanel('pdf')}><FileText size={22} />Abrir exame anexado</button>}</div>}
+      {panel === 'identity' && <DocumentForm key={`${doc.id}:identity`} doc={doc} mode="identity" onSaved={() => setPanel(current => current === 'identity' ? null : current)} />}
       {panel === 'pdf' && <DocumentPreview doc={doc} />}
       {panel === 'steps' && <div className="space-y-4"><DocumentSteps doc={doc} /><DocumentGroupConfirmation doc={doc} /></div>}
       {panel === 'history' && <div className="space-y-4"><DocumentProvenance doc={doc} /><DocumentHistory id={doc.id} /></div>}
@@ -135,7 +140,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
         <details><summary>Versão corrigida</summary>{doc.previous_document_id ? <p>Original preservado: <Link to={`/novos-exames/${doc.previous_document_id}`} onClick={close}>{documentDisplayId(doc.previous_document_id)}</Link></p> : <DocumentCorrection doc={doc} />}</details>
         <p className="exam-detail-reference">{documentDisplayId(doc.id)} · recebido em {new Date(doc.received_at).toLocaleString('pt-BR')}</p>
       </div>}
-      {panel === 'success' && <div className="exam-detail-success" role="status"><span className="exam-detail-success-mark"><Check size={42} strokeWidth={2.5} /></span><h3>{progress.contactCompleted ? 'Contato concluído' : 'Contato registrado'}</h3><p>{doc.completed ? 'Todas as etapas deste exame estão concluídas.' : progress.contactCompleted ? 'O contato com o tutor foi registrado. Acompanhe as etapas restantes na tela do exame.' : 'O registro foi salvo. Os demais itens continuam pendentes de contato.'}</p><button className="exam-detail-primary" onClick={close}>Voltar ao exame<Check size={20} /></button></div>}
+      {panel === 'success' && <div className="exam-detail-success" role="status"><span className="exam-detail-success-mark"><Check size={42} strokeWidth={2.5} /></span><h3>{progress.contactCompleted ? 'Contato concluído' : 'Contato registrado'}</h3><p>{doc.completed ? 'Todas as etapas deste exame estão concluídas.' : progress.contactCompleted ? 'O contato com o tutor foi registrado. Acompanhe as etapas restantes na tela do exame.' : 'O contato foi salvo para os itens selecionados. Acompanhe o andamento na tela do exame.'}</p><button className="exam-detail-primary" onClick={close}>Voltar ao exame<Check size={20} /></button></div>}
     </ExamDetailSheet>
   </div>
 }
