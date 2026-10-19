@@ -161,6 +161,35 @@ await check('malformed raw scheme, length and whitespace cannot become worker au
 await check('expired/unknown user tokens are refused',async()=>assert.equal((await request('file',{document_id:documentId},'invalid-user')).status,401));
 await check('authenticated outsider cannot retrieve clinical PDF',async()=>assert.equal((await request('file',{document_id:documentId},'fixture-outsider-token')).status,403));
 await check('member cannot use ingestion/service actions',async()=>assert.equal((await request('reserve_source',{},'fixture-user-token')).status,403));
+await check('reaction diagnostics/reserve/begin/result stay worker-only and cannot be used by members or anonymous clients',async()=>{
+  for(const action of ['reaction_preview','reaction_reserve_tasks','reaction_begin','reaction_result']){
+    assert.equal((await request(action,{},'fixture-user-token')).status,403);
+    assert.equal((await request(action,{},'fixture-outsider-token')).status,403);
+    assert.equal((await request(action,{},null)).status,401);
+  }assert.equal(calls.length,0);
+});
+await check('reaction preview calls only the read-only worker RPC without changing activation or issuing a provider request',async()=>{
+  assert.equal((await request('reaction_preview',{enabled:true,activation_cutoff:'1900-01-01',actor_id:999})).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'preview_exam_contact_reactions',args:{}}]);
+});
+await check('reaction reserve forwards worker/limit but cannot override server cutoff, actor or destination',async()=>{
+  assert.equal((await request('reaction_reserve_tasks',{worker:'n8n:fixture',limit:1,enabled:true,activation_cutoff:'1900-01-01',actor_id:999,destination_key:'forged'})).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'reserve_exam_contact_reactions',args:{p_worker:'n8n:fixture',p_limit:1}}]);
+});
+await check('reaction begin carries every original-target and actor fence before any toggle may be granted',async()=>{
+  assert.equal((await request('reaction_begin',{reaction_id:taskId,lease_token:token,destination_key:'fixture-group',external_message_id:'1498',emoji:'✅',actor_id:1})).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'begin_exam_contact_reaction',args:{p_reaction_id:taskId,p_lease_token:token,p_destination_key:'fixture-group',p_external_message_id:'1498',p_emoji:'✅',p_actor_id:1}}]);
+});
+await check('reaction begin rejects invalid UUID or unverified actor shape before RPC and result cannot omit its UUID token',async()=>{
+  for(const actor_id of [null,undefined,'1',0,-1,1.5,Number.MAX_SAFE_INTEGER+1,{}])assert.equal((await request('reaction_begin',{reaction_id:taskId,lease_token:token,actor_id})).status,400);
+  assert.equal((await request('reaction_begin',{reaction_id:'invalid',lease_token:token,actor_id:1})).status,400);
+  assert.equal((await request('reaction_result',{reaction_id:taskId,outcome:{status:'confirmed'}})).status,400);assert.equal(calls.length,0);
+});
+await check('reaction result sends only its fenced outcome to the separate ledger, without touching contact/delivery or provider',async()=>{
+  const outcome={status:'already_present',external_message_id:'1498',emoji:'✅',actor_id:1,own_reaction_verified:true};
+  assert.equal((await request('reaction_result',{reaction_id:taskId,lease_token:token,outcome})).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'record_exam_contact_reaction_result',args:{p_reaction_id:taskId,p_lease_token:token,p_outcome:outcome}}]);
+});
 await check('daily summary preview/reserve/begin/result are worker-only, including active members',async()=>{
   for(const action of ['pending_summary_preview','pending_summary_reserve','pending_summary_begin','pending_summary_result']){
     assert.equal((await request(action,{},'fixture-user-token')).status,403);

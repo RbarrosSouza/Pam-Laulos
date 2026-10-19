@@ -127,6 +127,21 @@ Deno.serve(async (req: Request) => {
       return data;
     }
     switch (action) {
+      case "reaction_preview": return response(await rpc("preview_exam_contact_reactions", {}));
+      case "reaction_reserve_tasks": return response(await rpc("reserve_exam_contact_reactions", {
+        p_worker: String(payload.worker || ""), p_limit: Number(payload.limit ?? 1),
+      }));
+      case "reaction_begin": {
+        if (typeof payload.actor_id !== "number" || !Number.isSafeInteger(payload.actor_id) || payload.actor_id < 1) error("REACTION_ACTOR_INVALID");
+        return response(await rpc("begin_exam_contact_reaction", {
+          p_reaction_id: uuid(payload.reaction_id), p_lease_token: uuid(payload.lease_token),
+          p_destination_key: String(payload.destination_key || ""), p_external_message_id: String(payload.external_message_id || ""),
+          p_emoji: String(payload.emoji || ""), p_actor_id: payload.actor_id,
+        }));
+      }
+      case "reaction_result": return response(await rpc("record_exam_contact_reaction_result", {
+        p_reaction_id: uuid(payload.reaction_id), p_lease_token: uuid(payload.lease_token), p_outcome: plain(payload.outcome),
+      }));
       case "pending_summary_preview": return response(await rpc("preview_exam_pending_summary", {}));
       case "pending_summary_reserve": return response(await rpc("reserve_exam_pending_summary", {
         // Day, time window and destination are owned by the server, not payload overrides.
