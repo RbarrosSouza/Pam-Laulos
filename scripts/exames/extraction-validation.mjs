@@ -1,6 +1,6 @@
 /** Pure, self-contained validator embedded in n8n. Never completes names from a registry. */
 export function validateExamExtraction(context, response) {
-  const fallback = reason => ({classification:'review', single_patient:false, fields:{}, evidence:[], review_reason:reason, extractor_version:'document-evidence-v5'});
+  const fallback = reason => ({classification:'review', single_patient:false, fields:{}, evidence:[], review_reason:reason, extractor_version:'document-evidence-v6'});
   const allowed = ['pet_name','client_name','exam_type','exam_date','lab_name','species','report_number','requesting_vet_name','requesting_vet_crmv'];
   const normalized = value => value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
   const comparable = value => normalized(value).toLocaleLowerCase('pt-BR');
@@ -97,6 +97,25 @@ export function validateExamExtraction(context, response) {
     return false;
   }
 
+  function expandRequesterHeader(ev) {
+    // Models sometimes quote only the two veterinarian rows. Extend that exact
+    // quote to its adjacent identification rows on the same original page.
+    const page = context.pages[ev.page - 1];
+    const rows = [...page.matchAll(/[^\r\n]+/gu)].filter(row => row[0].trim());
+    for (let at = 0; at + 5 < rows.length; at++) {
+      const block = rows.slice(at, at + 6);
+      if (!/^cl[ií]nica\s+veterin[aá]ria\s+m[eé]dic[oa]\s+veterin[aá]ri[oa]\s+crmv$/iu.test(normalized(block[0][0]))
+        || !/^(?:paciente|pet|animal|nome\s+do\s+paciente)\s+idade\s+sexo$/iu.test(normalized(block[2][0]))
+        || !/^(?:respons[aá]vel|tutor(?:a)?)\s+ra[cç]a\s+data\s+(?:(?:da|de)\s+)?coleta$/iu.test(normalized(block[4][0]))) continue;
+      const short = page.slice(block[0].index, block[1].index + block[1][0].length);
+      if (normalized(ev.excerpt) !== normalized(short) || ev.start < block[0].index || ev.end > block[1].index + block[1][0].length) continue;
+      const start = block[0].index, end = block[5].index + block[5][0].length;
+      const excerpt = page.slice(start, end);
+      if (excerpt.length <= 1500) return {...ev, start, end, excerpt};
+    }
+    return null;
+  }
+
   function supportsRequester(ev, value, field) {
     const quote = normalized(ev.excerpt);
     const label = /(?:solicitante|requisitante|solicitad[oa]\s+por)\s*[:=\-]?\s*(?:(?:dr|dra|doutor|doutora)\.?\s+)?$/iu;
@@ -188,7 +207,15 @@ export function validateExamExtraction(context, response) {
     if (!Object.hasOwn(data.fields, field)) continue;
     const value = data.fields[field];
     if (value === null) { fields[field] = null; continue; }
-    const valid = meaningful(value) && candidates.filter(ev => ev.field === field).find(ev => field === 'exam_date' ? supportsDate(ev, value) : field.startsWith('requesting_vet_') ? supportsRequester(ev, value, field) : occurrences(ev.excerpt, value).length > 0);
+    const valid = meaningful(value) && candidates.filter(ev => ev.field === field).find(ev => {
+      if (field === 'exam_date') return supportsDate(ev, value);
+      if (!field.startsWith('requesting_vet_')) return occurrences(ev.excerpt, value).length > 0;
+      if (supportsRequester(ev, value, field)) return true;
+      const expanded = expandRequesterHeader(ev);
+      if (!expanded || !supportsRequester(expanded, value, field)) return false;
+      Object.assign(ev, expanded); // Persist the full literal context checked by the database.
+      return true;
+    });
     if (!valid) { fields[field] = null; invalid.push(field); continue; }
     fields[field] = value;
     evidence.push({field:valid.field,page:valid.page,excerpt:valid.excerpt});
@@ -201,6 +228,6 @@ export function validateExamExtraction(context, response) {
   return {
     classification:data.classification === 'not_exam' ? 'not_exam' : incomplete || invalidCore ? 'review' : data.classification,
     single_patient:data.single_patient, fields, evidence,
-    review_reason:reasons.join('; ') || null, extractor_version:'document-evidence-v5',
+    review_reason:reasons.join('; ') || null, extractor_version:'document-evidence-v6',
   };
 }

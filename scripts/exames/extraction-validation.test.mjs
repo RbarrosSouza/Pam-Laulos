@@ -184,7 +184,7 @@ test('three current blood count sections normalize to Hemograma with three real 
  const out=run(data,report);
  assert.equal(out.fields.exam_type,'Hemograma');assert.equal(out.classification,'exam');
  assert.equal(out.fields.pet_name,'LILI');assert.equal(out.fields.client_name,'Clara Beatriz Lopes Oliveira');
- assert.equal(out.fields.exam_date,'2026-10-16');assert.equal(out.extractor_version,'document-evidence-v5');
+ assert.equal(out.fields.exam_date,'2026-10-16');assert.equal(out.extractor_version,'document-evidence-v6');
  assert.deepEqual(out.evidence.filter(ev=>ev.field==='exam_type'),bloodSections.map(section=>({field:'exam_type',page:1,excerpt:section.split('\n')[0]})));
  assert(out.evidence.every(ev=>report[ev.page-1].includes(ev.excerpt)));
 });
@@ -387,4 +387,28 @@ test('the complete count preserves evidenced Creatinina and Ureia components in 
  assert.equal(historical.fields.exam_type,'Hemograma');
  const unrelated=run(bloodData(),[...bloodPages(bloodSections),'GLICOSE Resultado Referência\n100 mg/dL']);
  assert.equal(unrelated.fields.exam_type,null,'an unknown current panel is kept for review rather than erased');
+});
+
+
+test('a short literal veterinarian header expands to adjacent original identity rows',()=>{
+ const short=identificationHeader.split('\n').slice(0,2).join('\n');
+ const report=[pages[0]+'\n'+identificationHeader+'\nLiberado por: Pedro Lima'];
+ const out=run(requesterData(short),report);
+ assert.equal(out.fields.requesting_vet_name,'Ana Beatriz Souza');
+ assert.equal(out.evidence.find(ev=>ev.field==='requesting_vet_name').excerpt,identificationHeader);
+ assert(report[0].includes(out.evidence.find(ev=>ev.field==='requesting_vet_name').excerpt));
+ assert.equal(out.extractor_version,'document-evidence-v6');
+});
+
+test('short header expansion cannot borrow another patient, guardian, page or missing context',()=>{
+ const short=identificationHeader.split('\n').slice(0,2).join('\n');
+ for(const report of [
+  [pages[0]+'\n'+identificationHeader.replace('LILI 10a','LUNA 10a')],
+  [pages[0]+'\n'+identificationHeader.replace('Clara Beatriz Lopes Oliveira Canino','HELENA Canino')],
+  [pages[0]+'\n'+short,identificationHeader.split('\n').slice(2).join('\n')],
+  [pages[0]+'\n'+identificationHeader.replace('Data coleta','Data nascimento')],
+  [pages[0]+'\n'+short+'\nAssinatura: Ana Beatriz Souza\n'+identificationHeader.split('\n').slice(2).join('\n')],
+ ]) assert.equal(run(requesterData(short),report).fields.requesting_vet_name,null);
+ const data=requesterData('Ana Beatriz Souza');
+ assert.equal(run(data,[pages[0]+'\n'+identificationHeader]).fields.requesting_vet_name,null);
 });
