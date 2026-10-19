@@ -112,3 +112,15 @@ A migração `20261018000012_exam_document_responsibility.sql` preserva os contr
 O seletor antigo do CRM pode conter um nome diferente do seu ID clínico. Essa divergência também exige seleção manual na página do exame; a automação não escolhe silenciosamente um dos dois valores. A escolha na página do exame grava ID e nome juntos, registra o autor e preserva o veterinário original da venda.
 
 Validação direcionada: `npm run test:exames:responsavel`.
+
+## Resumo diário dos pendentes
+
+`OPERACIONAL-06.json` agenda o resumo às 08h em `America/Sao_Paulo`, todos os dias. Instale a migração `20261018000013_exam_pending_summary.sql` e publique as ações correspondentes do `exam-document-service` antes de ativá-lo. O template público é inativo e sem credenciais; gere o vínculo em arquivo privado externo com `pending-summary-build.mjs --config … --out …`.
+
+A consulta usa documentos canônicos já entregues ao grupo configurado e com contato ainda aberto, incluindo contato parcial. Exclui fixtures e rejeitados. O texto mostra os nomes disponíveis, tempo desde a entrega confirmada, responsável clínica definida e link do exame. Sem pendentes, não envia mensagem. Não reenvia PDFs nem altera contato ou vínculo clínico.
+
+A reserva é única por dia local e destino. O banco concede a autorização para o POST uma única vez, entre 08h e 09h; resposta perdida ou incerta não libera outro envio. O resultado fica em `exam_pending_summary` e seu histórico privado. Uma falha exige conferir esse registro e o histórico do Chatwoot antes de qualquer recuperação. Não executar novamente um envio incerto.
+
+`OPERACIONAL-06-PREVIEW.json` consulta a mesma lista e verifica o grupo/histórico sem reservar ou enviar. Use essa prévia para conferência manual fora da janela. Listas acima de 200 documentos, resumos acima de 12.000 caracteres ou paginação incompleta falham explicitamente; nenhum item é cortado silenciosamente. A primeira execução da agenda continua sendo uma validação distinta da prévia.
+
+Verificações direcionadas: `node --test scripts/exames/pending-group-summary.test.mjs scripts/exames/pending-summary-runtime.test.mjs scripts/exames/pending-summary-build.test.mjs`, `node supabase/tests/exam-pending-summary.test.mjs` e `node supabase/tests/exam-document-service.test.mjs`.

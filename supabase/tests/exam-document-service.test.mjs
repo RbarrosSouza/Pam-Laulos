@@ -93,7 +93,7 @@ let handler;
 const source=await readFile(new URL('../functions/exam-document-service/index.ts',import.meta.url),'utf8');
 const script=ts.transpileModule(source.replace(/^import .*;\s*$/gm,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
 vm.runInNewContext(script,{selectExamSupabasePrivilegedKey:keyExports.selectExamSupabasePrivilegedKey,createClient:(_url,key)=>{clientKeys.push(key);return client},Deno:{env:{get:k=>env.get(k)},serve(fn){handler=fn}},Request,Response,File,Blob,FormData,URL,URLSearchParams,
-  crypto,TextDecoder,Uint8Array,ArrayBuffer,Date,
+  crypto,TextDecoder,TextEncoder,Uint8Array,ArrayBuffer,Date,
   oauthDriveReaderConfig:readerExports.oauthDriveReaderConfig,
   readOAuthDriveOriginal:readerExports.readOAuthDriveOriginal,
   // The adapter itself, including real SDK JSON/SSE transport, is tested by composio-original-reader.test.ts.
@@ -161,6 +161,41 @@ await check('malformed raw scheme, length and whitespace cannot become worker au
 await check('expired/unknown user tokens are refused',async()=>assert.equal((await request('file',{document_id:documentId},'invalid-user')).status,401));
 await check('authenticated outsider cannot retrieve clinical PDF',async()=>assert.equal((await request('file',{document_id:documentId},'fixture-outsider-token')).status,403));
 await check('member cannot use ingestion/service actions',async()=>assert.equal((await request('reserve_source',{},'fixture-user-token')).status,403));
+await check('daily summary preview/reserve/begin/result are worker-only, including active members',async()=>{
+  for(const action of ['pending_summary_preview','pending_summary_reserve','pending_summary_begin','pending_summary_result']){
+    assert.equal((await request(action,{},'fixture-user-token')).status,403);
+    assert.equal((await request(action,{},'fixture-outsider-token')).status,403);
+    assert.equal((await request(action,{},null)).status,401);
+  }
+  assert.equal(calls.length,0);
+});
+await check('summary preview performs one read-only RPC and no provider/storage call or client clock override',async()=>{
+  assert.equal((await request('pending_summary_preview',{day:'1900-01-01',as_of:'1900-01-01T00:00:00Z',destination_key:'forged'})).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'preview_exam_pending_summary',args:{}}]);
+});
+await check('summary reserve forwards only the worker; destination/day/dry-run cannot bypass server gates',async()=>{
+  assert.equal((await request('pending_summary_reserve',{worker:'n8n:fixture',day:'1900-01-01',destination_key:'forged',dry_run:false,as_of:'1900-01-01'})).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'reserve_exam_pending_summary',args:{p_worker:'n8n:fixture'}}]);
+});
+await check('summary begin hashes the actual final content and never accepts a caller-provided hash',async()=>{
+  const content='🧪 Resumo fixture\nSem dados clínicos.',expected=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(content)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+  assert.equal((await request('pending_summary_begin',{summary_id:taskId,lease_token:token,destination_key:'fixture-group',content,content_sha256:'forged'})).status,200);
+  const actual=calls[0];assert.equal(actual.name,'begin_exam_pending_summary');assert.equal(actual.args.p_content_sha256,expected);
+  assert.equal(actual.args.p_content_characters,Array.from(content).length);assert.equal(actual.args.p_destination_key,'fixture-group');
+  assert.equal(JSON.stringify(calls).includes(content),false);assert.equal(calls.length,1);
+});
+await check('summary begin rejects absent/blank/oversize/NUL content or invalid UUID before any RPC',async()=>{
+  for(const content of [undefined,null,'','   ','a'.repeat(12001),'bad\u0000content'])
+    assert.equal((await request('pending_summary_begin',{summary_id:taskId,lease_token:token,destination_key:'fixture',content})).status,400);
+  assert.equal((await request('pending_summary_begin',{summary_id:'invalid',lease_token:token,content:'fixture'})).status,400);
+  assert.equal(calls.length,0);
+});
+await check('summary result requires UUID fences and forwards outcome only to the summary ledger RPC',async()=>{
+  const outcome={status:'created',external_id:'9001',external_status:'sent',content_sha256:hash};
+  assert.equal((await request('pending_summary_result',{summary_id:taskId,lease_token:'invalid',outcome})).status,400);assert.equal(calls.length,0);
+  assert.equal((await request('pending_summary_result',{summary_id:taskId,lease_token:token,outcome})).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'record_exam_pending_summary_result',args:{p_summary_id:taskId,p_lease_token:token,p_outcome:outcome}}]);
+});
 await check('member cannot begin staging or report a helper result',async()=>{
   for(const action of ['begin_staging','staging_result']) assert.equal((await request(action,{},'fixture-user-token')).status,403);
   assert.equal(calls.length,0);

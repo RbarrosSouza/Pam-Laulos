@@ -36,21 +36,24 @@ function ageLabel(milliseconds) {
  * document_id?:string,id?:string,pet_name?:string|null,client_name?:string|null,exam_type?:string|null,
  * responsible_vet_id?:string|null,responsible_vet_name?:string|null,first_group_sent_at:string
  * }>}} snapshot The caller excludes fixtures, rejected/canonical documents, and completed contacts.
- * @param {{baseUrl:string}} options Public Pam Laudos origin, without credentials or query parameters.
+ * @param {{baseUrl:string,mode?:'test'|'daily'}} options Public Pam Laudos origin, without credentials or query parameters.
  * @returns {{content:string,count:number,documentIds:string[]}}
  */
-export function buildPendingGroupSummary(snapshot, { baseUrl } = {}) {
+export function buildPendingGroupSummary(snapshot, { baseUrl, mode = 'test' } = {}) {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) throw new TypeError('Snapshot inválido.');
   if (snapshot.has_more !== false) throw new Error('A consulta está incompleta; não enviar um resumo parcial.');
   if (!Array.isArray(snapshot.documents) || !Number.isSafeInteger(snapshot.total) || snapshot.total < 0 || snapshot.total !== snapshot.documents.length) {
     throw new Error('O total não corresponde à lista completa de exames.');
   }
   const asOf = instant(snapshot.as_of, 'as_of');
-  let base;
-  try { base = new URL(baseUrl); } catch { throw new TypeError('Endereço do Pam Laudos inválido.'); }
-  if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash || base.pathname !== '/') {
+  // The n8n Code sandbox has no URL global. Only an explicit public HTTPS
+  // origin is accepted; credentials, paths, queries and fragments never pass.
+  const match = typeof baseUrl === 'string' && baseUrl.match(/^https:\/\/([a-z0-9]+(?:[.-][a-z0-9]+)*)(?::([0-9]{1,5}))?\/?$/i);
+  if (!match || (match[2] && (Number(match[2]) < 1 || Number(match[2]) > 65535))) {
     throw new TypeError('Use somente a origem HTTPS pública do Pam Laudos.');
   }
+  const origin = 'https://' + match[1].toLowerCase() + (match[2] && Number(match[2]) !== 443 ? ':' + Number(match[2]) : '');
+  if (!['test', 'daily'].includes(mode)) throw new TypeError('Modo de resumo inválido.');
   const ids = new Set();
   const documents = snapshot.documents.map(document => {
     if (!document || typeof document !== 'object') throw new TypeError('ID de exame inválido.');
@@ -90,17 +93,17 @@ export function buildPendingGroupSummary(snapshot, { baseUrl } = {}) {
     ].filter(Boolean).join(' · ');
     return [
       `${index + 1}. ${info}`,
-      `${base.origin}/e/${Buffer.from(document.id.replace(/-/g, ''), 'hex').toString('base64url')}`,
+      `${origin}/e/${Buffer.from(document.id.replace(/-/g, ''), 'hex').toString('base64url')}`,
     ].join('\n');
   });
   const content = [
-    '🧪 *Teste de resumo*',
+    mode === 'daily' ? '📋 *Exames pendentes*' : '🧪 *Teste de resumo*',
     'Segue a lista dos exames que precisam de atenção',
     `${date} às ${time}`,
     '',
     ...blocks.flatMap(block => [block, '']),
     `Total: ${snapshot.total} ${snapshot.total === 1 ? 'exame' : 'exames'}`,
-    `📋 Pam Laudos: ${base.origin}/novos-exames`,
+    `📋 Pam Laudos: ${origin}/novos-exames`,
   ].join('\n');
   if (content.length > MAX_PENDING_SUMMARY_CHARACTERS) throw new Error('O resumo excede 24.000 caracteres; nenhum exame foi cortado ou enviado.');
   return { content, count: documents.length, documentIds: documents.map(document => document.id) };

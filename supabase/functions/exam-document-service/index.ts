@@ -127,6 +127,24 @@ Deno.serve(async (req: Request) => {
       return data;
     }
     switch (action) {
+      case "pending_summary_preview": return response(await rpc("preview_exam_pending_summary", {}));
+      case "pending_summary_reserve": return response(await rpc("reserve_exam_pending_summary", {
+        // Day, time window and destination are owned by the server, not payload overrides.
+        p_worker: String(payload.worker || ""),
+      }));
+      case "pending_summary_begin": {
+        const content = payload.content;
+        if (typeof content !== "string" || !content.trim() || content.length > 12000 || content.includes("\u0000")) error("SUMMARY_CONTENT_INVALID");
+        const contentHash = await sha256(new TextEncoder().encode(content).buffer as ArrayBuffer);
+        return response(await rpc("begin_exam_pending_summary", {
+          p_summary_id: uuid(payload.summary_id), p_lease_token: uuid(payload.lease_token),
+          p_destination_key: String(payload.destination_key || ""),
+          p_content_sha256: contentHash, p_content_characters: Array.from(content).length,
+        }));
+      }
+      case "pending_summary_result": return response(await rpc("record_exam_pending_summary_result", {
+        p_summary_id: uuid(payload.summary_id), p_lease_token: uuid(payload.lease_token), p_outcome: plain(payload.outcome),
+      }));
       case "collection_checkpoint": return response(await rpc("load_exam_collection_checkpoint", {
         p_collector_id: String(payload.collector_id || ""), p_scope_key: String(payload.scope_key || ""),
         p_sweep_id: payload.sweep_id == null ? null : uuid(payload.sweep_id),
