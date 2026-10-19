@@ -6,6 +6,7 @@ import path from 'node:path'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const repository = path.resolve(root, '../../..')
+const previewPort = Number(process.env.QA_PREVIEW_PORT || 4182)
 
 export default defineConfig({
   root,
@@ -23,11 +24,11 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',
-    port: 4182,
+    port: previewPort,
     strictPort: true,
     fs: { allow: [repository] },
     headers: {
-      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:4182; frame-src blob:; object-src 'none'",
+      'Content-Security-Policy': `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:${previewPort}; frame-src blob:; object-src 'none'`,
     },
   },
 })

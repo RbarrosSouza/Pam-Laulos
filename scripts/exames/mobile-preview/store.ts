@@ -8,13 +8,14 @@ const now = Date.now()
 const received = new Date(now - 18 * 60 * 60 * 1000 - 120000).toISOString()
 const sent = new Date(now - 18 * 60 * 60 * 1000).toISOString()
 const contacted = new Date(now - 600000).toISOString()
-const linked = ['linked', 'complete', 'partial', 'error', 'reception'].includes(scenario)
+const dateScenario = ['missing-date', 'date-error'].includes(scenario)
+const linked = ['linked', 'complete', 'partial', 'error', 'reception', 'missing-date', 'date-error'].includes(scenario)
 const complete = scenario === 'complete'
 const fields: DocumentFields = {
   pet_name: scenario === 'long' ? 'Luna Maria Estrela da Manhã' : 'Luna',
   client_name: scenario === 'long' ? 'Helena Beatriz Albuquerque de Oliveira Duarte' : 'Helena Duarte',
   exam_type: scenario === 'long' ? 'Hemograma completo com avaliação morfológica e contagem de reticulócitos' : 'Hemograma',
-  exam_date: '2026-10-17', lab_name: 'Laboratório demonstração', species: 'Canina',
+  exam_date: dateScenario ? null : '2026-10-17', lab_name: 'Laboratório demonstração', species: 'Canina',
 }
 
 let document: ExamDocument = {
@@ -28,7 +29,7 @@ let document: ExamDocument = {
   assigned_name: complete || scenario === 'partial' ? 'Dra. Isabela Martins' : null,
   group_release_at: sent, group_exception_reason: null, previous_document_id: null,
   oldest_group_sent_at: sent, contact_status: complete ? 'completed' : scenario === 'partial' ? 'partial' : 'pending',
-  group_status: 'sent', nexus_status: linked ? 'completed' : 'awaiting_link',
+  group_status: 'sent', nexus_status: linked && !dateScenario ? 'completed' : 'awaiting_link',
   process_status: 'completed', completed: complete,
   sources: [{ id: 'fixture-email', channel: 'email', account: 'qa@example.invalid', received_at: received }],
   items: linked ? [{ exam_item_id: 'item-hemograma-fixture', exam_type: 'Hemograma', contacted_at: complete || scenario === 'partial' ? contacted : null, contacted_by: complete || scenario === 'partial' ? USER_ID : null, contact_channel: complete || scenario === 'partial' ? 'whatsapp' : null, contact_note: complete || scenario === 'partial' ? 'Contato fictício registrado para avaliação visual.' : null }] : [],
@@ -36,7 +37,7 @@ let document: ExamDocument = {
     { id: 'delivery-drive', destination: 'drive', status: 'completed', attempts: 1, last_error: null },
     { id: 'delivery-processing', destination: 'processing', status: 'completed', attempts: 1, last_error: null },
     { id: 'delivery-group', destination: 'group', status: 'sent', attempts: 1, last_error: null, sent_at: sent, external_id: 'fixture-message' },
-    { id: 'delivery-nexus', destination: 'nexus', status: linked ? 'completed' : 'pending', attempts: linked ? 1 : 0, last_error: null },
+    { id: 'delivery-nexus', destination: 'nexus', status: linked && !dateScenario ? 'completed' : 'pending', attempts: linked && !dateScenario ? 1 : 0, last_error: null },
   ],
 }
 if (scenario === 'partial') document.items.push({ exam_item_id: 'item-reticulocitos-fixture', exam_type: 'Reticulócitos', contacted_at: null })
@@ -61,7 +62,7 @@ export const candidates: DocumentCandidate[] = [
 
 export async function mutateFixture(name: string, args: Record<string, unknown>) {
   await wait(350)
-  if (scenario === 'error') throw new Error('Não foi possível salvar. Falha simulada de conexão; nenhuma alteração foi gravada.')
+  if (scenario === 'error' || scenario === 'date-error') throw new Error('Não foi possível salvar. Falha simulada de conexão; nenhuma alteração foi gravada.')
   const next = structuredClone(document)
   if (args.p_expected_version !== undefined && args.p_expected_version !== next.version) throw new Error('A identificação mudou. Recarregue os dados antes de confirmar.')
   let eventType = name

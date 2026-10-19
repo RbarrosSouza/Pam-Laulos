@@ -19,3 +19,5 @@ Abra `http://127.0.0.1:4182/?scenario=pending`. Cenários disponíveis: `pending
 - `reception`: sem permissão para registrar contato.
 
 Todos os casos são fictícios. Responsabilidade, conferência, vínculo e contato persistem somente na memória da aba; recarregar restaura o cenário. O PDF é gerado localmente. O cenário é escolhido na URL para não inserir controles artificiais na área visual da página.
+
+Para reproduzir a edição da data no vínculo sem usar Supabase, execute `QA_PREVIEW_PORT=4193 npx vite --config scripts/exames/mobile-preview/vite.config.ts` e abra `http://127.0.0.1:4193/?scenario=missing-date`. O paciente já está identificado, mas a data não foi salva. Em **Adicionar exame ao cadastro**, digite a data e salve a identificação. O cenário `date-error` simula uma falha de gravação, preservando o formulário e o rascunho.
