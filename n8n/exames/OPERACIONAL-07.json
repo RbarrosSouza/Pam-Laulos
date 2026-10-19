@@ -1,0 +1,1133 @@
+{
+  "name": "OPERACIONAL 07 — Contato concluído no grupo",
+  "active": false,
+  "nodes": [
+    {
+      "id": "b42bf647-f025-5fbd-a890-7b359b1595a4",
+      "name": "Executar manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        180
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "9313f3b0-5235-5877-a05b-be8107ecc57a",
+      "name": "A cada minuto",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1200,
+        -40
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "5ef18cfc-e235-572d-ad7a-58272cdef5c7",
+      "name": "Configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nconst cfg={\n  \"enabled\": false,\n  \"dryRun\": true,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"expectedActorId\": null,\n  \"emoji\": \"✅\",\n  \"maxMessagePages\": 20,\n  \"worker\": \"n8n-exames-reacao-contato\",\n  \"diagnosticTarget\": null\n};\nreturn [{json:contactReactionConfiguration(cfg,$execution)}];"
+      }
+    },
+    {
+      "id": "6f12f5b6-cfc2-58ed-a95d-8c9481bdfaed",
+      "name": "Chatwoot - conferir usuário da credencial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl.replace(/\\/$/, '') + '/api/v1/profile' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "chatwootApi",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_EXISTING_CHATWOOT_CREDENTIAL",
+          "name": "Select existing Chatwoot credential"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "6f05e7c2-5a52-5017-a031-94c3f0546bc9",
+      "name": "Confirmar ator autenticado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:verifyContactReactionActor($json,$('Configuração').first().json)}];"
+      }
+    },
+    {
+      "id": "c4e7c59b-d651-5337-ac15-7aceaf857ab3",
+      "name": "Consultar ou reservar reações",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify( { action: $(\"Configuração\").first().json.dryRun ? \"reaction_preview\" : \"reaction_reserve_tasks\", payload: { worker: $(\"Confirmar ator autenticado\").first().json.worker, limit: 1 } } ) }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_EXISTING_WORKER_HEADER",
+          "name": "Select existing exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "28d2b3bc-aa72-5c0f-aa31-b087c3ff4a95",
+      "name": "Preparar alvos originais",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nconst tasks=prepareContactReactionTasks($json,$('Confirmar ator autenticado').first().json);return tasks.length?tasks.map(json=>({json})):[{json:{available:false,readOnly:true}}];"
+      }
+    },
+    {
+      "id": "d0632d00-5aa7-54eb-a476-ecef54906969",
+      "name": "Uma reação por vez",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "baf559c8-f64c-5040-a923-31e66c9ddeb0",
+      "name": "Alvo disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.available === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "bfd0f411-45b1-5c1c-ab55-3fba45be4d90",
+      "name": "Sem contato elegível",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        220
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:{post_permitted:false,eligible_targets:0}}];"
+      }
+    },
+    {
+      "id": "8fcef28c-94c7-5c87-a3b0-ab32f146fa57",
+      "name": "Chatwoot - conferir grupo original",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl.replace(/\\/$/, '') + '/api/v1/accounts/' + $('Configuração').first().json.accountId + '/conversations/' + $('Configuração').first().json.conversationId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "chatwootApi",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_EXISTING_CHATWOOT_CREDENTIAL",
+          "name": "Select existing Chatwoot credential"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "1315682a-bdf9-535b-ac75-a18cbb1706d1",
+      "name": "Conferir identidade do grupo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:verifyContactReactionGroup($json,$('Uma reação por vez').item.json,$('Confirmar ator autenticado').first().json)}];"
+      }
+    },
+    {
+      "id": "ec51abb4-e237-5536-a7ce-a276866739a4",
+      "name": "Chatwoot - ler original e todas as reações",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl.replace(/\\/$/, '') + '/api/v1/accounts/' + $('Configuração').first().json.accountId + '/conversations/' + $('Configuração').first().json.conversationId + '/messages' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "chatwootApi",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "after",
+                    "value": "={{ ($response.body.payload || $response.body.messages || []).map(m => String(m.id)).sort((a,b) => a.length-b.length || a.localeCompare(b)).at(-1) || '0' }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !($response.body.payload || $response.body.messages || []).length }}",
+              "limitPagesFetched": true,
+              "maxRequests": 20,
+              "requestInterval": 250
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "after",
+              "value": "={{ $json.scan_after }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_EXISTING_CHATWOOT_CREDENTIAL",
+          "name": "Select existing Chatwoot credential"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "afa8b8f1-e0e8-5449-afb2-df52710c0001",
+      "name": "Conferir reação sem alterar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:inspectContactReactionMessages($input.all().map(item=>item.json),$('Conferir identidade do grupo').item.json,$('Confirmar ator autenticado').first().json)}];"
+      }
+    },
+    {
+      "id": "433ebac2-9aed-54fc-af33-bea03d8f0b02",
+      "name": "Próximo alvo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        340
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:{checked:true}}];"
+      }
+    },
+    {
+      "id": "dc1e9d1c-4091-500c-a5ce-521a66e6a3aa",
+      "name": "Diagnóstico sem reação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -260
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:contactReactionDiagnostic($json)}];"
+      }
+    },
+    {
+      "id": "a271c033-cc33-5312-ade6-485b5d18e7cc",
+      "name": "Somente diagnóstico",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.readOnly === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "fee69af0-11a1-5f7d-ae10-c11ea6e205b5",
+      "name": "Precisa aplicar reação nova",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.postRequired === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "260d1c5c-1820-54dc-a0da-ea8224063f63",
+      "name": "Registrar reação já observada ou HOLD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify( { action: \"reaction_result\", payload: { reaction_id: $json.reaction_id, lease_token: $json.lease_token, outcome: $json.outcome } } ) }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_EXISTING_WORKER_HEADER",
+          "name": "Select existing exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "c2ab8779-12ee-5d1c-af87-17d2dbcdda14",
+      "name": "Persistir início antes do toggle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify( { action: \"reaction_begin\", payload: { reaction_id: $json.reaction_id, lease_token: $json.lease_token, destination_key: $json.destination_key, external_message_id: $json.external_message_id, emoji: \"✅\", actor_id: $json.actor_id } } ) }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_EXISTING_WORKER_HEADER",
+          "name": "Select existing exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "4e255321-ebf4-5b8d-a9c7-d8a54a7a89d3",
+      "name": "Conferir autorização única",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:contactReactionDispatchPermission($json,$('Conferir reação sem alterar mensagem').item.json,$('Confirmar ator autenticado').first().json)}];"
+      }
+    },
+    {
+      "id": "47945a40-2155-5daa-a113-dac71613968c",
+      "name": "Pode fazer um único toggle",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check",
+              "leftValue": "={{ $json.dispatch_allowed === true && $json.postRequired === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4e640ef5-62dc-51b4-a110-807a0bd63cea",
+      "name": "Chatwoot - reagir uma única vez",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl.replace(/\\/$/, '') + '/api/v1/accounts/' + $('Configuração').first().json.accountId + '/conversations/' + $('Configuração').first().json.conversationId + '/messages/' + $json.external_message_id + '/reactions' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "chatwootApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify( { emoji: \"✅\" } ) }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_EXISTING_CHATWOOT_CREDENTIAL",
+          "name": "Select existing Chatwoot credential"
+        }
+      },
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "65c5734c-34d4-536c-ae93-e69f9f092d40",
+      "name": "Registrar submissão sem repetir toggle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:classifyContactReactionSubmission($json,$('Conferir autorização única').item.json)}];"
+      }
+    },
+    {
+      "id": "0d0ef421-4b5c-539d-a206-0d4c3dcd5df9",
+      "name": "Salvar tentativa da reação",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify( { action: \"reaction_result\", payload: { reaction_id: $json.reaction_id, lease_token: $json.lease_token, outcome: $json.outcome } } ) }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_EXISTING_WORKER_HEADER",
+          "name": "Select existing exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "f9dd46c0-9cd8-5dbc-aa38-fc17879c9d5d",
+      "name": "Restaurar contexto para conferir",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:$('Registrar submissão sem repetir toggle').item.json}];"
+      }
+    },
+    {
+      "id": "0c993262-609c-5ac7-afd2-bded1774f648",
+      "name": "Chatwoot - conferir reação após tentativa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3600,
+        -40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuração').first().json.chatwootBaseUrl.replace(/\\/$/, '') + '/api/v1/accounts/' + $('Configuração').first().json.accountId + '/conversations/' + $('Configuração').first().json.conversationId + '/messages' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "chatwootApi",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "after",
+                    "value": "={{ ($response.body.payload || $response.body.messages || []).map(m => String(m.id)).sort((a,b) => a.length-b.length || a.localeCompare(b)).at(-1) || '0' }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !($response.body.payload || $response.body.messages || []).length }}",
+              "limitPagesFetched": true,
+              "maxRequests": 20,
+              "requestInterval": 250
+            }
+          }
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "after",
+              "value": "={{ $json.scan_after }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "chatwootApi": {
+          "id": "SELECT_EXISTING_CHATWOOT_CREDENTIAL",
+          "name": "Select existing Chatwoot credential"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "52294130-5394-5f6d-ad17-12945d0963a6",
+      "name": "Provar reação e preservar original",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3840,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "// Pure Chatwoot OP07 guards. Reaction writes are toggles, never retryable setters.\nconst REACTION_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;\nconst REACTION_SHA = /^[a-f0-9]{64}$/i;\nfunction reactionObject(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }\nfunction reactionFail(code) { throw new Error(code); }\nfunction reactionBody(value) {\n  const body = reactionObject(value?.body) ? value.body : value;\n  if (!reactionObject(body) || body.error || body.success === false) reactionFail('REACTION_API_RESPONSE_INVALID');\n  return body;\n}\nfunction reactionId(value) {\n  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);\n  if (typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value)) return value;\n  reactionFail('REACTION_MESSAGE_ID_INVALID');\n}\nfunction compareReactionId(a, b) { return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); }\nfunction previousReactionId(value) {\n  const digits = reactionId(value).split('');\n  for (let index = digits.length - 1; index >= 0; index--) {\n    if (digits[index] !== '0') { digits[index] = String(Number(digits[index]) - 1); break; }\n    digits[index] = '9';\n  }\n  return digits.join('').replace(/^0+(?=[0-9])/, '');\n}\nfunction reactionOrigin(value) { return typeof value === 'string' && /^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/?$/i.test(value); }\nfunction reactionOutcome(context, status, errorCode, verified = false) {\n  return { ...context, postRequired: false, outcome: { status, external_message_id: context.external_message_id,\n    emoji: '✅', actor_id: context.actor_id, ...(verified ? { own_reaction_verified: true } : {}), ...(errorCode ? { error_code: errorCode } : {}) } };\n}\n\nfunction contactReactionConfiguration(raw, execution) {\n  if (!reactionObject(raw) || raw.enabled !== true) reactionFail('EXAMES_REACAO_PAUSADA');\n  if (typeof raw.dryRun !== 'boolean' || !reactionOrigin(raw.chatwootBaseUrl)\n    || typeof raw.serviceUrl !== 'string' || !/^https:\\/\\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::443)?\\/functions\\/v1\\/exam-document-service$/i.test(raw.serviceUrl)\n    || ![raw.accountId, raw.inboxId, raw.conversationId, raw.expectedActorId].every(id => Number.isSafeInteger(id) && id > 0)\n    || typeof raw.groupJid !== 'string' || !/^[0-9-]+@g\\.us$/.test(raw.groupJid)\n    || raw.emoji !== '✅' || raw.maxMessagePages !== 20 || typeof raw.worker !== 'string'\n    || !/^[A-Za-z0-9_.:-]{1,96}$/.test(raw.worker) || !/^[A-Za-z0-9_.:-]{1,96}$/.test(String(execution?.id || ''))\n    || (raw.worker + ':' + execution.id).length > 96) reactionFail('REACTION_CONFIGURATION_INVALID');\n  if (raw.diagnosticTarget && !raw.dryRun) reactionFail('REACTION_DIAGNOSTIC_READ_ONLY');\n  return { ...raw, worker: raw.worker + ':' + execution.id,\n    destinationKey: `chatwoot:${raw.accountId}:${raw.inboxId}:${raw.conversationId}:${raw.groupJid}` };\n}\n\nfunction verifyContactReactionActor(response, cfg) {\n  const body = reactionBody(response);\n  if (Number(body.id) !== cfg.expectedActorId) reactionFail('REACTION_CREDENTIAL_ACTOR_MISMATCH');\n  if (Array.isArray(body.accounts) && !body.accounts.some(account => Number(account.id) === cfg.accountId)) reactionFail('REACTION_ACTOR_ACCOUNT_MISMATCH');\n  return { ...cfg, verifiedActorId: cfg.expectedActorId };\n}\n\nfunction prepareContactReactionTasks(response, cfg) {\n  const body = reactionBody(response);\n  if (!Array.isArray(body.tasks) || body.reconcile_tasks != null && !Array.isArray(body.reconcile_tasks)) reactionFail('REACTION_TASK_LIST_INVALID');\n  let tasks = [...(body.reconcile_tasks || []).map(task => ({ ...task, reconcile_only: true })), ...body.tasks];\n  if (tasks.length > 20) reactionFail('REACTION_TASK_LIMIT_EXCEEDED');\n  if (cfg.dryRun && cfg.diagnosticTarget) tasks = [{ ...cfg.diagnosticTarget, diagnostic_only: true, actor_id: cfg.verifiedActorId, destination_key: cfg.destinationKey }];\n  const seen = new Set();\n  return tasks.map(task => {\n    const actor = task.actor_id ?? body.actor_id;\n    if (!reactionObject(task) || task.destination_key !== cfg.destinationKey || Number(actor) !== cfg.verifiedActorId\n      || !REACTION_UUID.test(task.document_id || '') || !REACTION_UUID.test(task.delivery_id || '') || !REACTION_SHA.test(task.sha256 || '')\n      || task.emoji != null && task.emoji !== '✅') reactionFail('REACTION_TASK_IDENTITY_MISMATCH');\n    const external = reactionId(task.external_message_id);\n    if (seen.has(external)) reactionFail('REACTION_DUPLICATE_TARGET');\n    seen.add(external);\n    if (!cfg.dryRun && (!REACTION_UUID.test(task.reaction_id || '') || !REACTION_UUID.test(task.lease_token || ''))) reactionFail('REACTION_RESERVATION_INVALID');\n    return { ...task, external_message_id: external, actor_id: cfg.verifiedActorId, emoji: '✅', scan_after: previousReactionId(external),\n      readOnly: cfg.dryRun, postRequired: false, reconcile_only: !!task.reconcile_only, available: true };\n  });\n}\n\nfunction verifyContactReactionGroup(response, context, cfg) {\n  const body = reactionBody(response), sender = body.meta?.sender || body.contact || {};\n  const jid = sender.identifier || body.contact_inbox?.source_id || sender.additional_attributes?.jid;\n  if (Number(body.id) !== cfg.conversationId || Number(body.inbox_id) !== cfg.inboxId || jid !== cfg.groupJid\n    || context.destination_key !== cfg.destinationKey || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_GROUP_IDENTITY_MISMATCH');\n  return context;\n}\n\nfunction canonicalContactReactionMessages(pages, context, cfg) {\n  if (!Array.isArray(pages) || !pages.length || pages.length > cfg.maxMessagePages) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  const list = [], seen = new Set(); let last = context.scan_after, complete = false;\n  for (const page of pages) {\n    const body = reactionBody(page), messages = body.payload || body.messages;\n    if (!Array.isArray(messages) || complete) reactionFail('REACTION_MESSAGE_PAGE_INVALID');\n    if (!messages.length) { complete = true; continue; }\n    for (const message of messages) {\n      if (!reactionObject(message)) reactionFail('REACTION_MESSAGE_INVALID');\n      const id = reactionId(message.id);\n      if (seen.has(id) || compareReactionId(id, last) <= 0) reactionFail('REACTION_MESSAGE_ORDER_INVALID');\n      seen.add(id); last = id;\n      if (message.inbox_id != null && Number(message.inbox_id) !== cfg.inboxId\n        || message.conversation_id != null && Number(message.conversation_id) !== cfg.conversationId\n        || message.account_id != null && Number(message.account_id) !== cfg.accountId) reactionFail('REACTION_MESSAGE_DESTINATION_MISMATCH');\n      list.push(message);\n    }\n  }\n  if (!complete) reactionFail('REACTION_MESSAGE_SCAN_INCOMPLETE');\n  return list;\n}\n\nfunction inspectContactReactionMessages(pages, context, cfg, afterPost = false) {\n  try {\n    const list = canonicalContactReactionMessages(pages, context, cfg);\n    const message = list.find(item => reactionId(item.id) === context.external_message_id);\n    if (!message || message.private !== false || ![1, 'outgoing'].includes(message.message_type)\n      || typeof message.source_id !== 'string' || !message.source_id.trim() || !['sent', 'delivered', 'read'].includes(message.status)\n      || !Array.isArray(message.attachments) || !message.attachments.some(item => item.file_type === 'file')) reactionFail('REACTION_ORIGINAL_MESSAGE_UNPROVEN');\n    const attributes = message.content_attributes || {};\n    const tagged = attributes.pamvet_exam_document_id === context.document_id && attributes.pamvet_exam_delivery_id === context.delivery_id\n      && attributes.pamvet_exam_sha256 === context.sha256;\n    const anyTag = ['pamvet_exam_document_id', 'pamvet_exam_delivery_id', 'pamvet_exam_sha256'].some(key => Object.hasOwn(attributes, key));\n    const legacy = !anyTag && typeof message.content === 'string'\n      && message.content.trim().endsWith(`[EXAM:${context.document_id}:DELIVERY:${context.delivery_id}]`);\n    if (!tagged && !legacy || attributes.deleted === true || attributes.is_reaction === true) reactionFail('REACTION_ORIGINAL_CORRELATION_MISMATCH');\n    if (afterPost && (context.originalContent !== message.content\n      || JSON.stringify(context.originalAttachmentIds) !== JSON.stringify(message.attachments.map(item => reactionId(item.id))))) reactionFail('REACTION_ORIGINAL_CHANGED');\n    let own = null, unsafe = false, ownProviderStatus = null;\n    for (const event of list) {\n      const fields = event.content_attributes || {};\n      if (fields.is_reaction !== true) continue;\n      const internal = fields.in_reply_to != null && String(fields.in_reply_to) === context.external_message_id;\n      const external = fields.in_reply_to_external_id != null && typeof message.source_id === 'string' && fields.in_reply_to_external_id === message.source_id;\n      if (!internal && !external) continue;\n      if (fields.in_reply_to != null && !internal || fields.in_reply_to_external_id != null && !external) reactionFail('REACTION_PARENT_IDENTITY_MISMATCH');\n      if (fields.deleted === true) continue;\n      const outgoing = [1, 'outgoing'].includes(event.message_type);\n      if (!outgoing) continue; // A participant's reaction is not the authenticated support user's choice.\n      const sender = event.sender;\n      if (!reactionObject(sender) || Number(sender.id) !== context.actor_id || String(sender.type).toLowerCase() !== 'user') { unsafe = true; continue; }\n      const emoji = typeof event.content === 'string' ? event.content.normalize('NFC').replace(/\\ufe0f/g, '').trim() : '';\n      if (!emoji || own !== null) { unsafe = true; continue; }\n      own = emoji;\n      ownProviderStatus = event.status;\n      if (typeof event.source_id !== 'string' || !event.source_id.trim() || !['sent', 'delivered', 'read'].includes(event.status)) unsafe = true;\n    }\n    if (unsafe || own !== null && own !== '✅') return reactionOutcome(context, 'uncertain', 'REACTION_EXISTING_SUPPORT_CHOICE');\n    if (own === '✅') return { ...reactionOutcome(context, afterPost ? 'confirmed' : 'already_present', null, true), observedProviderStatus: ownProviderStatus };\n    if (afterPost || context.reconcile_only) return reactionOutcome(context, 'uncertain', 'REACTION_NOT_OBSERVED_NO_RETRY');\n    return { ...context, postRequired: !context.readOnly, verifiedOriginal: true, ownReactionAbsent: true,\n      originalContent: typeof message.content === 'string' ? message.content : null,\n      originalAttachmentIds: message.attachments.map(item => reactionId(item.id)), inspection: 'no_own_reaction' };\n  } catch (error) {\n    const code = error instanceof Error && /^REACTION_[A-Z_]+$/.test(error.message) ? error.message : 'REACTION_READ_FAILED';\n    return reactionOutcome(context, 'uncertain', code);\n  }\n}\n\nfunction contactReactionDispatchPermission(response, context, cfg) {\n  const body = reactionBody(response);\n  if (body.dispatch_allowed !== true) return { ...context, postRequired: false, dispatch_allowed: false, inspection: 'dispatch_not_granted' };\n  if (context.readOnly || context.reconcile_only || !context.verifiedOriginal || context.postRequired !== true\n    || body.reaction_id !== context.reaction_id || body.external_message_id != null && String(body.external_message_id) !== context.external_message_id\n    || context.actor_id !== cfg.verifiedActorId) reactionFail('REACTION_DISPATCH_PERMISSION_INVALID');\n  return { ...context, dispatch_allowed: true, postRequired: true };\n}\n\nfunction classifyContactReactionSubmission(response, context) {\n  if (!context.dispatch_allowed || context.readOnly || context.reconcile_only) reactionFail('REACTION_POST_WITHOUT_PERMISSION');\n  const status = Number(response?.statusCode || 0);\n  return reactionOutcome(context, status >= 200 && status < 300 ? 'submitted' : 'uncertain', status >= 200 && status < 300 ? null : 'REACTION_POST_UNCERTAIN');\n}\n\nfunction contactReactionDiagnostic(context) {\n  return { read_only: true, post_permitted: false, diagnostic_only: !!context.diagnostic_only, target_verified: context.verifiedOriginal === true || context.outcome?.own_reaction_verified === true,\n    own_check_present: context.outcome?.own_reaction_verified === true, provider_status: context.observedProviderStatus || null,\n    inspection: context.outcome?.error_code || context.outcome?.status || context.inspection || 'empty' };\n}\n\nreturn [{json:inspectContactReactionMessages($input.all().map(item=>item.json),$('Restaurar contexto para conferir').item.json,$('Confirmar ator autenticado').first().json,true)}];"
+      }
+    },
+    {
+      "id": "65692c43-6f65-5e28-a306-10d90f7cb928",
+      "name": "Salvar confirmação ou incerteza",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4080,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify( { action: \"reaction_result\", payload: { reaction_id: $json.reaction_id, lease_token: $json.lease_token, outcome: $json.outcome } } ) }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_EXISTING_WORKER_HEADER",
+          "name": "Select existing exam worker header"
+        }
+      },
+      "retryOnFail": false
+    }
+  ],
+  "connections": {
+    "Executar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A cada minuto": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuração": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - conferir usuário da credencial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - conferir usuário da credencial": {
+      "main": [
+        [
+          {
+            "node": "Confirmar ator autenticado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar ator autenticado": {
+      "main": [
+        [
+          {
+            "node": "Consultar ou reservar reações",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar ou reservar reações": {
+      "main": [
+        [
+          {
+            "node": "Preparar alvos originais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar alvos originais": {
+      "main": [
+        [
+          {
+            "node": "Uma reação por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uma reação por vez": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Alvo disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alvo disponível": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - conferir grupo original",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sem contato elegível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - conferir grupo original": {
+      "main": [
+        [
+          {
+            "node": "Conferir identidade do grupo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir identidade do grupo": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - ler original e todas as reações",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - ler original e todas as reações": {
+      "main": [
+        [
+          {
+            "node": "Conferir reação sem alterar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Próximo alvo": {
+      "main": [
+        [
+          {
+            "node": "Uma reação por vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diagnóstico sem reação": {
+      "main": [
+        [
+          {
+            "node": "Próximo alvo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir reação sem alterar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Somente diagnóstico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Somente diagnóstico": {
+      "main": [
+        [
+          {
+            "node": "Diagnóstico sem reação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Precisa aplicar reação nova",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Precisa aplicar reação nova": {
+      "main": [
+        [
+          {
+            "node": "Persistir início antes do toggle",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar reação já observada ou HOLD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar reação já observada ou HOLD": {
+      "main": [
+        [
+          {
+            "node": "Próximo alvo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persistir início antes do toggle": {
+      "main": [
+        [
+          {
+            "node": "Conferir autorização única",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir autorização única": {
+      "main": [
+        [
+          {
+            "node": "Pode fazer um único toggle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pode fazer um único toggle": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - reagir uma única vez",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Próximo alvo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - reagir uma única vez": {
+      "main": [
+        [
+          {
+            "node": "Registrar submissão sem repetir toggle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar submissão sem repetir toggle": {
+      "main": [
+        [
+          {
+            "node": "Salvar tentativa da reação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar tentativa da reação": {
+      "main": [
+        [
+          {
+            "node": "Restaurar contexto para conferir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar contexto para conferir": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - conferir reação após tentativa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chatwoot - conferir reação após tentativa": {
+      "main": [
+        [
+          {
+            "node": "Provar reação e preservar original",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provar reação e preservar original": {
+      "main": [
+        [
+          {
+            "node": "Salvar confirmação ou incerteza",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar confirmação ou incerteza": {
+      "main": [
+        [
+          {
+            "node": "Próximo alvo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 900
+  },
+  "pinData": {}
+}
