@@ -1,20 +1,10 @@
-import { Search, AlertTriangle, Eye, Stethoscope, Check } from 'lucide-react'
-import { StatusBadge } from './StatusBadge'
-import { formatHours, formatDate, cn } from '@/lib/utils'
+import { AlertTriangle, ArrowUpRight, CircleCheck, Clock3, Search, Stethoscope } from 'lucide-react'
+import { cn, formatDate, formatHours } from '@/lib/utils'
 import { elapsedHoursForDisplay } from '@/lib/group-time'
 import type { ExamCard } from '@/types/exam-card'
-
-function SkeletonRow() {
-  return (
-    <tr className="border-b border-[hsl(var(--border))]">
-      {[...Array(9)].map((_, i) => (
-        <td key={i} className="px-4 py-3">
-          <div className="h-4 bg-[hsl(var(--muted))] rounded animate-pulse" style={{ width: `${60 + i * 10}%` }} />
-        </td>
-      ))}
-    </tr>
-  )
-}
+import { TrackingCardSurface } from './TrackingCardSurface'
+import { TRACKING_ORIGIN_LABELS, TRACKING_STAGE_LABELS } from './tracking-display'
+import './tracking-surfaces.css'
 
 interface TrackingTableProps {
   cards?: ExamCard[]
@@ -25,200 +15,39 @@ interface TrackingTableProps {
   onToggleAllSelection: () => void
 }
 
-export function TrackingTable({ cards, onSelectCard, isLoading, selectedIds, onToggleSelection, onToggleAllSelection }: TrackingTableProps) {
-  const selectedCount = cards?.filter((card) => selectedIds.has(card.id)).length ?? 0
-  const allSelected = Boolean(cards?.length) && selectedCount === cards?.length
+export function TrackingTable({ cards = [], onSelectCard, isLoading, selectedIds, onToggleSelection, onToggleAllSelection }: TrackingTableProps) {
+  const selectedCount = cards.filter((card) => selectedIds.has(card.id)).length
+  const allSelected = cards.length > 0 && selectedCount === cards.length
   const someSelected = selectedCount > 0 && !allSelected
-
   return (
-    <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-sm overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40">
-              <th className="px-4 py-3 w-10">
-                <button
-                  type="button"
-                  onClick={onToggleAllSelection}
-                  disabled={!cards?.length}
-                  aria-label="Selecionar todos os exames da tabela"
-                  aria-pressed={allSelected}
-                  className={cn(
-                    'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all disabled:opacity-30',
-                    allSelected || someSelected
-                      ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]'
-                      : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]'
-                  )}
-                >
-                  {allSelected && <Check className="w-3 h-3 text-white" />}
-                  {someSelected && <span className="w-2 h-0.5 rounded bg-white" />}
-                </button>
-              </th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Status</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Pet / Tutor</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide hidden md:table-cell">Exames</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide hidden md:table-cell">Lab</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide hidden lg:table-cell">Vet</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide hidden lg:table-cell">Criado</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Progresso</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Tempo</th>
-              <th className="px-4 py-3 w-10" />
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && (
-              <>
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-              </>
-            )}
-
-            {!isLoading && cards?.length === 0 && (
-              <tr>
-                <td colSpan={10} className="text-center py-16 text-[hsl(var(--muted-foreground))]">
-                  <Search className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Nenhum card encontrado</p>
-                </td>
-              </tr>
-            )}
-
-            {cards?.map((card) => {
-              const labName = card.items?.find((i) => i.lab_name)?.lab_name
-              const examTypes = card.items?.map((i) => i.exam_type).filter(Boolean)
-              const vetFirst = card.vet_name?.split(' ')[0]
-              return (
-                <tr
-                  key={card.id}
-                  className={cn(
-                    'border-b border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]/40 cursor-pointer transition-colors group',
-                    card.alert_level === 'critical' && 'bg-red-50/50 dark:bg-red-950/20',
-                    card.alert_level === 'warning' && 'bg-amber-50/50 dark:bg-amber-950/20',
-                    selectedIds.has(card.id) && 'ring-2 ring-inset ring-[hsl(var(--primary))]'
-                  )}
-                  onClick={() => onSelectCard(card)}
-                >
-                  <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      aria-label={`Selecionar ${card.pet_name ?? 'card'}`}
-                      aria-pressed={selectedIds.has(card.id)}
-                      onClick={(event) => { event.stopPropagation(); onToggleSelection(card.id) }}
-                      className={cn(
-                        'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all',
-                        selectedIds.has(card.id)
-                          ? 'bg-[hsl(var(--primary))] border-[hsl(var(--primary))]'
-                          : 'border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]'
-                      )}
-                    >
-                      {selectedIds.has(card.id) && <Check className="w-3 h-3 text-white" />}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={card.status} alertLevel={card.alert_level} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      {card.is_orphan && (
-                        <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
-                      )}
-                      <div>
-                        <p className="font-medium text-[hsl(var(--foreground))] leading-tight">
-                          {card.pet_name ?? '—'}
-                        </p>
-                        <p className="text-xs text-[hsl(var(--muted-foreground))] leading-tight mt-0.5">
-                          {card.client_name ?? '—'}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell">
-                    {examTypes && examTypes.length > 0 ? (
-                      <div className="space-y-0.5">
-                        {examTypes.slice(0, 2).map((t, i) => (
-                          <p key={i} className="text-xs text-[hsl(var(--foreground))] truncate max-w-[160px]">{t}</p>
-                        ))}
-                        {examTypes.length > 2 && (
-                          <p className="text-[10px] text-[hsl(var(--muted-foreground))]">+{examTypes.length - 2} mais</p>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-[hsl(var(--muted-foreground))]">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-[hsl(var(--muted-foreground))] hidden md:table-cell">
-                    {labName ?? '—'}
-                  </td>
-                  <td className="px-4 py-3 hidden lg:table-cell">
-                    {vetFirst ? (
-                      <div className="flex items-center gap-1.5">
-                        {card.vet_avatar_url ? (
-                          <img src={card.vet_avatar_url} alt="" className="w-5 h-5 rounded-full object-cover" />
-                        ) : (
-                          <Stethoscope className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
-                        )}
-                        <span className="text-xs text-[hsl(var(--foreground))]">{vetFirst}</span>
-                      </div>
-                    ) : (
-                      <span className="text-[hsl(var(--muted-foreground))]">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-[hsl(var(--muted-foreground))] hidden lg:table-cell">
-                    {formatDate(card.created_at)}
-                  </td>
-                  <td className="px-4 py-3">
-                    {card.items_total > 0 ? (
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-16 h-1.5 rounded-full bg-[hsl(var(--border))]">
-                          <div
-                            className="h-full rounded-full bg-[hsl(var(--primary))] transition-all"
-                            style={{ width: `${Math.round((card.items_ready / card.items_total) * 100)}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-[hsl(var(--muted-foreground))] tabular-nums">
-                          {card.items_ready}/{card.items_total}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-[hsl(var(--muted-foreground))]">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={cn(
-                      'font-semibold text-sm',
-                      card.alert_level === 'critical' ? 'text-red-600 dark:text-red-400' :
-                      card.alert_level === 'warning' ? 'text-amber-600 dark:text-amber-400' :
-                      'text-[hsl(var(--muted-foreground))]'
-                    )}>
-                      <span title={card.status === 'no_grupo' && card.group_sent_at ? `No grupo desde ${formatDate(card.group_sent_at)}` : undefined}>
-                        {formatHours(elapsedHoursForDisplay(card))}
-                      </span>
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onSelectCard(card) }}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))] hover:bg-[hsl(var(--accent))] transition-all opacity-0 group-hover:opacity-100"
-                      aria-label="Ver detalhes"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+    <div className="tracking-table-view">
+      <div className="tracking-table-selection">
+        <label className="tracking-selection">
+          <input type="checkbox" checked={allSelected} disabled={!cards.length || isLoading} onChange={onToggleAllSelection} aria-label="Selecionar todos os exames da tabela" aria-checked={someSelected ? 'mixed' : allSelected}
+            ref={(input) => { if (input) input.indeterminate = someSelected }} />
+          <span>Selecionar todas</span>
+        </label>
       </div>
-
-      {cards && cards.length > 0 && (
-        <div className="px-4 py-2.5 border-t border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20">
-          <p className="text-xs text-[hsl(var(--muted-foreground))]">
-            {cards.length} card{cards.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-      )}
+      {isLoading ? <div className="tracking-table-skeleton" role="status" aria-label="Carregando rastreamento">{[1, 2, 3].map((item) => <div key={item}><span /><span /><span /></div>)}</div> : !cards.length ? (
+        <div className="tracking-table-empty"><Search size={26} aria-hidden="true" /><h2>Nenhum exame encontrado</h2><p>Tente outro nome ou ajuste os filtros acima.</p></div>
+      ) : <>
+        <table className="tracking-table">
+          <caption className="sr-only">Atendimentos e etapas do rastreamento de exames</caption>
+          <thead><tr><th scope="col"><span className="sr-only">Selecionar</span></th><th scope="col">Paciente</th><th scope="col">Exames</th><th scope="col">Responsável</th><th scope="col">Etapa</th></tr></thead>
+          <tbody>{cards.map((card) => {
+            const labs = [...new Set(card.items.map((item) => item.lab_name).filter(Boolean))]
+            const complete = card.status === 'contato_realizado'
+            return <tr key={card.id} className={cn(selectedIds.has(card.id) && 'is-selected')}>
+              <td><label className="tracking-selection"><input type="checkbox" checked={selectedIds.has(card.id)} onChange={() => onToggleSelection(card.id)} aria-label={`Selecionar ${card.pet_name || 'pet não identificado'}`} /></label></td>
+              <td><button type="button" className="tracking-table-patient" onClick={() => onSelectCard(card)} aria-label={`Abrir exame de ${card.pet_name || 'pet não identificado'}`}><strong>{card.pet_name || 'Pet não identificado'}</strong><span>{card.client_name || 'Tutor não identificado'}</span><ArrowUpRight size={15} aria-hidden="true" /></button><span className="tracking-table-meta">{TRACKING_ORIGIN_LABELS[card.origin]}</span>{card.is_orphan && <span className="tracking-table-orphan"><AlertTriangle size={13} aria-hidden="true" />Sem venda vinculada</span>}</td>
+              <td><ul className="tracking-table-exams">{card.items.map((item) => <li key={item.id}>{item.exam_type}</li>)}</ul>{labs.length > 0 && <span className="tracking-table-meta">{labs.join(' · ')}</span>}<span className="tracking-table-meta tabular-nums">{card.items_ready}/{card.items_total} resultados</span></td>
+              <td><span className="tracking-table-vet">{card.vet_avatar_url ? <img src={card.vet_avatar_url} alt="" loading="lazy" /> : <Stethoscope size={16} aria-hidden="true" />}<span>{card.vet_name || 'Sem responsável'}</span></span><span className="tracking-table-meta">Criado em {formatDate(card.created_at)}</span></td>
+              <td><span className={cn('tracking-table-stage', complete && 'is-complete')}>{complete && <CircleCheck size={14} aria-hidden="true" />}{TRACKING_STAGE_LABELS[card.status]}</span>{!complete && <span className={cn('tracking-table-time tabular-nums', card.alert_level !== 'normal' && 'needs-attention')} title={card.status === 'no_grupo' && card.group_sent_at ? `No grupo desde ${formatDate(card.group_sent_at)}` : 'Tempo desde a criação'}><Clock3 size={13} aria-hidden="true" />{formatHours(elapsedHoursForDisplay(card))} {card.status === 'no_grupo' ? 'no grupo' : 'em aberto'}</span>}</td>
+            </tr>
+          })}</tbody>
+        </table>
+        <div className="tracking-table-mobile">{cards.map((card) => <TrackingCardSurface key={card.id} card={card} stageLabel={TRACKING_STAGE_LABELS[card.status]} onOpen={() => onSelectCard(card)} selected={selectedIds.has(card.id)} onToggleSelection={() => onToggleSelection(card.id)} />)}</div>
+      </>}
     </div>
   )
 }

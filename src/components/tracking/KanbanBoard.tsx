@@ -4,7 +4,7 @@ import {
   DragOverlay,
   PointerSensor,
   TouchSensor,
-  closestCenter,
+  KeyboardSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -12,8 +12,9 @@ import {
 } from '@dnd-kit/core'
 import { AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
-import { KanbanColumn } from './KanbanColumn'
 import { KanbanCard } from './KanbanCard'
+import { TrackingBoardView } from './TrackingBoardView'
+import { trackingCollisionDetection } from './tracking-dnd'
 import { VetPickerModal } from './VetPickerModal'
 import { CARD_STATUSES } from '@/lib/card-constants'
 import { useMoveCard } from '@/hooks/useExamCardMutations'
@@ -41,13 +42,9 @@ export function KanbanBoard({ cards, onSelectCard, selectedIds, onToggleSelectio
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(KeyboardSensor)
   )
-
-  const grouped = CARD_STATUSES.map((status) => ({
-    status,
-    cards: cards.filter((c) => c.status === status),
-  }))
 
   function handleDragStart(event: DragStartEvent) {
     const card = event.active.data.current?.card as ExamCard | undefined
@@ -63,7 +60,8 @@ export function KanbanBoard({ cards, onSelectCard, selectedIds, onToggleSelectio
     const card = active.data.current?.card as ExamCard | undefined
     if (!card) return
 
-    const toStatus = over.id as CardStatus
+    const toStatus = (over.data.current?.status ?? over.id) as CardStatus
+    if (!CARD_STATUSES.includes(toStatus)) return
     const fromStatus = card.status
 
     if (toStatus === fromStatus) return
@@ -102,27 +100,19 @@ export function KanbanBoard({ cards, onSelectCard, selectedIds, onToggleSelectio
     <>
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={trackingCollisionDetection}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
+        onDragCancel={() => setActiveCard(null)}
       >
-        <div className="flex gap-3 overflow-x-auto pb-4 -mx-1 px-1">
-          {grouped.map(({ status, cards: colCards }) => (
-            <KanbanColumn
-              key={status}
-              status={status}
-              cards={colCards}
-              onSelectCard={onSelectCard}
-              selectedIds={selectedIds}
-              onToggleSelection={onToggleSelection}
-              onToggleAll={() => onToggleGroupSelection(colCards.map((card) => card.id))}
-            />
-          ))}
-        </div>
+        <TrackingBoardView cards={cards} onSelectCard={onSelectCard} selectedIds={selectedIds}
+          onToggleSelection={onToggleSelection} onToggleGroupSelection={onToggleGroupSelection}
+          renderCard={(card, props) => <KanbanCard card={card} onClick={props.onOpen}
+            selected={props.selected} onToggleSelection={props.onToggleSelection} />} />
 
         <DragOverlay dropAnimation={{ duration: 180, easing: 'ease' }}>
           {activeCard ? (
-            <div className="rotate-1 scale-[1.03] shadow-2xl opacity-95 pointer-events-none">
+            <div className="shadow-lg opacity-95 pointer-events-none">
               <KanbanCard card={activeCard} onClick={() => {}} isDragging />
             </div>
           ) : null}

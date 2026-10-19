@@ -6,9 +6,14 @@ import { Package, ArrowLeft } from 'lucide-react'
 import { LoginView } from '@/components/auth/LoginView'
 import { AppFrame } from '@/components/layout/AppFrame'
 import { DocumentQueue } from '@/components/documents/DocumentQueue'
+import { TrackingPreview } from '@/design/TrackingPreview'
 import type { DocumentFilter } from '@/hooks/useExamDocuments'
 import type { ExamDocument } from '@/types/exam-document'
+import '@fontsource/dm-sans/latin-400.css'
+import '@fontsource/dm-sans/latin-500.css'
+import '@fontsource/dm-sans/latin-600.css'
 import '@fontsource/dm-sans/latin-700.css'
+import '@fontsource/manrope/latin-800.css'
 import './index.css'
 import './design-preview.css'
 
@@ -41,6 +46,7 @@ export function PreviewContent() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<DocumentFilter>('open')
   const [page, setPage] = useState(0)
+  if (pathname === '/tracking') return <TrackingPreview />
   if (pathname === '/novos-exames') {
     const filtered = examples.filter(doc => {
       const term = search.toLocaleLowerCase('pt-BR')
@@ -63,17 +69,17 @@ export function PreviewContent() {
     <div><Package size={28} strokeWidth={1.4} /><h2>Funcionalidade preservada</h2><p>Nesta prévia, avalie a navegação. O conteúdo desta tela será refinado na próxima etapa.</p></div>
   </section>
 }
-export function PreviewApplication() { return <MemoryRouter initialEntries={['/novos-exames']}><AppFrame><PreviewContent /></AppFrame></MemoryRouter> }
+export function PreviewApplication({ tracking = false }: { tracking?: boolean }) { return <MemoryRouter initialEntries={[tracking ? '/tracking' : '/novos-exames']}><AppFrame><PreviewContent /></AppFrame></MemoryRouter> }
 export function PreviewBoard() {
-  const [screen, setScreen] = useState('app')
+  const [screen, setScreen] = useState(new URLSearchParams(window.location.search).get('screen') === 'tracking' ? 'tracking' : 'app')
   const [device, setDevice] = useState('mobile')
   return <main className="study-board">
     <header className="study-toolbar"><div><h1>Pam Laudos <span>Estudo 01</span></h1><p>Prévia local · dados fictícios</p></div>
-      <div className="study-controls"><div className="study-segments" aria-label="Tela da prévia">{[['login', 'Login'], ['app', 'Aplicação']].map(([id, label]) => <button key={id} aria-pressed={screen === id} onClick={() => setScreen(id)}>{label}</button>)}</div>
+      <div className="study-controls"><div className="study-segments" aria-label="Tela da prévia">{[['login', 'Login'], ['app', 'Recebidos'], ['tracking', 'Rastreamento']].map(([id, label]) => <button key={id} aria-pressed={screen === id} onClick={() => setScreen(id)}>{label}</button>)}</div>
         <div className="study-segments" aria-label="Tamanho da prévia">{[['mobile', 'Celular'], ['desktop', 'Web']].map(([id, label]) => <button key={id} aria-pressed={device === id} onClick={() => setDevice(id)}>{label}</button>)}</div></div>
     </header>
     <div className={`study-device ${device}`}><iframe key={`${screen}-${device}`} title={`Prévia ${screen === 'login' ? 'do login' : 'da aplicação'} em ${device === 'mobile' ? 'celular' : 'web'}`} src={`/design-preview.html?frame=${screen}`} /></div>
   </main>
 }
 const frame = new URLSearchParams(window.location.search).get('frame')
-if (import.meta.env.DEV) createRoot(document.getElementById('root')!).render(frame === 'login' ? <PreviewLogin /> : frame === 'app' ? <PreviewApplication /> : <PreviewBoard />)
+if (import.meta.env.DEV) createRoot(document.getElementById('root')!).render(frame === 'login' ? <PreviewLogin /> : frame === 'app' || frame === 'tracking' ? <PreviewApplication tracking={frame === 'tracking'} /> : <PreviewBoard />)
