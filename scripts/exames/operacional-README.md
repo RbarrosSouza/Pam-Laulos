@@ -78,6 +78,14 @@ npm run test:exames:whatsapp
 
 These runtime and builder tests cover synthetic metadata/bytes, API reread, origin/redirect validation, loop prevention, deduplication contracts and neutral/private configuration. They do not prove live Chatwoot delivery, Drive upload or workflow activation.
 
+## Identification and commercial exam names
+
+The v5 evidence validator reads labelled identity tables as columns, including the collection date and a requesting veterinarian in the patient header. A generic veterinarian label alone or a report signature is insufficient. Registration numbers without a state remain null; names are not completed from a registry. Multiple releasing professionals do not imply multiple patients when the patient and tutor identity is the same across pages.
+
+Eritrograma, Leucograma and Plaquetograma together, as current result sections for one patient, normalize to Hemograma. The validator preserves supported additional Creatinina and/or Ureia sections in the commercial display name, with evidence for every component. Historical mentions, incomplete trios, mixed patients and unrelated named panels do not acquire that normalization. SQL migration16 validates the same evidence before automatic matching; a composite document does not consume an arbitrary individual sales item. Migration17 permits only the contextual requesting-veterinarian header, preserving manual assignment and conflict rules.
+
+Regenerating a neutral template does not update the installed n8n workflow or Supabase. Review and install those changes separately. Reprocessing an existing document must retain its source, bytes, clinical decisions and existing group delivery; do not reopen a sent/uncertain delivery.
+
 ## Operation and recovery
 
 Use an agreed ISO cutoff for both intake and notifications, replace the old importer for that window, and then enable the existing operational configuration and four schedules together. Each of the first four templates offers a manual trigger and a five-minute schedule. A selected `manualMessageId` in Gmail intake uses the same MIME/source/Drive path; the schedule refuses to run while this field is populated. Clear it before operational scheduling.

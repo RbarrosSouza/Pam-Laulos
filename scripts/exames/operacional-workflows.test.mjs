@@ -147,3 +147,22 @@ test('exam_candidate comes only from Subject; unknown sender PDFs are still pres
  const decision=a.decideReservation(fromKnown,{document_id:docId,document:{id:docId,file_status:'pending'}});assert.equal(decision.skip,false);
  const exam=structuredClone(message);exam.payload.headers.find(h=>h.name==='Subject').value='Resultado do exame veterinário';const origin=a.inspectMessage(exam,exam.id,cfg).origins[0];assert.equal(origin.source.metadata.exam_candidate,true);assert.equal(origin.source.metadata.unknown_sender,true);assert.equal(a.decideReservation(origin,{document_id:docId,document:{id:docId,file_status:'pending'}}).skip,false);
 });
+
+
+test('processing prompt preserves table roles, a single patient across signers and supported commercial panels',()=>{
+ const body=expression(n(workflows.processing,'Extrair dados estruturados').parameters.jsonBody,{text:'texto fictício'}, {'Configuração':{json:{extractorModel:'synthetic-model'}}});
+ const prompt=body.messages[0].content;
+ assert(prompt.includes('Médico veterinário no cabeçalho de identificação'));
+ assert(prompt.includes('sem incluir a assinatura'));
+ assert(prompt.includes('um número sem UF é null'));
+ assert(prompt.includes('Vários exames, várias páginas ou profissionais diferentes em Liberado por não significam vários pacientes'));
+ assert(prompt.includes('Responsável | Raça | Data coleta'));
+ assert(prompt.includes('ERITROGRAMA, LEUCOGRAMA e PLAQUETOGRAMA'));
+ assert(prompt.includes('Hemograma + Creatinina + Ureia'));
+ assert(prompt.includes('sem inventar uma ocorrência literal de Hemograma'));
+ assert.equal((prompt.match(/Determine single_patient pela identidade/g)||[]).length,1);
+ assert.equal((prompt.match(/requesting_vet_name é o nome completo/g)||[]).length,1);
+ assert(!prompt.includes('requesting_vet_name é exclusivamente'));
+ assert(!prompt.includes('exam_type deve ser uma expressão literal'));
+ assert.equal(body.messages[1].content,'texto fictício');
+});

@@ -164,3 +164,227 @@ test('another professional registration in a wider quote is not assigned to the 
  const out=run(data,[pages[0]+'\n'+quote,...pages.slice(1)]);
  assert.equal(out.fields.requesting_vet_name,'Ana Beatriz Souza');assert.equal(out.fields.requesting_vet_crmv,null);
 });
+
+const bloodSections = [
+ 'ERITROGRAMA\nHemácias 7,1 milhões/mm³\nHemoglobina 15,0 g/dL',
+ 'LEUCOGRAMA\nLeucócitos 10.500 /mm³\nSegmentados 70 %',
+ 'PLAQUETOGRAMA\nPlaquetas 320.000 /mm³',
+];
+function bloodData(type = 'Hemograma') {
+ const data = copy(); data.fields.exam_type = type;
+ data.evidence = data.evidence.filter(ev => ev.field !== 'exam_type');
+ return data;
+}
+const bloodPages = sections => [pages[0].replace('RELATÓRIO RADIOGRÁFICO\nRegião: pelve e joelhos', sections.join('\n'))];
+
+test('three current blood count sections normalize to Hemograma with three real page excerpts',()=>{
+ const data=bloodData(); data.fields.exam_date='2026-10-16';
+ data.evidence.push({field:'exam_date',page:1,excerpt:'Data do Laudo: 16/10/2026'});
+ const report=bloodPages(bloodSections); assert.equal(report[0].includes('Hemograma'),false);
+ const out=run(data,report);
+ assert.equal(out.fields.exam_type,'Hemograma');assert.equal(out.classification,'exam');
+ assert.equal(out.fields.pet_name,'LILI');assert.equal(out.fields.client_name,'Clara Beatriz Lopes Oliveira');
+ assert.equal(out.fields.exam_date,'2026-10-16');assert.equal(out.extractor_version,'document-evidence-v5');
+ assert.deepEqual(out.evidence.filter(ev=>ev.field==='exam_type'),bloodSections.map(section=>({field:'exam_type',page:1,excerpt:section.split('\n')[0]})));
+ assert(out.evidence.every(ev=>report[ev.page-1].includes(ev.excerpt)));
+});
+
+test('headings may continue over pages, use ordinal prefixes or carry table column labels',()=>{
+ const report=[
+   ...bloodPages(['1. Eritrograma  Resultado  Valores de referência\nHemácias 7,1 milhões/mm³']),
+   'II - Leucograma: Resultado | Valor de referência\nLeucócitos 10.500 /mm³',
+   '3) PLAQUETOGRAMA — Valores de referência\nPlaquetas 320.000 /mm³',
+ ];
+ const out=run(bloodData('Eritrograma, Leucograma e Plaquetograma'),report);
+ assert.equal(out.fields.exam_type,'Hemograma');
+ assert.deepEqual(out.evidence.filter(ev=>ev.field==='exam_type').map(ev=>ev.page),[1,2,3]);
+ assert(out.evidence.every(ev=>report[ev.page-1].includes(ev.excerpt)));
+});
+
+test('a missing, null or section-only type can be filled from the complete current report',()=>{
+ for(const type of [undefined,null,'Leucograma','ERITROGRAMA / LEUCOGRAMA / PLAQUETOGRAMA','Hemograma completo']) {
+  const data=bloodData(type);if(type===undefined) delete data.fields.exam_type;
+  const out=run(data,bloodPages(bloodSections));assert.equal(out.fields.exam_type,'Hemograma');
+  assert.equal(out.evidence.filter(ev=>ev.field==='exam_type').length,3);
+ }
+});
+
+test('one or two blood count sections never establish the complete commercial exam',()=>{
+ for(const sections of [bloodSections.slice(0,1),bloodSections.slice(1,2),bloodSections.slice(2),bloodSections.slice(0,2),bloodSections.slice(1),[bloodSections[0],bloodSections[2]]]) {
+  const out=run(bloodData(),bloodPages(sections));
+  assert.equal(out.fields.exam_type,null);assert.equal(out.classification,'review');
+  assert.equal(out.fields.pet_name,'LILI');assert.equal(out.fields.client_name,'Clara Beatriz Lopes Oliveira');
+  assert.equal(out.evidence.some(ev=>ev.field==='exam_type'),false);
+ }
+});
+
+test('mentions, an order list, substring words and paraphrased evidence cannot stand in for section headings',()=>{
+ for(const text of [
+  'Recomenda-se eritrograma, leucograma e plaquetograma no retorno.',
+  'Exames solicitados: Eritrograma\nExames solicitados: Leucograma\nExames solicitados: Plaquetograma',
+  'Não foram realizados eritrograma, leucograma ou plaquetograma.',
+  'ERITROGRAMALEUCOGRAMA\nPLAQUETOGRAMA',
+  'Eritrograma Resultado esperado amanhã\nLeucograma Resultado esperado amanhã\nPlaquetograma Resultado esperado amanhã',
+ ]) {
+  const data=bloodData();data.evidence.push({field:'exam_type',page:1,excerpt:'Hemograma'});
+  const out=run(data,bloodPages([text]));assert.equal(out.fields.exam_type,null);
+ }
+});
+
+test('a cancelled, missing or pending section is not counted even when the model crops its qualifier',()=>{
+ for(const unavailable of ['não realizado','não foi realizado','não há resultados','não foi possível realizar','Não solicitado','SEM RESULTADOS','sem material','cancelado','pendente']) {
+  for(const section of ['PLAQUETOGRAMA: '+unavailable,'PLAQUETOGRAMA\n'+unavailable]) {
+   const data=bloodData();data.evidence.push(...['ERITROGRAMA','LEUCOGRAMA','PLAQUETOGRAMA'].map(excerpt=>({field:'exam_type',page:1,excerpt})));
+   assert.equal(run(data,bloodPages([...bloodSections.slice(0,2),section])).fields.exam_type,null);
+  }
+ }
+});
+
+test('historical, reference and non-performed blocks cannot supply missing sections',()=>{
+ for(const label of ['Histórico','Histórico clínico','Resultados anteriores','Resultados do exame anterior','Exames anteriores','Referência histórica','Bibliografia','Exemplo','Não realizado','Não foi realizado','Exames não realizados']) {
+  const report=bloodPages([bloodSections[0],label+':',...bloodSections.slice(1)]);
+  assert.equal(run(bloodData(),report).fields.exam_type,null,label);
+ }
+ const report=[...bloodPages([bloodSections[0],'Resultados anteriores:',bloodSections[1]]),bloodSections[2]];
+ assert.equal(run(bloodData(),report).fields.exam_type,null);
+});
+
+test('an explicit current results block may follow historical results without citing the old headings',()=>{
+ const report=bloodPages(['Histórico:',...bloodSections,'Resultados atuais:',...bloodSections.map(section=>section.toLocaleLowerCase('pt-BR'))]);
+ const out=run(bloodData(),report);assert.equal(out.fields.exam_type,'Hemograma');
+ assert.deepEqual(out.evidence.filter(ev=>ev.field==='exam_type').map(ev=>ev.excerpt),['eritrograma','leucograma','plaquetograma']);
+});
+
+test('a different explicit panel or a combined exam retains its own evidenced type',()=>{
+ for(const type of ['RELATÓRIO RADIOGRÁFICO','Hemograma + Bioquímica','Eritrograma e PCR','Leucograma e Urinálise']) {
+  const data=bloodData(type);data.evidence.push({field:'exam_type',page:1,excerpt:type});
+  const out=run(data,bloodPages([type,...bloodSections]));
+  assert.equal(out.fields.exam_type,type);assert.deepEqual(out.evidence.filter(ev=>ev.field==='exam_type'),[{field:'exam_type',page:1,excerpt:type}]);
+ }
+});
+
+test('normalizing the exam type never upgrades uncertainty, combines patients or overrides not-exam',()=>{
+ const uncertain=bloodData();uncertain.classification='review';uncertain.review_reason='Conferir identificação';
+ const reviewed=run(uncertain,bloodPages(bloodSections));assert.equal(reviewed.fields.exam_type,'Hemograma');assert.equal(reviewed.classification,'review');
+ for(const classification of ['exam','review','not_exam']) {
+  const data=bloodData();data.classification=classification;data.single_patient=false;
+  const out=run(data,bloodPages(bloodSections));assert.equal(out.fields.exam_type,null);assert.notEqual(out.classification,'exam');
+ }
+ const notExam=bloodData();notExam.classification='not_exam';
+ assert.equal(run(notExam,bloodPages(bloodSections)).classification,'not_exam');
+ assert.equal(run(notExam,bloodPages(bloodSections)).fields.exam_type,null);
+});
+
+// Same row structure as the n8n native parser, with fictitious identities.
+const identificationHeader = [
+ 'Clínica veterinária Médico veterinário CRMV',
+ 'CLÍNICA MODELO Ana Beatriz Souza 12345',
+ 'Paciente Idade Sexo',
+ 'LILI 10a Fêmea',
+ 'Responsável Raça Data coleta',
+ 'Clara Beatriz Lopes Oliveira Canino / MALTÊS 16/10/2026',
+].join('\n');
+const requesterData = header => {
+ const data=copy();data.fields.requesting_vet_name='Ana Beatriz Souza';
+ data.evidence.push({field:'requesting_vet_name',page:1,excerpt:header});return data;
+};
+
+test('the native single-space identification table proves the full named veterinarian and collection date',()=>{
+ const data=requesterData(identificationHeader);data.fields.exam_date='2026-10-16';
+ data.fields.requesting_vet_crmv='12345';
+ data.evidence.push({field:'exam_date',page:1,excerpt:identificationHeader.split('\n').slice(4).join('\n')});
+ data.evidence.push({field:'requesting_vet_crmv',page:1,excerpt:identificationHeader});
+ const report=[pages[0]+'\n'+identificationHeader+'\nLiberado por: Outro Profissional CRMV SP-54321'];
+ const out=run(data,report);
+ assert.equal(out.fields.requesting_vet_name,'Ana Beatriz Souza');
+ assert.equal(out.fields.requesting_vet_crmv,null,'an unqualified numeric registration is still not assigned a state');
+ assert.equal(out.fields.exam_date,'2026-10-16');assert.equal(out.classification,'exam');
+ assert(out.evidence.every(ev=>report[ev.page-1].includes(ev.excerpt)));
+});
+
+test('physical column gaps also work without borrowing a clinic name or only part of the veterinarian name',()=>{
+ const header=identificationHeader.replace('Clínica veterinária Médico veterinário CRMV','Clínica veterinária   Médico veterinário   CRMV')
+  .replace('CLÍNICA MODELO Ana Beatriz Souza 12345','CLÍNICA MODELO   Ana Beatriz Souza   SP-12345')
+  .replace('Paciente Idade Sexo','Paciente   Idade   Sexo').replace('LILI 10a Fêmea','LILI   10a   Fêmea')
+  .replace('Responsável Raça Data coleta','Responsável   Raça   Data coleta')
+  .replace('Clara Beatriz Lopes Oliveira Canino / MALTÊS 16/10/2026','Clara Beatriz Lopes Oliveira   Canino / MALTÊS   16/10/2026');
+ const data=requesterData(header.replace(/\s+/gu,' '));data.fields.requesting_vet_crmv='SP-12345';
+ data.evidence.push({field:'requesting_vet_crmv',page:1,excerpt:header});
+ const report=[pages[0]+'\n'+header];const out=run(data,report);
+ assert.equal(out.fields.requesting_vet_name,'Ana Beatriz Souza');assert.equal(out.fields.requesting_vet_crmv,'SP-12345');
+ for(const name of ['Beatriz Souza','CLÍNICA MODELO Ana Beatriz Souza']) {
+  data.fields.requesting_vet_name=name;assert.equal(run(data,report).fields.requesting_vet_name,null);
+ }
+});
+
+test('generic veterinarian evidence must include the same validated pet and guardian, not another patient header',()=>{
+ for(const header of [
+  identificationHeader.replace('LILI 10a','LUNA 10a'),
+  identificationHeader.replace('Clara Beatriz Lopes Oliveira Canino','HELENA Canino'),
+  identificationHeader.replace('LILI 10a','LUNA 10a').replace('Clara Beatriz Lopes Oliveira Canino','HELENA Canino'),
+ ]) {
+  const out=run(requesterData(header),[pages[0]+'\n'+header]);
+  assert.equal(out.fields.requesting_vet_name,null);assert.equal(out.fields.pet_name,'LILI');
+  assert.equal(out.fields.client_name,'Clara Beatriz Lopes Oliveira');
+ }
+ for(const missing of ['pet_name','client_name']) {
+  const data=requesterData(identificationHeader);data.fields[missing]=null;
+  assert.equal(run(data,[pages[0]+'\n'+identificationHeader]).fields.requesting_vet_name,null);
+ }
+});
+
+test('a generic title alone, a signer quote or missing collection context never identifies the requester',()=>{
+ for(const quote of [
+  'Médico veterinário: Ana Beatriz Souza',
+  identificationHeader+'\nLiberado por: Ana Beatriz Souza',
+  identificationHeader+'\nAssinatura: Ana Beatriz Souza',
+  identificationHeader+'\nResponsável técnico: Ana Beatriz Souza',
+  identificationHeader+'\nRT: Ana Beatriz Souza',
+  identificationHeader.replace('Data coleta','Data nascimento'),
+  identificationHeader.replace('Paciente Idade Sexo\nLILI 10a Fêmea\n',''),
+ ]) {
+  const out=run(requesterData(quote),[pages[0]+'\n'+quote]);assert.equal(out.fields.requesting_vet_name,null,quote);
+ }
+});
+
+test('a directly labelled medical veterinarian is accepted only with the same inline identification context',()=>{
+ const quote='Paciente: LILI\nTutor: Clara Beatriz Lopes Oliveira\nData de coleta: 16/10/2026\nMédica Veterinária: Dra. Ana Beatriz Souza';
+ assert.equal(run(requesterData(quote),[pages[0]+'\n'+quote]).fields.requesting_vet_name,'Ana Beatriz Souza');
+ const foreign=quote.replace('Paciente: LILI','Paciente: LUNA');
+ assert.equal(run(requesterData(foreign),[pages[0]+'\n'+foreign]).fields.requesting_vet_name,null);
+});
+
+test('collection date maps only the terminal date of the explicit guardian/race/collection header',()=>{
+ const make=(header,excerpt=header)=>run({classification:'review',single_patient:true,fields:{exam_date:'2026-10-16'},evidence:[{field:'exam_date',page:1,excerpt}]},[header]);
+ assert.equal(make(identificationHeader).fields.exam_date,'2026-10-16');
+ for(const header of [
+  identificationHeader.replace('Data coleta','Data nascimento'),
+  identificationHeader.replace('Data coleta','Data recebimento'),
+  identificationHeader.replace('16/10/2026','31/02/2026'),
+  identificationHeader.replace('Clara Beatriz Lopes Oliveira Canino / MALTÊS 16/10/2026','Clara Beatriz Lopes Oliveira 16/10/2026 Canino / MALTÊS'),
+  identificationHeader.replace('Clara Beatriz Lopes Oliveira Canino / MALTÊS 16/10/2026','Clara Beatriz Lopes Oliveira 15/10/2026 Canino / MALTÊS 16/10/2026'),
+ ]) assert.equal(make(header).fields.exam_date,null);
+ assert.equal(make(identificationHeader,'16/10/2026').fields.exam_date,null,'cropping the table header cannot prove its date column');
+});
+
+test('a requested-only block never establishes performed haematology sections',()=>{
+ for(const marker of ['Exames solicitados','Solicitação de exames','Exames a realizar']) {
+  const report=bloodPages([marker+':',...bloodSections]);
+  const data=bloodData(null);data.classification='review';
+  assert.equal(run(data,report).fields.exam_type,null,marker);
+ }
+});
+
+test('the complete count preserves evidenced Creatinina and Ureia components in canonical order',()=>{
+ const extras=['CREATININA Resultado Referência\n0,8 mg/dL','URÉIA Resultado Referência\n45,2 mg/dL'];
+ for(const [extra,expected] of [[[],'Hemograma'],[[extras[0]],'Hemograma + Creatinina'],[[extras[1]],'Hemograma + Ureia'],[extras,'Hemograma + Creatinina + Ureia']]) {
+  const report=[...bloodPages(bloodSections),extra.join('\n') || 'Imagem.'];
+  const out=run(bloodData('Eritrograma'),report);
+  assert.equal(out.fields.exam_type,expected);assert.equal(out.evidence.filter(ev=>ev.field==='exam_type').length,3+extra.length);
+  assert(out.evidence.every(ev=>report[ev.page-1].includes(ev.excerpt)));
+ }
+ const historical=run(bloodData(),[...bloodPages(bloodSections),'Resultados anteriores:\n'+extras.join('\n')]);
+ assert.equal(historical.fields.exam_type,'Hemograma');
+ const unrelated=run(bloodData(),[...bloodPages(bloodSections),'GLICOSE Resultado Referência\n100 mg/dL']);
+ assert.equal(unrelated.fields.exam_type,null,'an unknown current panel is kept for review rather than erased');
+});
