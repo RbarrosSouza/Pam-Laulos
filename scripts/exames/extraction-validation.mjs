@@ -5,7 +5,11 @@ export function validateExamExtraction(context, response) {
   const normalized = value => value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
   const comparable = value => normalized(value).toLocaleLowerCase('pt-BR');
   const meaningful = value => typeof value === 'string' && /[\p{L}\p{N}]/u.test(value) && value.length <= 300;
-  if (!Array.isArray(context.pages) || !context.pages.every(page => typeof page === 'string') || context.pages.length !== context.totalPages || !context.pages.some(page => page.trim())) return fallback('Texto ou paginação inválidos; conferir documento');
+  if (context.isVision) {
+    if (!Number.isSafeInteger(context.totalPages) || context.totalPages < 1) return fallback('Paginação inválida; conferir documento');
+  } else if (!Array.isArray(context.pages) || !context.pages.every(page => typeof page === 'string') || context.pages.length !== context.totalPages || !context.pages.some(page => page.trim())) {
+    return fallback('Texto ou paginação inválidos; conferir documento');
+  }
   let data;
   try { data = JSON.parse(response?.choices?.[0]?.message?.content || ''); }
   catch { return fallback('Resposta do extrator sem JSON válido; conferir documento'); }
@@ -27,11 +31,14 @@ export function validateExamExtraction(context, response) {
     }
     return {value, starts, ends};
   }
-  const mappedPages = context.pages.map(indexed);
+  const mappedPages = Array.isArray(context.pages) ? context.pages.map(indexed) : [];
   function locateEvidence(ev) {
     if (!ev || !allowed.includes(ev.field) || typeof ev.excerpt !== 'string' || !ev.excerpt.trim() || !Number.isSafeInteger(ev.page) || ev.page < 1 || ev.page > context.totalPages) return [];
+    if (context.isVision) {
+      return [{field:ev.field, page:ev.page, excerpt:normalized(ev.excerpt), start:0, end:ev.excerpt.length}];
+    }
     const page = mappedPages[ev.page - 1], needle = normalized(ev.excerpt), matches = [];
-    if (!needle) return matches;
+    if (!needle || !page) return matches;
     for (let at = page.value.indexOf(needle); at >= 0; at = page.value.indexOf(needle, at + 1)) {
       const start = page.starts[at], end = page.ends[at + needle.length - 1];
       matches.push({field:ev.field, page:ev.page, excerpt:context.pages[ev.page - 1].slice(start, end), start, end});
@@ -85,11 +92,13 @@ export function validateExamExtraction(context, response) {
     const [year,month,day] = value.split('-');
     const variants = [value, ...['/','.', '-'].flatMap(separator => [...new Set([day,String(Number(day))])].flatMap(d => [...new Set([month,String(Number(month))])].map(m => d + separator + m + separator + year)))];
     const documentDateLabel = /(?:data\s+(?:(?:da|de|do)\s+)?(?:realiza[cç][aã]o(?:\s+(?:do|de)\s+exame)?|coleta|exame)|realiza[cç][aã]o(?:\s+(?:do|de)\s+exame)?|coleta|exame\s+realizado|realizad[oa]|coletad[oa]|data\s+(?:(?:da|de|do)\s+)?(?:laudo|emiss[aã]o|assinatura)|laudo(?:\s+(?:emitido|realizado|assinado))?|emiss[aã]o|emitido|assinatura|assinado)(?:\s+em)?\s*[:=-]?\s*$/iu;
-    const page = context.pages[ev.page - 1], indexedExcerpt = indexed(ev.excerpt);
+    const page = Array.isArray(context.pages) ? context.pages[ev.page - 1] : '', indexedExcerpt = indexed(ev.excerpt);
     for (const variant of variants) for (const at of occurrences(ev.excerpt, variant)) {
       // The label must immediately qualify this date, not some other date in the quote.
-      const rawStart = ev.start + indexedExcerpt.starts[at];
-      const prefix = page.slice(Math.max(0, rawStart - 160), rawStart);
+      const rawStart = (page && typeof ev.start === 'number' && ev.start > 0) ? ev.start + indexedExcerpt.starts[at] : at;
+      const prefix = (page && typeof ev.start === 'number' && ev.start > 0)
+        ? page.slice(Math.max(0, rawStart - 160), rawStart)
+        : ev.excerpt.slice(Math.max(0, at - 160), at);
       const label = prefix.split(/\d{4}-\d{2}-\d{2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}|[;.!?]/u).at(-1);
       if (/\b(?:receb(?:ido|imento)|nascimento|nascido|n[aã]o)\b/iu.test(label)) continue;
       if (documentDateLabel.test(normalized(label))) return true;
@@ -100,6 +109,7 @@ export function validateExamExtraction(context, response) {
   function expandRequesterHeader(ev) {
     // Models sometimes quote only the two veterinarian rows. Extend that exact
     // quote to its adjacent identification rows on the same original page.
+    if (!Array.isArray(context.pages) || !context.pages[ev.page - 1]) return null;
     const page = context.pages[ev.page - 1];
     const rows = [...page.matchAll(/[^\r\n]+/gu)].filter(row => row[0].trim());
     for (let at = 0; at + 5 < rows.length; at++) {
@@ -154,6 +164,7 @@ export function validateExamExtraction(context, response) {
 
   function hemogramEvidence() {
     if (data.classification === 'not_exam' || !data.single_patient) return null;
+    if (!Array.isArray(context.pages)) return null;
     const value = data.fields.exam_type;
     // A named non-haematological panel or a combined order keeps its own type.
     // Only an absent type or these haematology names may be normalized.

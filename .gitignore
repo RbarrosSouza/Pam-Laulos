@@ -13,10 +13,16 @@ dist-ssr
 *.local
 
 # Skills/agents (local only)
+/.agent
 .agents
 .claude
 .trae
 .mcp.json
+/_opensquad
+/dashboard
+/skills
+/squads
+/supabase/.temp
 
 # Editor directories and files
 .vscode/*

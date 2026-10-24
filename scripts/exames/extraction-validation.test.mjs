@@ -412,3 +412,61 @@ test('short header expansion cannot borrow another patient, guardian, page or mi
  const data=requesterData('Ana Beatriz Souza');
  assert.equal(run(data,[pages[0]+'\n'+identificationHeader]).fields.requesting_vet_name,null);
 });
+
+test('vision mode validates scanned or image PDF without text layer and preserves verified metadata',()=>{
+ const context = { isVision: true, totalPages: 1 };
+ const payload = {
+  classification: 'exam', single_patient: true,
+  fields: { pet_name: 'Thor', client_name: 'Rodrigo Barros', exam_type: 'Hemograma Completo', exam_date: '2026-10-23' },
+  evidence: [
+   { field: 'pet_name', page: 1, excerpt: 'Paciente: Thor' },
+   { field: 'client_name', page: 1, excerpt: 'Tutor: Rodrigo Barros' },
+   { field: 'exam_type', page: 1, excerpt: 'HEMOGRAMA COMPLETO' },
+   { field: 'exam_date', page: 1, excerpt: 'Data da Coleta: 23/10/2026' }
+  ]
+ };
+ const out = validateExamExtraction(context, { choices: [{ message: { content: JSON.stringify(payload) } }] });
+ assert.equal(out.classification, 'exam');
+ assert.equal(out.fields.pet_name, 'Thor');
+ assert.equal(out.fields.client_name, 'Rodrigo Barros');
+ assert.equal(out.fields.exam_type, 'Hemograma Completo');
+ assert.equal(out.fields.exam_date, '2026-10-23');
+ assert.equal(out.evidence.length, 4);
+ assert.equal(out.extractor_version, 'document-evidence-v6');
+});
+
+test('vision mode rejects unevidenced fields, invalid calendar dates or multiple patients',()=>{
+ const context = { isVision: true, totalPages: 1 };
+ const base = {
+  classification: 'exam', single_patient: true,
+  fields: { pet_name: 'Thor', client_name: 'Rodrigo Barros', exam_type: 'Hemograma', exam_date: '2026-10-23' },
+  evidence: [
+   { field: 'pet_name', page: 1, excerpt: 'Paciente: Thor' },
+   { field: 'client_name', page: 1, excerpt: 'Tutor: Rodrigo Barros' },
+   { field: 'exam_type', page: 1, excerpt: 'Hemograma' },
+   { field: 'exam_date', page: 1, excerpt: 'Data da Coleta: 23/10/2026' }
+  ]
+ };
+ // Invalid date (2026-02-31)
+ const badDate = JSON.parse(JSON.stringify(base));
+ badDate.fields.exam_date = '2026-02-31';
+ badDate.evidence.find(ev => ev.field === 'exam_date').excerpt = 'Data do exame: 31/02/2026';
+ const outBadDate = validateExamExtraction(context, { choices: [{ message: { content: JSON.stringify(badDate) } }] });
+ assert.equal(outBadDate.fields.exam_date, null);
+ assert.equal(outBadDate.classification, 'review');
+
+ // Multiple patients
+ const multi = JSON.parse(JSON.stringify(base));
+ multi.single_patient = false;
+ const outMulti = validateExamExtraction(context, { choices: [{ message: { content: JSON.stringify(multi) } }] });
+ assert.equal(outMulti.single_patient, false);
+ assert.equal(outMulti.classification, 'review');
+
+ // Date qualified by birth instead of exam date
+ const birthDate = JSON.parse(JSON.stringify(base));
+ birthDate.evidence.find(ev => ev.field === 'exam_date').excerpt = 'Data de nascimento: 23/10/2026';
+ const outBirth = validateExamExtraction(context, { choices: [{ message: { content: JSON.stringify(birthDate) } }] });
+ assert.equal(outBirth.fields.exam_date, null);
+ assert.equal(outBirth.classification, 'review');
+});
+
