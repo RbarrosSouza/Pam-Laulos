@@ -46,6 +46,8 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
   const [savingVetId, setSavingVetId] = useState<string | null>(null)
   const [justCompleted, setJustCompleted] = useState(false)
   const [isCelebrating, setIsCelebrating] = useState(false)
+  const [isSavingContact, setIsSavingContact] = useState(false)
+  const [showCelebrationBanner, setShowCelebrationBanner] = useState(false)
   const assignmentPending = useRef(false)
   const [now, setNow] = useState(Date.now)
   const progress = getExamDetailProgress(doc, now)
@@ -81,19 +83,16 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
   }
   const copyLink = () => navigator.clipboard.writeText(`${window.location.origin}/novos-exames/${doc.id}`).then(() => toast.success('Link copiado.')).catch(() => toast.error('Não foi possível copiar o link.'))
 
-  // Direct check action on card with festive fireworks
+  // Direct check action on card with loader, festive fireworks and completion message
   const handleDirectContact = async (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    if (isContactDone || action.isPending) return
+    if (isContactDone || isSavingContact || action.isPending) return
+
+    setIsSavingContact(true)
 
     const rect = event.currentTarget.getBoundingClientRect()
     const x = rect.left + rect.width / 2
     const y = rect.top + rect.height / 2
-    triggerFireworksAt(x, y)
-
-    setJustCompleted(true)
-    setIsCelebrating(true)
-    setTimeout(() => setIsCelebrating(false), 900)
 
     const itemIds = doc.items
       .map(item => item.item_id || item.exam_item_id)
@@ -114,8 +113,16 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
         await refresh()
       } catch (err) {
         console.error('Erro ao registrar contato:', err)
+      } finally {
+        setIsSavingContact(false)
+        setJustCompleted(true)
+        setShowCelebrationBanner(true)
+        setIsCelebrating(true)
+        triggerFireworksAt(x, y)
+        setTimeout(() => setIsCelebrating(false), 900)
       }
     } else {
+      setIsSavingContact(false)
       setPanel('contact')
     }
   }
@@ -162,7 +169,15 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
           >
             <span className="exam-detail-row-copy">
               <span className="exam-detail-field-label">Contato com o tutor</span>
-              <strong>{isContactDone ? 'Realizado' : progress.contactedCount ? `${progress.contactedCount} de ${progress.itemCount} exames` : 'Entrei em contato'}</strong>
+              <strong>
+                {isSavingContact
+                  ? 'Salvando contato…'
+                  : isContactDone
+                    ? '✓ Exame concluído'
+                    : progress.contactedCount
+                      ? `${progress.contactedCount} de ${progress.itemCount} exames`
+                      : 'Entrei em contato'}
+              </strong>
             </span>
           </button>
           {isContactDone ? (
@@ -177,15 +192,39 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
           ) : (
             <button
               type="button"
-              className="exam-detail-contact-check-btn"
+              className={`exam-detail-contact-check-btn${isSavingContact ? ' is-loading' : ''}`}
               onClick={handleDirectContact}
-              title="Marcar contato como concluído"
-              aria-label="Concluir contato com o tutor"
+              disabled={isSavingContact}
+              title={isSavingContact ? 'Salvando contato...' : 'Marcar contato como concluído'}
+              aria-label={isSavingContact ? 'Salvando contato...' : 'Concluir contato com o tutor'}
             >
-              <Check size={18} strokeWidth={2.2} />
+              {isSavingContact ? (
+                <Loader2 size={19} className="animate-spin text-[var(--olive)]" />
+              ) : (
+                <Check size={18} strokeWidth={2.2} />
+              )}
             </button>
           )}
         </div>
+        {showCelebrationBanner && (
+          <div className="exam-detail-celebration-banner" role="status">
+            <div className="exam-detail-celebration-copy">
+              <span className="exam-detail-celebration-emoji" aria-hidden="true">🎉</span>
+              <div>
+                <strong>Exame concluído com sucesso!</strong>
+                <p>Contato registrado e fila sincronizada.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowCelebrationBanner(false)}
+              className="exam-detail-celebration-close"
+              aria-label="Fechar mensagem de conclusão"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <section className="exam-detail-progress" aria-label="Progresso do exame">
           <ul>{stages.map(({ label, description, done, icon: Icon, panel: target }) => <li key={label}><button title={description} aria-label={description} onClick={() => setPanel(target)}><span className={`exam-detail-stage-icon${done ? ' is-done' : ''}${label === 'Contato' ? done ? ' contact-done' : ' contact-pending' : ''}`}><Icon size={23} aria-hidden="true" />{done && <span className="exam-detail-stage-check"><Check size={10} strokeWidth={3} /></span>}</span><span>{label}</span></button></li>)}</ul>
           <p className={`exam-detail-progress-caption${(doc.completed || isContactDone) ? ' is-complete' : ''}`} role="status">{(doc.completed || isContactDone) ? <Check size={15} /> : progress.groupAgeLabel ? <Clock3 size={14} /> : null}{isContactDone && !progress.groupAgeLabel ? '✓ Contato concluído' : (progress.groupAgeLabel || progress.summary)}</p>
@@ -213,6 +252,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
         const cy = typeof window !== 'undefined' ? window.innerHeight * 0.4 : 200
         triggerFireworksAt(cx, cy)
         setJustCompleted(true)
+        setShowCelebrationBanner(true)
         setPanel(current => current === 'contact' ? 'success' : current)
       }} />)}
       {panel === 'patient' && <div className="space-y-5"><DocumentForm key={`${doc.id}:patient`} doc={doc} mode="patient" onSaved={() => setPanel(current => current === 'patient' ? null : current)} />{progress.nexusLinked && <button className="exam-detail-primary" onClick={() => setPanel('pdf')}><FileText size={22} />Abrir exame anexado</button>}</div>}
