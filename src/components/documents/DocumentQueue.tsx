@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Link2, Loader2, Mail, Phone, RefreshCw, Search, SlidersHorizontal, UserRound } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, FileText, Link2, Loader2, Mail, Phone, RefreshCw, Search, SlidersHorizontal, UserRound } from 'lucide-react'
 import { WhatsappLogo } from '@phosphor-icons/react/dist/csr/WhatsappLogo'
 import type { DocumentFilter } from '@/hooks/useExamDocuments'
 import type { ExamDocument } from '@/types/exam-document'
@@ -59,17 +59,14 @@ function DocumentQueueRow({ doc }: { doc: ExamDocument }) {
   const date = examDate(doc)
   const days = parseDaysInGroup(doc)
   const overdue = !!progress.groupAgeLabel && documentIsOverdue(doc)
-  let summary: string = progress.summary
   let attention = false
   if (!doc.completed) {
-    if (doc.identification_status === 'not_exam') summary = 'Não é exame'
-    else if (doc.file_status === 'failed') { summary = 'Falha ao salvar PDF'; attention = true }
-    else if (doc.file_status === 'uncertain') { summary = 'Arquivo a confirmar'; attention = true }
-    else if (doc.group_status === 'failed') { summary = 'Envio ao grupo falhou'; attention = true }
-    else if (['uncertain', 'submitted'].includes(doc.group_status)) { summary = 'Envio ao grupo a confirmar'; attention = true }
-    else if (doc.nexus_status === 'failed') { summary = 'Cadastro com pendência'; attention = true }
-    else if (doc.process_status === 'failed') { summary = 'Leitura do PDF a conferir'; attention = true }
-    else if (summary === 'Em andamento' && ['unidentified', 'suggested', 'review'].includes(doc.identification_status)) summary = 'Selecionar cadastro'
+    if (['failed', 'uncertain'].includes(doc.file_status) ||
+        ['failed', 'uncertain', 'submitted'].includes(doc.group_status) ||
+        doc.nexus_status === 'failed' ||
+        doc.process_status === 'failed') {
+      attention = true
+    }
   }
   const origin = progress.originChannel === 'email'
     ? { label: 'E-mail', description: 'Recebido por e-mail', icon: <Mail size={12} /> }
@@ -78,9 +75,9 @@ function DocumentQueueRow({ doc }: { doc: ExamDocument }) {
       : { label: progress.originChannel === 'manual' ? 'Arquivo' : 'Origem', description: progress.originChannel === 'manual' ? 'Arquivo recebido manualmente' : 'Origem ainda não identificada', icon: <FileText size={12} /> }
   const stages = [
     { ...origin, done: progress.originReceived },
-    { label: 'Grupo', description: progress.groupSent ? 'Enviado ao grupo de WhatsApp' : 'Envio ao grupo ainda não confirmado', icon: <WhatsappLogo size={12} />, done: progress.groupSent },
-    { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : 'Exame ainda não anexado ao cadastro', icon: <Link2 size={12} />, done: progress.nexusLinked },
-    { label: 'Contato', description: progress.contactCompleted ? 'Contato com tutor concluído' : progress.contactedCount ? `Contato registrado em ${progress.contactedCount} de ${progress.itemCount} exames` : 'Contato com tutor pendente', icon: <Phone size={12} />, done: progress.contactCompleted },
+    { label: 'Grupo', description: progress.groupSent ? 'Enviado ao grupo de WhatsApp' : 'Envio ao grupo ainda não confirmado', icon: <WhatsappLogo size={13} />, done: progress.groupSent, attention: doc.group_status === 'failed' },
+    { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : 'Exame ainda não anexado ao cadastro', icon: <Link2 size={13} />, done: progress.nexusLinked, attention: doc.nexus_status === 'failed' },
+    { label: 'Contato', description: progress.contactCompleted ? 'Contato com tutor concluído' : progress.contactedCount ? `Contato registrado em ${progress.contactedCount} de ${progress.itemCount} exames` : 'Contato com tutor pendente', icon: <Phone size={13} />, done: progress.contactCompleted },
   ]
   return (
     <li className={`document-queue-item${overdue ? ' is-overdue' : ''}`}>
@@ -110,44 +107,37 @@ function DocumentQueueRow({ doc }: { doc: ExamDocument }) {
           </span>
         </div>
         <div className={`document-queue-pending${doc.completed ? ' is-complete' : attention ? ' needs-attention' : ''}`}>
-          <div className="document-queue-pending-left">
-            <span className="document-queue-summary">
-              {doc.completed && <Check size={12} className="inline mr-1 text-emerald-600" aria-hidden="true" />}
-              {summary}
-              {summary === 'Contato parcial' && <span> · {progress.contactedCount}/{progress.itemCount}</span>}
-            </span>
-            {days !== null && (
-              <span className="document-queue-sla">
-                {days === 0 ? (
-                  <span className="text-[hsl(var(--muted-foreground))]">hoje</span>
-                ) : days === 1 ? (
-                  <span className="text-[hsl(var(--muted-foreground))]">1d</span>
-                ) : days >= 2 && days < 4 ? (
-                  <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                    {days}d
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                    {days}d
-                  </span>
-                )}
-              </span>
-            )}
-          </div>
           <ul className="document-queue-stages" aria-label="Etapas do exame">
             {stages.map(stage => (
               <li
                 key={stage.label}
                 title={`${stage.label}: ${stage.description}`}
-                className={`document-queue-stage-pill${stage.done ? ' is-done' : ''}`}
+                className={`document-queue-stage-pill${stage.done ? ' is-done' : stage.attention ? ' needs-attention' : ''}`}
+                aria-label={`${stage.label}: ${stage.description}`}
               >
                 <span className="document-queue-stage-icon" aria-hidden="true">{stage.icon}</span>
-                <span className="document-queue-stage-label">{stage.label}</span>
               </li>
             ))}
           </ul>
+          {days !== null && (
+            <span className="document-queue-sla">
+              {days === 0 ? (
+                <span className="text-[hsl(var(--muted-foreground))]">hoje</span>
+              ) : days === 1 ? (
+                <span className="text-[hsl(var(--muted-foreground))]">1d</span>
+              ) : days >= 2 && days < 4 ? (
+                <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  {days}d
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                  {days}d
+                </span>
+              )}
+            </span>
+          )}
         </div>
         <ChevronRight className="document-queue-open" size={15} aria-hidden="true" />
       </Link>
@@ -234,7 +224,7 @@ export function DocumentQueue({ documents, total, page, pageSize, loading, error
             <span>Paciente</span>
             <span>Exame e data</span>
             <span>Responsável</span>
-            <span>Pendência e etapas</span>
+            <span>Pendências</span>
             <span />
           </div>
           <ul aria-label="Exames recebidos">
