@@ -81,7 +81,7 @@ function DocumentQueueRow({ doc }: { doc: ExamDocument }) {
   ]
   return (
     <li className={`document-queue-item${overdue ? ' is-overdue' : ''}`}>
-      <Link className="document-queue-row" to={`/novos-exames/${doc.id}`}>
+      <Link className="document-queue-row" to={`/novos-exames/${doc.id}?from=exames`} state={{ from: '/novos-exames' }}>
         <div className="document-queue-identity">
           <strong className="document-queue-pet">{pet}</strong>
           <span className="document-queue-tutor">{tutor}</span>

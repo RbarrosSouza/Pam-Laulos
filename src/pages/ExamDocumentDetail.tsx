@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, FileText, History, Link2, Loader2, Mail, MoreVertical, Phone, Settings2, UserRound, UserRoundPlus } from 'lucide-react'
 import { WhatsappLogo } from '@phosphor-icons/react/dist/csr/WhatsappLogo'
 import { toast } from 'sonner'
@@ -11,6 +11,7 @@ import { DocumentForm, DocumentHistory, DocumentPreview, DocumentSteps } from '@
 import { ExamDetailSheet } from '@/components/documents/ExamDetailSheet'
 import { documentDisplayId, documentLabel } from '@/lib/document-status'
 import { getExamDetailProgress } from '@/lib/exam-detail-progress'
+import { triggerFireworksAt } from '@/lib/fireworks'
 import type { ExamDocument } from '@/types/exam-document'
 import '@fontsource/manrope/latin-800.css'
 import '@fontsource/dm-sans/latin-400.css'
@@ -32,11 +33,24 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
   const auth = useExamAuth()
   const action = useDocumentAction()
   const vets = useVets()
-  const [panel, setPanel] = useState<Panel>(null)
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+
+  const fromState = (location.state as { from?: string } | null)?.from
+  const fromParam = searchParams.get('from')
+  const backTarget = fromState || (fromParam === 'home' ? '/' : fromParam === 'tracking' ? '/tracking' : '/novos-exames')
+  const backLabel = backTarget === '/' ? 'Voltar para Início' : backTarget === '/tracking' ? 'Voltar para Rastreamento' : 'Voltar para Novos exames'
+
+  const initialPanel = (searchParams.get('panel') as Panel) || null
+  const [panel, setPanel] = useState<Panel>(initialPanel)
   const [savingVetId, setSavingVetId] = useState<string | null>(null)
+  const [justCompleted, setJustCompleted] = useState(false)
+  const [isCelebrating, setIsCelebrating] = useState(false)
   const assignmentPending = useRef(false)
   const [now, setNow] = useState(Date.now)
   const progress = getExamDetailProgress(doc, now)
+  const isContactDone = progress.contactCompleted || justCompleted
+
   useEffect(() => {
     if (doc.group_status !== 'sent' || doc.contact_status === 'completed' || doc.completed) return
     const timer = window.setInterval(() => setNow(Date.now()), 60_000)
@@ -66,6 +80,46 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
     finally { assignmentPending.current = false; setSavingVetId(null) }
   }
   const copyLink = () => navigator.clipboard.writeText(`${window.location.origin}/novos-exames/${doc.id}`).then(() => toast.success('Link copiado.')).catch(() => toast.error('Não foi possível copiar o link.'))
+
+  // Direct check action on card with festive fireworks
+  const handleDirectContact = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    if (isContactDone || action.isPending) return
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    triggerFireworksAt(x, y)
+
+    setJustCompleted(true)
+    setIsCelebrating(true)
+    setTimeout(() => setIsCelebrating(false), 900)
+
+    const itemIds = doc.items
+      .map(item => item.item_id || item.exam_item_id)
+      .filter((id): id is string => Boolean(id))
+
+    if (doc.pet_id && itemIds.length > 0) {
+      try {
+        await action.mutateAsync({
+          name: 'record_exam_document_contact',
+          args: {
+            p_document_id: doc.id,
+            p_item_ids: itemIds,
+            p_channel: 'whatsapp',
+            p_note: null,
+            p_contacted_at: new Date().toISOString(),
+          },
+        })
+        await refresh()
+      } catch (err) {
+        console.error('Erro ao registrar contato:', err)
+      }
+    } else {
+      setPanel('contact')
+    }
+  }
+
   const origin = progress.originChannel === 'email'
     ? { label: 'E-mail', description: 'Recebido por e-mail', icon: Mail }
     : progress.originChannel === 'whatsapp'
@@ -75,12 +129,12 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
     { ...origin, done: progress.originReceived, panel: 'history' as const },
     { label: 'Grupo', description: progress.groupSent ? 'Enviado ao grupo de WhatsApp' : 'Envio ao grupo ainda não confirmado', done: progress.groupSent, icon: WhatsappLogo, panel: 'steps' as const },
     { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : 'Exame ainda não anexado ao cadastro', done: progress.nexusLinked, icon: Link2, panel: 'patient' as const },
-    { label: 'Contato', description: progress.contactCompleted ? 'Contato com tutor concluído' : 'Contato com tutor pendente', done: progress.contactCompleted, icon: Phone, panel: 'contact' as const },
+    { label: 'Contato', description: isContactDone ? 'Contato com tutor concluído' : 'Contato com tutor pendente', done: isContactDone, icon: Phone, panel: 'contact' as const },
   ]
   return <div className="exam-detail-page">
     <div className="exam-detail-container">
       <header className="exam-detail-header">
-        <Link to="/novos-exames" className="exam-detail-icon-button" aria-label="Voltar para Novos exames"><ArrowLeft size={26} /></Link>
+        <Link to={backTarget} className="exam-detail-icon-button" aria-label={backLabel}><ArrowLeft size={26} /></Link>
         <span>Pam Laudos</span>
         <button className="exam-detail-icon-button" aria-label="Opções do exame" onClick={() => setPanel('more')}><MoreVertical size={25} /></button>
       </header>
@@ -98,13 +152,43 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
           <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Responsável</span><strong>{responsible}</strong></span>
           <span className="exam-detail-responsible-icon" aria-hidden="true">{responsibleAvatar ? <img className="exam-detail-responsible-photo" src={responsibleAvatar} alt="" /> : <UserRound size={29} />}<ChevronDown size={15} /></span>
         </button>
-        <button className={`exam-detail-contact${progress.contactCompleted ? ' is-complete' : ''}`} onClick={() => setPanel('contact')} aria-haspopup="dialog" aria-label={progress.contactCompleted ? 'Contato realizado. Ver registro' : 'Registrar contato com o tutor'}>
-          <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Contato com o tutor</span><strong>{progress.contactCompleted ? 'Realizado' : progress.contactedCount ? `${progress.contactedCount} de ${progress.itemCount} exames` : 'Entrei em contato'}</strong></span>
-          <span className="exam-detail-contact-check" aria-hidden="true">{progress.contactCompleted && <Check size={21} />}</span>
-        </button>
+        <div className={`exam-detail-contact${isContactDone ? ' is-complete' : ''}${isCelebrating ? ' is-celebrating' : ''}`}>
+          <button
+            type="button"
+            className="exam-detail-contact-btn"
+            onClick={() => setPanel('contact')}
+            aria-haspopup="dialog"
+            aria-label={isContactDone ? 'Contato realizado. Ver registro' : 'Registrar contato com o tutor'}
+          >
+            <span className="exam-detail-row-copy">
+              <span className="exam-detail-field-label">Contato com o tutor</span>
+              <strong>{isContactDone ? 'Realizado' : progress.contactedCount ? `${progress.contactedCount} de ${progress.itemCount} exames` : 'Entrei em contato'}</strong>
+            </span>
+          </button>
+          {isContactDone ? (
+            <button
+              type="button"
+              className="exam-detail-contact-check is-checked"
+              onClick={() => setPanel('contact')}
+              aria-label="Contato realizado. Ver registro"
+            >
+              <Check size={21} strokeWidth={2.5} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="exam-detail-contact-check-btn"
+              onClick={handleDirectContact}
+              title="Marcar contato como concluído"
+              aria-label="Concluir contato com o tutor"
+            >
+              <Check size={18} strokeWidth={2.2} />
+            </button>
+          )}
+        </div>
         <section className="exam-detail-progress" aria-label="Progresso do exame">
           <ul>{stages.map(({ label, description, done, icon: Icon, panel: target }) => <li key={label}><button title={description} aria-label={description} onClick={() => setPanel(target)}><span className={`exam-detail-stage-icon${done ? ' is-done' : ''}${label === 'Contato' ? done ? ' contact-done' : ' contact-pending' : ''}`}><Icon size={23} aria-hidden="true" />{done && <span className="exam-detail-stage-check"><Check size={10} strokeWidth={3} /></span>}</span><span>{label}</span></button></li>)}</ul>
-          <p className={`exam-detail-progress-caption${doc.completed ? ' is-complete' : ''}`} role="status">{doc.completed ? <Check size={15} /> : progress.groupAgeLabel ? <Clock3 size={14} /> : null}{progress.groupAgeLabel || progress.summary}</p>
+          <p className={`exam-detail-progress-caption${(doc.completed || isContactDone) ? ' is-complete' : ''}`} role="status">{(doc.completed || isContactDone) ? <Check size={15} /> : progress.groupAgeLabel ? <Clock3 size={14} /> : null}{isContactDone && !progress.groupAgeLabel ? '✓ Contato concluído' : (progress.groupAgeLabel || progress.summary)}</p>
         </section>
       </main>
       <footer className="exam-detail-footer"><button className="exam-detail-primary" onClick={() => setPanel('patient')}><UserRoundPlus size={25} /><span>{progress.nexusLinked ? 'Ver exame no cadastro' : doc.pet_id ? 'Acompanhar cadastro' : 'Adicionar exame ao cadastro'}</span><ChevronRight size={21} /></button></footer>
@@ -121,10 +205,14 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
           </button></li>
         })}</ul>}
       </div>}
-      {panel === 'contact' && (progress.contactCompleted ? <DocumentProvenance doc={doc} /> : !contactAllowed ? <p className="exam-detail-hint">O registro de contato é feito por uma veterinária ou pela gestão.</p> : !doc.pet_id && !progress.contactCompleted ? <div className="exam-detail-empty"><UserRoundPlus size={35} /><h3>Confirme o paciente primeiro</h3><p>Selecione o cadastro para registrar o contato com o tutor correto.</p><button className="exam-detail-primary" onClick={() => setPanel('patient')}>Selecionar paciente<ChevronRight size={20} /></button></div> : <DocumentForm key={`${doc.id}:contact`} doc={doc} mode="contact" onContactSaved={async () => {
+      {panel === 'contact' && (isContactDone ? <DocumentProvenance doc={doc} /> : !contactAllowed ? <p className="exam-detail-hint">O registro de contato é feito por uma veterinária ou pela gestão.</p> : !doc.pet_id && !isContactDone ? <div className="exam-detail-empty"><UserRoundPlus size={35} /><h3>Confirme o paciente primeiro</h3><p>Selecione o cadastro para registrar o contato com o tutor correto.</p><button className="exam-detail-primary" onClick={() => setPanel('patient')}>Selecionar paciente<ChevronRight size={20} /></button></div> : <DocumentForm key={`${doc.id}:contact`} doc={doc} mode="contact" onContactSaved={async () => {
         // The contact RPC has already succeeded. A refresh failure must not
         // turn a saved contact into an apparent write failure or invite retry.
         try { await refresh() } catch { /* Query state retains any read error. */ }
+        const cx = typeof window !== 'undefined' ? window.innerWidth / 2 : 200
+        const cy = typeof window !== 'undefined' ? window.innerHeight * 0.4 : 200
+        triggerFireworksAt(cx, cy)
+        setJustCompleted(true)
         setPanel(current => current === 'contact' ? 'success' : current)
       }} />)}
       {panel === 'patient' && <div className="space-y-5"><DocumentForm key={`${doc.id}:patient`} doc={doc} mode="patient" onSaved={() => setPanel(current => current === 'patient' ? null : current)} />{progress.nexusLinked && <button className="exam-detail-primary" onClick={() => setPanel('pdf')}><FileText size={22} />Abrir exame anexado</button>}</div>}
@@ -140,15 +228,22 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
         <details><summary>Versão corrigida</summary>{doc.previous_document_id ? <p>Original preservado: <Link to={`/novos-exames/${doc.previous_document_id}`} onClick={close}>{documentDisplayId(doc.previous_document_id)}</Link></p> : <DocumentCorrection doc={doc} />}</details>
         <p className="exam-detail-reference">{documentDisplayId(doc.id)} · recebido em {new Date(doc.received_at).toLocaleString('pt-BR')}</p>
       </div>}
-      {panel === 'success' && <div className="exam-detail-success" role="status"><span className="exam-detail-success-mark"><Check size={42} strokeWidth={2.5} /></span><h3>{progress.contactCompleted ? 'Contato concluído' : 'Contato registrado'}</h3><p>{doc.completed ? 'Todas as etapas deste exame estão concluídas.' : progress.contactCompleted ? 'O contato com o tutor foi registrado. Acompanhe as etapas restantes na tela do exame.' : 'O contato foi salvo para os itens selecionados. Acompanhe o andamento na tela do exame.'}</p><button className="exam-detail-primary" onClick={close}>Voltar ao exame<Check size={20} /></button></div>}
+      {panel === 'success' && <div className="exam-detail-success" role="status"><span className="exam-detail-success-mark"><Check size={42} strokeWidth={2.5} /></span><h3>{isContactDone ? 'Contato concluído' : 'Contato registrado'}</h3><p>{doc.completed ? 'Todas as etapas deste exame estão concluídas.' : progress.contactCompleted ? 'O contato com o tutor foi registrado. Acompanhe as etapas restantes na tela do exame.' : 'O contato foi salvo para os itens selecionados. Acompanhe o andamento na tela do exame.'}</p><button className="exam-detail-primary" onClick={close}>Voltar ao exame<Check size={20} /></button></div>}
     </ExamDetailSheet>
   </div>
 }
 
 export function ExamDocumentDetail() {
   const { documentId = '' } = useParams()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const fromState = (location.state as { from?: string } | null)?.from
+  const fromParam = searchParams.get('from')
+  const backTarget = fromState || (fromParam === 'home' ? '/' : fromParam === 'tracking' ? '/tracking' : '/novos-exames')
+  const backTitle = backTarget === '/' ? 'Início' : backTarget === '/tracking' ? 'Rastreamento' : 'Novos exames'
+
   const validId = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(documentId)
   const query = useExamDocument(validId ? documentId : '')
   if (query.data) return <ExamDocumentContent key={documentId} doc={query.data} refresh={query.refetch} />
-  return <div className="exam-detail-page"><div className="exam-detail-container exam-detail-loading"><Link to="/novos-exames"><ArrowLeft size={20} />Novos exames</Link>{query.isLoading ? <p role="status"><Loader2 size={24} className="animate-spin" />Carregando exame…</p> : <><FileText size={38} /><h1>{validId ? 'Exame indisponível' : 'Link inválido'}</h1><p role="alert">{validId ? 'Confira sua conta ou tente novamente.' : 'Abra novamente o link enviado no grupo.'}</p>{validId && <button className="exam-detail-primary" onClick={() => void query.refetch()}>Tentar novamente</button>}</>}</div></div>
+  return <div className="exam-detail-page"><div className="exam-detail-container exam-detail-loading"><Link to={backTarget}><ArrowLeft size={20} />{backTitle}</Link>{query.isLoading ? <p role="status"><Loader2 size={24} className="animate-spin" />Carregando exame…</p> : <><FileText size={38} /><h1>{validId ? 'Exame indisponível' : 'Link inválido'}</h1><p role="alert">{validId ? 'Confira sua conta ou tente novamente.' : 'Abra novamente o link enviado no grupo.'}</p>{validId && <button className="exam-detail-primary" onClick={() => void query.refetch()}>Tentar novamente</button>}</>}</div></div>
 }

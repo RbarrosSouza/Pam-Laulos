@@ -213,6 +213,7 @@ export function ExamItemRow({ item, cardId, onContactClick, compact = false }: E
             <Link
               key={documentId}
               to={`/novos-exames/${documentId}`}
+              state={{ from: '/tracking' }}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}

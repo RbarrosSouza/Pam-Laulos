@@ -31,9 +31,17 @@
 .exam-detail-responsible-icon { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--olive); flex-shrink: 0; }
 .exam-detail-responsible-photo { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; }
 .exam-detail-contact { border-bottom: 1px solid var(--line); min-height: 105px; }
-.exam-detail-contact-check { width: 29px; height: 29px; flex-shrink: 0; display: grid; place-items: center; border: 1.7px solid var(--olive); border-radius: 7px; color: white; transition: background-color .18s; }
-.exam-detail-contact.is-complete .exam-detail-contact-check { background: var(--green); border-color: var(--green); }
+.exam-detail-contact-btn { display: flex; align-items: center; flex: 1; min-width: 0; background: transparent; border: 0; padding: 0; text-align: left; cursor: pointer; color: inherit; }
+.exam-detail-contact-check { width: 32px; height: 32px; flex-shrink: 0; display: grid; place-items: center; border: 1.7px solid var(--olive); border-radius: 9px; color: white; transition: background-color .18s; }
+.exam-detail-contact-check-btn { width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; border: 1.8px solid var(--olive); border-radius: 9px; background: transparent; color: var(--olive); cursor: pointer; transition: all .2s cubic-bezier(.34, 1.56, .64, 1); }
+.exam-detail-contact-check-btn:hover { background: var(--tint); border-color: var(--green); color: var(--green); transform: scale(1.08); }
+.exam-detail-contact-check-btn:active { transform: scale(0.92); }
+.exam-detail-contact.is-complete .exam-detail-contact-check,
+.exam-detail-contact-check.is-checked { background: var(--green); border-color: var(--green); color: white; cursor: pointer; animation: exam-check-bounce .35s cubic-bezier(.34, 1.56, .64, 1); }
 .exam-detail-contact.is-complete strong { color: var(--green); }
+.exam-detail-contact.is-celebrating { animation: exam-contact-pulse .6s cubic-bezier(.34, 1.56, .64, 1); }
+@keyframes exam-check-bounce { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+@keyframes exam-contact-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.015); background-color: var(--green-tint); border-radius: 12px; } 100% { transform: scale(1); } }
 .exam-detail-progress { padding-top: 21px; }
 .exam-detail-progress ul { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 0; margin: 0; }
 .exam-detail-progress li > button { display: flex; align-items: center; flex-direction: column; gap: 7px; width: 100%; min-height: 65px; color: var(--muted); font-size: 12px; }

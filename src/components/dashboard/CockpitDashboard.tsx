@@ -278,7 +278,7 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
                   <div
                     key={doc.id}
                     className={`p-3.5 flex flex-col gap-2.5 transition-colors cursor-pointer hover:bg-[hsl(var(--muted)/0.3)] ${isExiting ? 'row-completing-exit' : ''}`}
-                    onClick={() => navigate(`/novos-exames/${doc.id}`)}
+                    onClick={() => navigate(`/novos-exames/${doc.id}?from=home`, { state: { from: '/' } })}
                   >
                     {/* Linha 1: Pet + Tutor + SLA */}
                     <div className="flex items-start justify-between gap-2">
@@ -318,7 +318,7 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
                     <div className="flex items-center justify-between pt-2 border-t border-[hsl(var(--border)/0.6)]" onClick={e => e.stopPropagation()}>
                       <button
                         type="button"
-                        onClick={() => navigate(`/novos-exames/${doc.id}?panel=contact`)}
+                        onClick={() => navigate(`/novos-exames/${doc.id}?panel=contact&from=home`, { state: { from: '/' } })}
                         className="inline-flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-medium py-1.5 px-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 border border-emerald-200/80 dark:border-emerald-900/50 transition cursor-pointer"
                         title={`Contato com tutor ${tutor}`}
                       >
@@ -375,7 +375,7 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
                       <tr
                         key={doc.id}
                         className={`hover:bg-[hsl(var(--muted)/0.4)] transition-colors cursor-pointer ${isExiting ? 'row-completing-exit' : ''}`}
-                        onClick={() => navigate(`/novos-exames/${doc.id}`)}
+                        onClick={() => navigate(`/novos-exames/${doc.id}?from=home`, { state: { from: '/' } })}
                       >
                         {/* Paciente e Tutor */}
                         <td className="py-2.5 px-5">
@@ -418,7 +418,7 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
                           <div className="inline-flex items-center gap-3 justify-end">
                             <button
                               type="button"
-                              onClick={() => navigate(`/novos-exames/${doc.id}?panel=contact`)}
+                              onClick={() => navigate(`/novos-exames/${doc.id}?panel=contact&from=home`, { state: { from: '/' } })}
                               className="inline-flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))] hover:text-emerald-700 font-medium transition cursor-pointer"
                               title={`Contato com tutor ${tutor}`}
                             >

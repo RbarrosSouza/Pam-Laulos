@@ -239,6 +239,7 @@ export function TrackingDetail({ card, onClose }: TrackingDetailProps) {
                 <div className="space-y-2">
                   <Link
                     to={documentIds.length === 1 ? `/novos-exames/${documentIds[0]}` : '/novos-exames'}
+                    state={{ from: '/tracking' }}
                     onClick={onClose}
                     className="w-full flex items-center justify-center gap-2 py-3 px-3 rounded-xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-sm font-semibold hover:opacity-90 transition-opacity"
                   >
