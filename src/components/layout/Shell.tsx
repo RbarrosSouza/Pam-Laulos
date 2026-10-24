@@ -9,6 +9,7 @@ export function Shell() {
   useTheme()
   // The approved document page keeps its own navigation and safe-area spacing.
   if (/^\/novos-exames\/[^/]+\/?$/.test(pathname)) return <Outlet />
-  const showsCardAlert = ['/tracking', '/late'].includes(normalizeAppPath(pathname))
+  // Card alert banner removed from tracking as requested; kept only for /late if ever needed.
+  const showsCardAlert = ['/late'].includes(normalizeAppPath(pathname))
   return <AppFrame notice={showsCardAlert ? <AlertBanner /> : undefined}><Outlet /></AppFrame>
 }

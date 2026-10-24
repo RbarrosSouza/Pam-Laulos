@@ -7,8 +7,8 @@
 .app-mobile-header { min-height: calc(70px + env(safe-area-inset-top)); padding: max(13px, env(safe-area-inset-top)) 22px 13px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--background)); }
 .app-main { min-width: 0; outline: none; padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 .app-content { width: 100%; max-width: 1280px; margin-inline: auto; padding: 26px 20px 36px; }
-.app-section-tabs { display: flex; gap: 27px; padding-inline: 22px; min-height: 55px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--background)); }
-.app-section-tab { min-height: 55px; display: inline-flex; align-items: center; position: relative; color: hsl(var(--muted-foreground)); text-decoration: none; font-size: 14px; font-weight: 500; white-space: nowrap; }
+.app-section-tabs { display: flex; gap: 20px; padding-inline: 20px; min-height: 44px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--background)); }
+.app-section-tab { min-height: 44px; display: inline-flex; align-items: center; position: relative; color: hsl(var(--muted-foreground)); text-decoration: none; font-size: 13px; font-weight: 500; white-space: nowrap; }
 .app-section-tab.is-active { color: hsl(var(--foreground)); font-weight: 600; }
 .app-section-tab.is-active::after { content: ''; position: absolute; bottom: -1px; height: 2px; left: 0; right: 0; border-radius: 2px; background: hsl(var(--primary)); }
 .app-bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; display: grid; grid-template-columns: repeat(4, 1fr); padding: 9px 10px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
@@ -30,9 +30,9 @@
   .app-sidebar-footer span { padding-inline: 5px; }
   .app-mobile-header, .app-bottom-nav { display: none; }
   .app-main { margin-left: 224px; padding-bottom: 0; min-height: 100dvh; }
-  .app-content { padding: 40px 36px; }
-  .app-section-tabs { padding-inline: 36px; gap: 32px; min-height: 74px; }
-  .app-section-tab { min-height: 74px; }
+  .app-content { padding: 24px 28px 36px; }
+  .app-section-tabs { padding-inline: 28px; gap: 24px; min-height: 46px; }
+  .app-section-tab { min-height: 46px; font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-frame *, .app-frame *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }

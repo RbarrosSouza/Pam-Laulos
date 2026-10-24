@@ -27,7 +27,7 @@ function TrackingStageButton({ stage, count, selected, disabled, onSelect }: Tra
   const { setNodeRef, isOver } = useDroppable({ id: `stage-${stage.status}`, data: { status: stage.status } })
   return (
     <button ref={setNodeRef} type="button" className={cn('tracking-stage-button', selected && 'is-active', isOver && 'is-drop-over')} aria-pressed={selected} disabled={disabled} onClick={onSelect}>
-      <stage.Icon size={18} aria-hidden="true" /><span>{stage.label}</span><span className="tracking-stage-count tabular-nums">{count}</span>
+      <stage.Icon size={14} aria-hidden="true" /><span>{stage.label}</span><span className="tracking-stage-count tabular-nums">{count}</span>
     </button>
   )
 }

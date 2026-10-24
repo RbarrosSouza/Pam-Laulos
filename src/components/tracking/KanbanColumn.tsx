@@ -33,7 +33,7 @@ export function KanbanColumn({ status, cards, onSelectCard, selectedIds, onToggl
   return (
     <section ref={setNodeRef} className={cn('tracking-column', isOver && 'is-over')} aria-label={stage.label}>
       <header className="tracking-column-heading">
-        <stage.Icon size={18} aria-hidden="true" />
+        <stage.Icon size={15} aria-hidden="true" />
         <h2>{stage.label}</h2>
         <span className="tracking-stage-count tabular-nums">{cards.length}</span>
         <label className="tracking-selection" title={`Selecionar todos em ${stage.label}`}>
@@ -45,7 +45,7 @@ export function KanbanColumn({ status, cards, onSelectCard, selectedIds, onToggl
         {cards.length ? cards.map((card) => {
           const props = { selected: selectedIds.has(card.id), onToggleSelection: () => onToggleSelection(card.id), onOpen: () => onSelectCard(card) }
           return <div key={card.id}>{renderCard ? renderCard(card, props) : <TrackingCardSurface card={card} {...props} />}</div>
-        }) : <div className="tracking-column-empty"><Inbox size={24} aria-hidden="true" /><p>{isOver ? 'Soltar aqui' : 'Nenhum exame nesta etapa'}</p></div>}
+        }) : <div className="tracking-column-empty"><Inbox size={20} aria-hidden="true" /><p>{isOver ? 'Soltar aqui' : 'Nenhum exame nesta etapa'}</p></div>}
       </div>
     </section>
   )
