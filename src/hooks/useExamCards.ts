@@ -18,9 +18,36 @@ export function useExamCards(filters?: {
         query = query.in('status', filters.status)
       }
       if (filters?.search) {
-        query = query.or(
-          `pet_name.ilike.%${filters.search}%,client_name.ilike.%${filters.search}%,vet_name.ilike.%${filters.search}%`
-        )
+        const term = filters.search.trim()
+        const variants = new Set<string>()
+        variants.add(term)
+        if (/qui/i.test(term)) {
+          variants.add(term.replace(/qui/gi, 'ki'))
+          variants.add(term.replace(/qui/gi, 'chi'))
+        }
+        if (/ki/i.test(term)) {
+          variants.add(term.replace(/ki/gi, 'qui'))
+          variants.add(term.replace(/ki/gi, 'chi'))
+        }
+        if (/chi/i.test(term)) {
+          variants.add(term.replace(/chi/gi, 'ki'))
+          variants.add(term.replace(/chi/gi, 'qui'))
+        }
+        const digits = term.replace(/\D/g, '')
+        if (digits.length >= 4) {
+          variants.add(digits)
+        }
+
+        const orClauses: string[] = []
+        for (const t of variants) {
+          orClauses.push(
+            `pet_name.ilike.%${t}%`,
+            `client_name.ilike.%${t}%`,
+            `vet_name.ilike.%${t}%`,
+            `client_phone.ilike.%${t}%`
+          )
+        }
+        query = query.or(orClauses.join(','))
       }
       if (filters?.vetName) {
         query = query.ilike('vet_name', `%${filters.vetName}%`)

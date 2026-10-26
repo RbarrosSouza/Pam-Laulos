@@ -78,6 +78,8 @@ export interface DocumentCandidate {
   client_name: string
   client_code: string
   species?: string | null
+  client_phone?: string | null
+  last_vet_name?: string | null
   items?: { id: string; exam_card_id: string; exam_type: string; result_received: boolean }[]
 }
 

@@ -242,7 +242,7 @@ export function DocumentQueue({ documents, total, page, pageSize, loading, error
           <span className="sr-only">Buscar por pet, tutor ou arquivo</span>
           <input
             type="search"
-            placeholder="Buscar por pet, tutor ou arquivo..."
+            placeholder="Buscar por pet, tutor, telefone ou exame..."
             value={search}
             onChange={event => onSearchChange(event.target.value)}
             autoComplete="off"

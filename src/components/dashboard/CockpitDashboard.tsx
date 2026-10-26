@@ -161,7 +161,7 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar paciente, tutor ou exame..."
+              placeholder="Buscar paciente, tutor, telefone ou exame..."
               className="w-full pl-8 pr-3 py-1.5 text-xs bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg focus:outline-none focus:border-[hsl(var(--primary))] text-[hsl(var(--foreground))]"
             />
           </div>

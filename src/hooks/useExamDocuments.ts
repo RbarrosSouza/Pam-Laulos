@@ -19,8 +19,51 @@ export function buildExamDocumentsQuery(search: string, filter: DocumentFilter) 
   const term = search.replace(/[(),]/g, ' ').trim()
   if (term) {
     const idTerm = term.replace(/^EX-/i, '')
-    if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(idTerm)) query = query.eq('id', idTerm)
-    else query = query.or(`display_code.ilike.%${term}%,original_name.ilike.%${term}%,extracted_data->>pet_name.ilike.%${term}%,extracted_data->>client_name.ilike.%${term}%,confirmed_data->>pet_name.ilike.%${term}%,confirmed_data->>client_name.ilike.%${term}%`)
+    if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(idTerm)) {
+      query = query.eq('id', idTerm)
+    } else {
+      const variants = new Set<string>()
+      variants.add(term)
+      if (/qui/i.test(term)) {
+        variants.add(term.replace(/qui/gi, 'ki'))
+        variants.add(term.replace(/qui/gi, 'chi'))
+      }
+      if (/ki/i.test(term)) {
+        variants.add(term.replace(/ki/gi, 'qui'))
+        variants.add(term.replace(/ki/gi, 'chi'))
+      }
+      if (/chi/i.test(term)) {
+        variants.add(term.replace(/chi/gi, 'ki'))
+        variants.add(term.replace(/chi/gi, 'qui'))
+      }
+      const digits = term.replace(/\D/g, '')
+      if (digits.length >= 4) {
+        variants.add(digits)
+      }
+
+      const orClauses: string[] = []
+      for (const t of variants) {
+        orClauses.push(
+          `display_code.ilike.%${t}%`,
+          `original_name.ilike.%${t}%`,
+          `extracted_data->>pet_name.ilike.%${t}%`,
+          `extracted_data->>client_name.ilike.%${t}%`,
+          `extracted_data->>client_phone.ilike.%${t}%`,
+          `extracted_data->>vet_name.ilike.%${t}%`,
+          `extracted_data->>requester_vet.ilike.%${t}%`,
+          `extracted_data->>requesting_vet_name.ilike.%${t}%`,
+          `confirmed_data->>pet_name.ilike.%${t}%`,
+          `confirmed_data->>client_name.ilike.%${t}%`,
+          `confirmed_data->>client_phone.ilike.%${t}%`,
+          `confirmed_data->>vet_name.ilike.%${t}%`,
+          `confirmed_data->>requester_vet.ilike.%${t}%`,
+          `confirmed_data->>requesting_vet_name.ilike.%${t}%`,
+          `responsible_vet_name.ilike.%${t}%`,
+          `assigned_name.ilike.%${t}%`
+        )
+      }
+      query = query.or(orClauses.join(','))
+    }
   }
   return query
 }
@@ -75,13 +118,61 @@ export function useDocumentEvents(id: string) {
 
 export function useDocumentCandidates(query: string) {
   const auth = useExamAuth()
+  const trimmed = query.trim()
   return useQuery({
-    queryKey: ['exam-document-candidates', auth.session?.user.id, query],
-    enabled: auth.membership && query.trim().length >= 2,
+    queryKey: ['exam-document-candidates', auth.session?.user.id, trimmed],
+    enabled: auth.membership && trimmed.length >= 2,
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('search_exam_document_candidates', { p_query: query.trim(), p_limit: 20 })
+      const { data, error } = await supabase.rpc('search_exam_document_candidates', { p_query: trimmed, p_limit: 50 })
       if (error) throw error
-      return (data || []) as DocumentCandidate[]
+      let results = (data || []) as DocumentCandidate[]
+
+      // Resiliência imediata caso o banco ainda não tenha a migração fonética/telefone:
+      if (results.length === 0 && (/qui/i.test(trimmed) || /ki/i.test(trimmed) || /chi/i.test(trimmed))) {
+        let alt = trimmed
+        if (/qui/i.test(trimmed)) alt = trimmed.replace(/qui/gi, 'ki')
+        else if (/ki/i.test(trimmed)) alt = trimmed.replace(/ki/gi, 'qui')
+        else if (/chi/i.test(trimmed)) alt = trimmed.replace(/chi/gi, 'ki')
+        const { data: fallbackData } = await supabase.rpc('search_exam_document_candidates', { p_query: alt, p_limit: 50 })
+        if (fallbackData && fallbackData.length > 0) {
+          results = fallbackData as DocumentCandidate[]
+        }
+      }
+
+      // Resiliência imediata para busca por telefone se o RPC ainda não busca no campo Celular:
+      const digits = trimmed.replace(/\D/g, '')
+      if (results.length === 0 && digits.length >= 4) {
+        const { data: clientMatches } = await supabase
+          .from('clients')
+          .select('"Código", "Nome", "Celular"')
+          .or(`"Celular".ilike.%${trimmed}%,"Celular".ilike.%${digits}%`)
+          .limit(20)
+        if (clientMatches && clientMatches.length > 0) {
+          const clientCodes = clientMatches.map(c => c["Código"])
+          const { data: petMatches } = await supabase
+            .from('pets')
+            .select('id, name, species, client_code')
+            .in('client_code', clientCodes)
+            .limit(50)
+          if (petMatches && petMatches.length > 0) {
+            const codeMap = Object.fromEntries(clientMatches.map(c => [c["Código"], c]))
+            results = petMatches.map(p => {
+              const c = codeMap[p.client_code]
+              return {
+                pet_id: p.id,
+                pet_name: p.name,
+                species: p.species,
+                client_code: p.client_code,
+                client_name: c?.["Nome"] || 'Tutor não informado',
+                client_phone: c?.["Celular"] || null,
+                items: [],
+              }
+            })
+          }
+        }
+      }
+
+      return results
     },
   })
 }
