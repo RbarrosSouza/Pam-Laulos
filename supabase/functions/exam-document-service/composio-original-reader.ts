@@ -9,7 +9,7 @@ const SEARCH = "COMPOSIO_SEARCH_TOOLS";
 const EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
 const METADATA = "GOOGLEDRIVE_GET_FILE_METADATA";
 const DOWNLOAD = "GOOGLEDRIVE_DOWNLOAD_FILE";
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
 type Json = Record<string, unknown>;
 type Fetch = typeof fetch;
 

@@ -7,26 +7,37 @@ import type { DocumentCandidate, DocumentEvent, ExamDocument } from '@/types/exa
 export const DOCUMENT_PAGE_SIZE = 25
 export type DocumentFilter = 'open' | 'all' | 'review' | 'unassigned' | 'group_failed' | 'contact' | 'nexus' | 'completed'
 
+export function buildExamDocumentsQuery(search: string, filter: DocumentFilter) {
+  let query = supabase.from('v_exam_documents').select('*', { count: 'exact' }).order('received_at', { ascending: false })
+  if (filter === 'open') query = query.eq('completed', false).neq('identification_status', 'not_exam')
+  if (filter === 'review') query = query.in('identification_status', ['unidentified', 'suggested', 'review'])
+  if (filter === 'unassigned') query = query.is('responsible_vet_id', null).is('assigned_to', null).eq('completed', false)
+  if (filter === 'group_failed') query = query.in('group_status', ['failed', 'uncertain'])
+  if (filter === 'contact') query = query.neq('contact_status', 'completed').neq('identification_status', 'not_exam')
+  if (filter === 'nexus') query = query.neq('nexus_status', 'completed').neq('identification_status', 'not_exam')
+  if (filter === 'completed') query = query.eq('completed', true)
+  const term = search.replace(/[(),]/g, ' ').trim()
+  if (term) {
+    const idTerm = term.replace(/^EX-/i, '')
+    if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(idTerm)) query = query.eq('id', idTerm)
+    else query = query.or(`display_code.ilike.%${term}%,original_name.ilike.%${term}%,extracted_data->>pet_name.ilike.%${term}%,extracted_data->>client_name.ilike.%${term}%,confirmed_data->>pet_name.ilike.%${term}%,confirmed_data->>client_name.ilike.%${term}%`)
+  }
+  return query
+}
+
+export async function fetchAllExamDocuments(search: string, filter: DocumentFilter): Promise<ExamDocument[]> {
+  const { data, error } = await buildExamDocumentsQuery(search, filter).limit(1000)
+  if (error) throw error
+  return (data || []) as ExamDocument[]
+}
+
 export function useExamDocuments(search: string, filter: DocumentFilter, page: number) {
   const auth = useExamAuth()
   return useQuery({
     queryKey: ['exam-documents', auth.session?.user.id, search, filter, page],
     enabled: !!auth.session && auth.membership,
     queryFn: async () => {
-      let query = supabase.from('v_exam_documents').select('*', { count: 'exact' }).order('received_at', { ascending: false })
-      if (filter === 'open') query = query.eq('completed', false).neq('identification_status', 'not_exam')
-      if (filter === 'review') query = query.in('identification_status', ['unidentified', 'suggested', 'review'])
-      if (filter === 'unassigned') query = query.is('responsible_vet_id', null).is('assigned_to', null).eq('completed', false)
-      if (filter === 'group_failed') query = query.in('group_status', ['failed', 'uncertain'])
-      if (filter === 'contact') query = query.neq('contact_status', 'completed').neq('identification_status', 'not_exam')
-      if (filter === 'nexus') query = query.neq('nexus_status', 'completed').neq('identification_status', 'not_exam')
-      if (filter === 'completed') query = query.eq('completed', true)
-      const term = search.replace(/[(),]/g, ' ').trim()
-      if (term) {
-        const idTerm = term.replace(/^EX-/i, '')
-        if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(idTerm)) query = query.eq('id', idTerm)
-        else query = query.or(`display_code.ilike.%${term}%,original_name.ilike.%${term}%,extracted_data->>pet_name.ilike.%${term}%,extracted_data->>client_name.ilike.%${term}%,confirmed_data->>pet_name.ilike.%${term}%,confirmed_data->>client_name.ilike.%${term}%`)
-      }
+      const query = buildExamDocumentsQuery(search, filter)
       const { data, error, count } = await query.range(page * DOCUMENT_PAGE_SIZE, (page + 1) * DOCUMENT_PAGE_SIZE - 1)
       if (error) throw error
       return { documents: (data || []) as ExamDocument[], count: count || 0 }

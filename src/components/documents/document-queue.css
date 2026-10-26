@@ -41,6 +41,13 @@
   transition: all 0.16s ease;
 }
 
+.document-queue-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.document-queue-print,
 .document-queue-refresh {
   height: 32px;
   display: inline-flex;
@@ -56,9 +63,16 @@
   font-weight: 500;
 }
 
-.document-queue-refresh:hover {
+.document-queue-print:hover:not(:disabled),
+.document-queue-refresh:hover:not(:disabled) {
   background: hsl(var(--muted));
   color: hsl(var(--foreground));
+}
+
+.document-queue-print:disabled,
+.document-queue-refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .document-queue-tools {
@@ -490,5 +504,271 @@
 
   .document-queue-open {
     display: none;
+  }
+}
+
+/* VISÃO DE IMPRESSÃO - OCULTA NA TELA NORMAL */
+.document-queue-print-view {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 10mm 12mm 10mm;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    color: #111827 !important;
+    font-size: 9.5pt !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ocultar elementos desnecessários de navegação e tela */
+  .app-sidebar,
+  .app-mobile-header,
+  .app-section-tabs,
+  .bottom-nav,
+  .app-skip-link,
+  .document-queue-header,
+  .document-queue-tools,
+  .document-queue-list,
+  .document-queue-pagination,
+  .document-queue-feedback {
+    display: none !important;
+  }
+
+  /* Exibir visão de impressão ocupando 100% */
+  .document-queue-print-view {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  .document-queue-print-header {
+    border-bottom: 2px solid #111827;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+  }
+
+  .document-queue-print-brand {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .document-queue-print-logo {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 13pt;
+    color: #065f46;
+  }
+
+  .document-queue-print-badge {
+    font-size: 7.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 6px;
+    border: 1px solid #065f46;
+    border-radius: 4px;
+    color: #065f46;
+  }
+
+  .document-queue-print-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .document-queue-print-title {
+    font-size: 15pt;
+    font-weight: 700;
+    margin: 0;
+    color: #111827;
+  }
+
+  .document-queue-print-meta {
+    font-size: 8.5pt;
+    color: #4b5563;
+    margin: 2px 0 0;
+  }
+
+  .document-queue-print-timestamp {
+    text-align: right;
+    font-size: 8pt;
+    color: #6b7280;
+  }
+
+  .document-queue-print-timestamp small {
+    display: block;
+    text-transform: uppercase;
+    font-size: 6.5pt;
+    font-weight: 600;
+  }
+
+  /* Tabela de Impressão */
+  .document-queue-print-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+  }
+
+  .document-queue-print-table th {
+    background-color: #f3f4f6 !important;
+    color: #1f2937;
+    font-weight: 600;
+    text-align: left;
+    padding: 6px 8px;
+    border-top: 1px solid #d1d5db;
+    border-bottom: 1.5px solid #9ca3af;
+    font-size: 7.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .document-queue-print-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: top;
+    page-break-inside: avoid;
+  }
+
+  .document-queue-print-table tr:nth-child(even) td {
+    background-color: #f9fafb !important;
+  }
+
+  .document-queue-print-table .th-check,
+  .document-queue-print-table .td-check {
+    width: 32px;
+    text-align: center;
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
+  .print-box {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid #374151;
+    border-radius: 3px;
+    background: #ffffff;
+    vertical-align: middle;
+  }
+
+  .document-queue-print-table .th-patient,
+  .document-queue-print-table .td-patient {
+    width: 23%;
+  }
+
+  .print-pet {
+    display: block;
+    font-weight: 700;
+    font-size: 9pt;
+    color: #111827;
+  }
+
+  .print-tutor {
+    display: block;
+    font-size: 7.5pt;
+    color: #4b5563;
+  }
+
+  .document-queue-print-table .th-exam,
+  .document-queue-print-table .td-exam {
+    width: 25%;
+  }
+
+  .print-exam {
+    display: block;
+    font-weight: 500;
+    font-size: 8.5pt;
+    color: #111827;
+  }
+
+  .print-date {
+    display: block;
+    font-size: 7.5pt;
+    color: #4b5563;
+  }
+
+  .document-queue-print-table .th-vet,
+  .document-queue-print-table .td-vet {
+    width: 20%;
+    font-size: 8pt;
+    font-weight: 500;
+    color: #1f2937;
+  }
+
+  .document-queue-print-table .th-pending,
+  .document-queue-print-table .td-pending {
+    width: 17%;
+  }
+
+  .print-stages {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: 7pt;
+    color: #4b5563;
+    line-height: 1.2;
+  }
+
+  .print-stage-tag {
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    color: #6b7280;
+  }
+
+  .print-stage-tag.is-done {
+    background: #ecfdf5 !important;
+    border-color: #a7f3d0 !important;
+    color: #065f46 !important;
+    font-weight: 600;
+  }
+
+  .print-sla {
+    display: block;
+    font-size: 7.5pt;
+    font-weight: 600;
+    color: #b45309;
+    margin-top: 3px;
+  }
+
+  .document-queue-print-table .th-notes,
+  .document-queue-print-table .td-notes {
+    width: 15%;
+  }
+
+  .print-notes-space {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 4px;
+  }
+
+  .print-notes-line {
+    display: block;
+    width: 100%;
+    border-bottom: 1px dotted #9ca3af;
+    height: 1px;
+  }
+
+  .document-queue-print-footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 14px;
+    padding-top: 6px;
+    border-top: 1px solid #d1d5db;
+    font-size: 7pt;
+    color: #6b7280;
   }
 }

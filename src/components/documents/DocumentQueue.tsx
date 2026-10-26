@@ -1,7 +1,10 @@
+import { useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, FileText, Link2, Loader2, Mail, Phone, RefreshCw, Search, SlidersHorizontal, UserRound } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, FileText, Link2, Loader2, Mail, Phone, Printer, RefreshCw, Search, SlidersHorizontal, Stethoscope, UserRound } from 'lucide-react'
 import { WhatsappLogo } from '@phosphor-icons/react/dist/csr/WhatsappLogo'
-import type { DocumentFilter } from '@/hooks/useExamDocuments'
+import { toast } from 'sonner'
+import { fetchAllExamDocuments, type DocumentFilter } from '@/hooks/useExamDocuments'
 import type { ExamDocument } from '@/types/exam-document'
 import { getExamDetailProgress } from '@/lib/exam-detail-progress'
 import { documentIsOverdue, documentLabel } from '@/lib/document-status'
@@ -28,6 +31,7 @@ export interface DocumentQueueProps {
   onSearchChange: (value: string) => void
   onFilterChange: (value: DocumentFilter) => void
   onPageChange: (value: number) => void
+  onFetchAll?: () => Promise<ExamDocument[]>
 }
 
 function field(doc: ExamDocument, key: 'pet_name' | 'client_name' | 'exam_type', fallback: string) {
@@ -145,8 +149,49 @@ function DocumentQueueRow({ doc }: { doc: ExamDocument }) {
   )
 }
 
-export function DocumentQueue({ documents, total, page, pageSize, loading, error, refreshing, search, filter, onRefresh, onSearchChange, onFilterChange, onPageChange }: DocumentQueueProps) {
+export function DocumentQueue({ documents, total, page, pageSize, loading, error, refreshing, search, filter, onRefresh, onSearchChange, onFilterChange, onPageChange, onFetchAll }: DocumentQueueProps) {
   const pages = Math.max(1, Math.ceil(total / pageSize))
+  const [isPrinting, setIsPrinting] = useState(false)
+  const [printDocuments, setPrintDocuments] = useState<ExamDocument[]>(documents)
+
+  const handlePrint = async () => {
+    if (isPrinting || loading || total === 0) return
+    try {
+      setIsPrinting(true)
+      let targetDocs: ExamDocument[]
+      if (onFetchAll) {
+        targetDocs = await onFetchAll()
+      } else if (total <= documents.length && page === 0) {
+        targetDocs = documents
+      } else {
+        targetDocs = await fetchAllExamDocuments(search, filter)
+      }
+      if (!targetDocs.length) {
+        toast.error('Nenhum exame para imprimir com os filtros selecionados.')
+        setIsPrinting(false)
+        return
+      }
+      flushSync(() => {
+        setPrintDocuments(targetDocs)
+      })
+      window.print()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Não foi possível preparar a impressão.')
+    } finally {
+      setIsPrinting(false)
+    }
+  }
+
+  const printItems = printDocuments.length ? printDocuments : documents
+  const currentFilterLabel = filters.find(option => option.value === filter)?.label || 'Todos'
+  const printDate = new Date().toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
   return (
     <section className="document-queue" aria-labelledby="document-queue-title">
       <header className="document-queue-header">
@@ -158,17 +203,34 @@ export function DocumentQueue({ documents, total, page, pageSize, loading, error
             )}
           </p>
         </div>
-        <button
-          type="button"
-          className="document-queue-refresh"
-          onClick={onRefresh}
-          disabled={refreshing}
-          aria-label={refreshing ? 'Atualizando exames' : 'Atualizar exames'}
-          title="Atualizar exames"
-        >
-          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} aria-hidden="true" />
-          <span>Atualizar</span>
-        </button>
+        <div className="document-queue-header-actions">
+          <button
+            type="button"
+            className="document-queue-print"
+            onClick={() => void handlePrint()}
+            disabled={isPrinting || loading || total === 0}
+            aria-label="Imprimir lista completa de exames"
+            title="Imprimir lista completa"
+          >
+            {isPrinting ? (
+              <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Printer size={13} aria-hidden="true" />
+            )}
+            <span>{isPrinting ? 'Preparando…' : 'Imprimir'}</span>
+          </button>
+          <button
+            type="button"
+            className="document-queue-refresh"
+            onClick={onRefresh}
+            disabled={refreshing || isPrinting}
+            aria-label={refreshing ? 'Atualizando exames' : 'Atualizar exames'}
+            title="Atualizar exames"
+          >
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} aria-hidden="true" />
+            <span>Atualizar</span>
+          </button>
+        </div>
       </header>
       <div className="document-queue-tools">
         <label className="document-queue-search">
@@ -246,6 +308,107 @@ export function DocumentQueue({ documents, total, page, pageSize, loading, error
           </nav>
         </footer>
       )}
+
+      {/* VISÃO EXCLUSIVA DE IMPRESSÃO (A4 / VETERINÁRIOS) */}
+      <div className="document-queue-print-view" aria-hidden="true">
+        <header className="document-queue-print-header">
+          <div className="document-queue-print-brand">
+            <div className="document-queue-print-logo">
+              <Stethoscope size={18} strokeWidth={2} aria-hidden="true" />
+              <span>Pam Laudos · PamVet</span>
+            </div>
+            <span className="document-queue-print-badge">Controle Clínico</span>
+          </div>
+          <div className="document-queue-print-title-row">
+            <div>
+              <h2 className="document-queue-print-title">Lista de Exames Recebidos</h2>
+              <p className="document-queue-print-meta">
+                <span><strong>Filtro:</strong> {currentFilterLabel}</span>
+                {search.trim() && <span> · <strong>Busca:</strong> &ldquo;{search.trim()}&rdquo;</span>}
+                <span> · <strong>Total:</strong> {printItems.length} {printItems.length === 1 ? 'exame' : 'exames'}</span>
+              </p>
+            </div>
+            <div className="document-queue-print-timestamp">
+              <small>Emissão</small>
+              <span>{printDate}</span>
+            </div>
+          </div>
+        </header>
+
+        <table className="document-queue-print-table">
+          <thead>
+            <tr>
+              <th className="th-check">Check</th>
+              <th className="th-patient">Paciente e Tutor</th>
+              <th className="th-exam">Exame e Data</th>
+              <th className="th-vet">Veterinário(a) Responsável</th>
+              <th className="th-pending">Pendências / SLA</th>
+              <th className="th-notes">Visto / Observações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {printItems.map(doc => {
+              const pet = field(doc, 'pet_name', 'Pet a identificar')
+              const tutor = field(doc, 'client_name', 'Tutor a identificar')
+              const exam = field(doc, 'exam_type', 'Exame a identificar')
+              const responsible = doc.responsible_vet_name || doc.assigned_name || 'Sem responsável'
+              const date = examDate(doc)
+              const days = parseDaysInGroup(doc)
+              const progress = getExamDetailProgress(doc)
+              return (
+                <tr key={doc.id}>
+                  <td className="td-check">
+                    <span className="print-box" />
+                  </td>
+                  <td className="td-patient">
+                    <strong className="print-pet">{pet}</strong>
+                    <span className="print-tutor">{tutor}</span>
+                  </td>
+                  <td className="td-exam">
+                    <span className="print-exam">{exam}</span>
+                    <span className="print-date">{date || 'Data a conferir'}</span>
+                  </td>
+                  <td className="td-vet">
+                    <span>{responsible}</span>
+                  </td>
+                  <td className="td-pending">
+                    <div className="print-stages">
+                      <span className={`print-stage-tag${progress.originReceived ? ' is-done' : ''}`}>
+                        {progress.originChannel === 'whatsapp' ? 'WhatsApp' : 'E-mail'} {progress.originReceived ? '✓' : '—'}
+                      </span>
+                      <span className={`print-stage-tag${progress.groupSent ? ' is-done' : ''}`}>
+                        Grupo {progress.groupSent ? '✓' : '—'}
+                      </span>
+                      <span className={`print-stage-tag${progress.nexusLinked ? ' is-done' : ''}`}>
+                        Cadastro {progress.nexusLinked ? '✓' : '—'}
+                      </span>
+                      <span className={`print-stage-tag${progress.contactCompleted ? ' is-done' : ''}`}>
+                        Contato {progress.contactCompleted ? '✓' : '—'}
+                      </span>
+                    </div>
+                    {days !== null && (
+                      <span className="print-sla">
+                        {days === 0 ? 'SLA: hoje' : `SLA: ${days}d`}
+                      </span>
+                    )}
+                  </td>
+                  <td className="td-notes">
+                    <div className="print-notes-space">
+                      <span className="print-notes-line" />
+                      <span className="print-notes-line" />
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+
+        <footer className="document-queue-print-footer">
+          <span>Pam Laudos · Triagem e Rastreabilidade de Exames</span>
+          <span>Conferência clínica e entrega aos veterinários</span>
+        </footer>
+      </div>
     </section>
   )
 }
