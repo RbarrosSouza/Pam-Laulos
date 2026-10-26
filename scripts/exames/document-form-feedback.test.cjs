@@ -116,6 +116,47 @@ const check = async (name, run) => { await run(); console.log(`ok ${++checks} - 
   request.resolve({ document: { ...current, pet_id: 'fixture-pet', version: 2 } }); await tick()
   await check('successful patient confirmation dismisses the parent once', () => { assert.equal(saved, 1) })
 
+  // New regression checks: bottom button unifies confirmation, and missing exam_type highlights in red
+  reset({ ...fixture(), pet_id: null, identification_status: 'unidentified' })
+  saved = 0; request = deferred(); behavior = () => request.promise
+  tree = render('patient', { onSaved })
+  tree.find(node => node.type === 'input' && node.props.type === 'radio').props.onChange()
+  tree = render('patient', { onSaved })
+  const confLabel = tree.find(node => node.type === 'label' && words(node).startsWith('Conferi o PDF'))
+  nodes(confLabel).find(node => node.type === 'input').props.onChange({ target: { checked: true } })
+  const bottomConfirmBtn = tree.filter(node => node.type === 'button' && words(node) === 'Confirmar cadastro e anexar').at(-1)
+  assert.ok(bottomConfirmBtn, 'Bottom button should switch to "Confirmar cadastro e anexar" when patient is confirmed')
+  bottomConfirmBtn.props.onClick()
+  await check('bottom button in patient mode confirms link when patient is confirmed', () => {
+    assert.equal(saved, 0); assert.equal(writes.length, 1)
+    assert.equal(writes[0].name, 'confirm_exam_document_link')
+    assert.equal(writes[0].args.p_pet_id, 'fixture-pet')
+  })
+  request.resolve({ document: { ...current, pet_id: 'fixture-pet', version: 2 } }); await tick()
+  await check('bottom confirmation dismisses the parent once after link', () => { assert.equal(saved, 1) })
+
+  // Missing exam_type highlights input in red and keeps save disabled
+  reset({ ...fixture(), pet_id: null, extracted_data: { pet_name: 'Luna', exam_type: '' }, confirmed_data: { exam_type: '' } })
+  tree = render('patient')
+  const examTypeInput = tree.find(node => node.type === 'input' && node.props['aria-label'] === 'Tipo do exame')
+  await check('missing exam type highlights input in red', () => {
+    assert.match(examTypeInput.props.className, /border-red-500/)
+    assert.match(words(tree[0]), /Preenchimento obrigatório para salvar e anexar/)
+  })
+
+  // Patient mode saving identity without confirmation does not prematurely dismiss parent
+  reset({ ...fixture(), pet_id: null, identification_status: 'unidentified' })
+  saved = 0; behavior = async () => ({ document: { ...current, version: 2 } })
+  tree = render('patient', { onSaved })
+  tree.find(node => node.type === 'input' && node.props.type === 'radio').props.onChange()
+  const saveIdentityBtn = button(render('patient', { onSaved }), 'Salvar identificação')
+  assert.ok(saveIdentityBtn, 'Button remains "Salvar identificação" when patient is selected but not confirmed')
+  saveIdentityBtn.props.onClick(); await tick()
+  await check('patient mode saving identity without confirmation does not prematurely dismiss parent', () => {
+    assert.equal(saved, 0)
+    assert.equal(writes.at(-1).name, 'review_exam_document')
+  })
+
   for (const blank of ['', '   \n ']) {
     reset()
     tree = render('contact')
