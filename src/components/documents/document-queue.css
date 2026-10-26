@@ -515,13 +515,13 @@
 @media print {
   @page {
     size: A4 portrait;
-    margin: 12mm 10mm 12mm 10mm;
+    margin: 8mm 8mm 8mm 8mm;
   }
 
   body, html {
     background: #ffffff !important;
     color: #111827 !important;
-    font-size: 9.5pt !important;
+    font-size: 8pt !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -531,14 +531,29 @@
   .app-sidebar,
   .app-mobile-header,
   .app-section-tabs,
+  .app-bottom-nav,
   .bottom-nav,
   .app-skip-link,
   .document-queue-header,
   .document-queue-tools,
   .document-queue-list,
   .document-queue-pagination,
-  .document-queue-feedback {
+  .document-queue-feedback,
+  .sonner-toaster,
+  .app-sidebar-footer {
     display: none !important;
+  }
+
+  /* Resetar containers da aplicação para largura total de impressão sem offsets de tela */
+  .app-frame,
+  .app-main,
+  .app-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: auto !important;
+    display: block !important;
   }
 
   /* Exibir visão de impressão ocupando 100% */
@@ -548,35 +563,35 @@
   }
 
   .document-queue-print-header {
-    border-bottom: 2px solid #111827;
-    padding-bottom: 8px;
-    margin-bottom: 12px;
+    border-bottom: 1.5px solid #111827;
+    padding-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .document-queue-print-brand {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 6px;
+    margin-bottom: 2px;
   }
 
   .document-queue-print-logo {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     font-weight: 700;
-    font-size: 13pt;
+    font-size: 10.5pt;
     color: #065f46;
   }
 
   .document-queue-print-badge {
-    font-size: 7.5pt;
-    font-weight: 600;
+    font-size: 6.5pt;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 2px 6px;
+    letter-spacing: 0.04em;
+    padding: 1px 5px;
     border: 1px solid #065f46;
-    border-radius: 4px;
+    border-radius: 3px;
     color: #065f46;
   }
 
@@ -587,28 +602,31 @@
   }
 
   .document-queue-print-title {
-    font-size: 15pt;
+    font-size: 11pt;
     font-weight: 700;
     margin: 0;
     color: #111827;
+    line-height: 1.2;
   }
 
   .document-queue-print-meta {
-    font-size: 8.5pt;
+    font-size: 7pt;
     color: #4b5563;
-    margin: 2px 0 0;
+    margin: 1px 0 0;
+    line-height: 1.2;
   }
 
   .document-queue-print-timestamp {
     text-align: right;
-    font-size: 8pt;
+    font-size: 6.5pt;
     color: #6b7280;
+    line-height: 1.2;
   }
 
   .document-queue-print-timestamp small {
     display: block;
     text-transform: uppercase;
-    font-size: 6.5pt;
+    font-size: 5.5pt;
     font-weight: 600;
   }
 
@@ -616,36 +634,43 @@
   .document-queue-print-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 8.5pt;
+    font-size: 7.5pt;
+  }
+
+  .document-queue-print-table thead {
+    display: table-header-group;
   }
 
   .document-queue-print-table th {
     background-color: #f3f4f6 !important;
     color: #1f2937;
-    font-weight: 600;
+    font-weight: 700;
     text-align: left;
-    padding: 6px 8px;
+    padding: 3px 5px;
     border-top: 1px solid #d1d5db;
     border-bottom: 1.5px solid #9ca3af;
-    font-size: 7.5pt;
+    font-size: 6.5pt;
     text-transform: uppercase;
     letter-spacing: 0.03em;
+    line-height: 1.2;
   }
 
   .document-queue-print-table td {
-    padding: 6px 8px;
+    padding: 3px 5px;
     border-bottom: 1px solid #e5e7eb;
-    vertical-align: top;
+    vertical-align: middle;
     page-break-inside: avoid;
+    line-height: 1.2;
   }
 
   .document-queue-print-table tr:nth-child(even) td {
     background-color: #f9fafb !important;
   }
 
+  /* Coluna Check */
   .document-queue-print-table .th-check,
   .document-queue-print-table .td-check {
-    width: 32px;
+    width: 22px;
     text-align: center;
     padding-left: 2px;
     padding-right: 2px;
@@ -653,122 +678,171 @@
 
   .print-box {
     display: inline-block;
-    width: 14px;
-    height: 14px;
-    border: 1.5px solid #374151;
-    border-radius: 3px;
+    width: 11px;
+    height: 11px;
+    border: 1.2px solid #374151;
+    border-radius: 2px;
     background: #ffffff;
     vertical-align: middle;
   }
 
+  /* Coluna Paciente / Tutor */
   .document-queue-print-table .th-patient,
   .document-queue-print-table .td-patient {
-    width: 23%;
+    width: 28%;
   }
 
   .print-pet {
     display: block;
     font-weight: 700;
-    font-size: 9pt;
+    font-size: 8pt;
     color: #111827;
+    line-height: 1.2;
   }
 
   .print-tutor {
     display: block;
-    font-size: 7.5pt;
-    color: #4b5563;
-  }
-
-  .document-queue-print-table .th-exam,
-  .document-queue-print-table .td-exam {
-    width: 25%;
-  }
-
-  .print-exam {
-    display: block;
-    font-weight: 500;
-    font-size: 8.5pt;
-    color: #111827;
-  }
-
-  .print-date {
-    display: block;
-    font-size: 7.5pt;
-    color: #4b5563;
-  }
-
-  .document-queue-print-table .th-vet,
-  .document-queue-print-table .td-vet {
-    width: 20%;
-    font-size: 8pt;
-    font-weight: 500;
-    color: #1f2937;
-  }
-
-  .document-queue-print-table .th-pending,
-  .document-queue-print-table .td-pending {
-    width: 17%;
-  }
-
-  .print-stages {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    font-size: 7pt;
+    font-size: 6.5pt;
     color: #4b5563;
     line-height: 1.2;
   }
 
-  .print-stage-tag {
-    display: inline-block;
-    padding: 1px 4px;
-    border-radius: 3px;
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-    color: #6b7280;
+  /* Coluna Exame / Data */
+  .document-queue-print-table .th-exam,
+  .document-queue-print-table .td-exam {
+    width: 32%;
   }
 
-  .print-stage-tag.is-done {
+  .print-exam {
+    display: block;
+    font-weight: 600;
+    font-size: 7.5pt;
+    color: #111827;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .print-date {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 6.5pt;
+    color: #6b7280;
+    line-height: 1.2;
+    margin-top: 1px;
+  }
+
+  /* Coluna Responsável */
+  .document-queue-print-table .th-vet,
+  .document-queue-print-table .td-vet {
+    width: 22%;
+  }
+
+  .print-vet {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .print-avatar {
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #f3f4f6;
+    color: #065f46;
+    font-size: 7.5px;
+    border: 1px solid #d1d5db;
+  }
+
+  .print-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    object-fit: cover;
+  }
+
+  .print-vet-name {
+    font-size: 7pt;
+    color: #1f2937;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Coluna Etapas (apenas ícones) + SLA */
+  .document-queue-print-table .th-pending,
+  .document-queue-print-table .td-pending {
+    width: 18%;
+  }
+
+  .print-pending {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .print-stages {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .print-stage-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #9ca3af;
+  }
+
+  .print-stage-pill.is-done {
     background: #ecfdf5 !important;
     border-color: #a7f3d0 !important;
-    color: #065f46 !important;
-    font-weight: 600;
+    color: #047857 !important;
+  }
+
+  .print-stage-pill.needs-attention {
+    background: #fef2f2 !important;
+    border-color: #fecaca !important;
+    color: #b91c1c !important;
   }
 
   .print-sla {
-    display: block;
-    font-size: 7.5pt;
+    font-size: 6.5pt;
     font-weight: 600;
-    color: #b45309;
-    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+    color: #6b7280;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
-  .document-queue-print-table .th-notes,
-  .document-queue-print-table .td-notes {
-    width: 15%;
+  .print-sla.is-warning {
+    color: #b45309 !important;
   }
 
-  .print-notes-space {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 4px;
-  }
-
-  .print-notes-line {
-    display: block;
-    width: 100%;
-    border-bottom: 1px dotted #9ca3af;
-    height: 1px;
+  .print-sla.is-late {
+    color: #b91c1c !important;
   }
 
   .document-queue-print-footer {
     display: flex;
     justify-content: space-between;
-    margin-top: 14px;
-    padding-top: 6px;
+    margin-top: 6px;
+    padding-top: 4px;
     border-top: 1px solid #d1d5db;
-    font-size: 7pt;
+    font-size: 6pt;
     color: #6b7280;
   }
 }

@@ -37,3 +37,24 @@
 @media (prefers-reduced-motion: reduce) {
   .app-frame *, .app-frame *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+@media print {
+  .app-sidebar,
+  .app-mobile-header,
+  .app-section-tabs,
+  .app-bottom-nav,
+  .app-skip-link {
+    display: none !important;
+  }
+  .app-frame {
+    min-height: auto !important;
+  }
+  .app-main {
+    margin-left: 0 !important;
+    padding-bottom: 0 !important;
+    min-height: auto !important;
+  }
+  .app-content {
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+}

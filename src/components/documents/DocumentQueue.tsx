@@ -54,6 +54,20 @@ function parseDaysInGroup(doc: ExamDocument): number | null {
   return Math.floor(diffHours / 24)
 }
 
+function getDocumentStages(doc: ExamDocument, progress: ReturnType<typeof getExamDetailProgress>, iconSize: number) {
+  const origin = progress.originChannel === 'email'
+    ? { label: 'E-mail', description: 'Recebido por e-mail', icon: <Mail size={iconSize} /> }
+    : progress.originChannel === 'whatsapp'
+      ? { label: 'WhatsApp', description: 'Recebido pelo WhatsApp', icon: <WhatsappLogo size={iconSize} /> }
+      : { label: progress.originChannel === 'manual' ? 'Arquivo' : 'Origem', description: progress.originChannel === 'manual' ? 'Arquivo recebido manualmente' : 'Origem ainda não identificada', icon: <FileText size={iconSize} /> }
+  return [
+    { ...origin, done: progress.originReceived },
+    { label: 'Grupo', description: progress.groupSent ? 'Enviado ao grupo de WhatsApp' : 'Envio ao grupo ainda não confirmado', icon: <WhatsappLogo size={iconSize} />, done: progress.groupSent, attention: doc.group_status === 'failed' },
+    { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : 'Exame ainda não anexado ao cadastro', icon: <Link2 size={iconSize} />, done: progress.nexusLinked, attention: doc.nexus_status === 'failed' },
+    { label: 'Contato', description: progress.contactCompleted ? 'Contato com tutor concluído' : progress.contactedCount ? `Contato registrado em ${progress.contactedCount} de ${progress.itemCount} exames` : 'Contato com tutor pendente', icon: <Phone size={iconSize} />, done: progress.contactCompleted },
+  ]
+}
+
 function DocumentQueueRow({ doc }: { doc: ExamDocument }) {
   const progress = getExamDetailProgress(doc)
   const pet = field(doc, 'pet_name', 'Pet a identificar')
@@ -72,17 +86,7 @@ function DocumentQueueRow({ doc }: { doc: ExamDocument }) {
       attention = true
     }
   }
-  const origin = progress.originChannel === 'email'
-    ? { label: 'E-mail', description: 'Recebido por e-mail', icon: <Mail size={12} /> }
-    : progress.originChannel === 'whatsapp'
-      ? { label: 'WhatsApp', description: 'Recebido pelo WhatsApp', icon: <WhatsappLogo size={12} /> }
-      : { label: progress.originChannel === 'manual' ? 'Arquivo' : 'Origem', description: progress.originChannel === 'manual' ? 'Arquivo recebido manualmente' : 'Origem ainda não identificada', icon: <FileText size={12} /> }
-  const stages = [
-    { ...origin, done: progress.originReceived },
-    { label: 'Grupo', description: progress.groupSent ? 'Enviado ao grupo de WhatsApp' : 'Envio ao grupo ainda não confirmado', icon: <WhatsappLogo size={13} />, done: progress.groupSent, attention: doc.group_status === 'failed' },
-    { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : 'Exame ainda não anexado ao cadastro', icon: <Link2 size={13} />, done: progress.nexusLinked, attention: doc.nexus_status === 'failed' },
-    { label: 'Contato', description: progress.contactCompleted ? 'Contato com tutor concluído' : progress.contactedCount ? `Contato registrado em ${progress.contactedCount} de ${progress.itemCount} exames` : 'Contato com tutor pendente', icon: <Phone size={13} />, done: progress.contactCompleted },
-  ]
+  const stages = getDocumentStages(doc, progress, 13)
   return (
     <li className={`document-queue-item${overdue ? ' is-overdue' : ''}`}>
       <Link className="document-queue-row" to={`/novos-exames/${doc.id}?from=exames`} state={{ from: '/novos-exames' }}>
@@ -339,11 +343,10 @@ export function DocumentQueue({ documents, total, page, pageSize, loading, error
           <thead>
             <tr>
               <th className="th-check">Check</th>
-              <th className="th-patient">Paciente e Tutor</th>
-              <th className="th-exam">Exame e Data</th>
-              <th className="th-vet">Veterinário(a) Responsável</th>
-              <th className="th-pending">Pendências / SLA</th>
-              <th className="th-notes">Visto / Observações</th>
+              <th className="th-patient">Paciente / Tutor</th>
+              <th className="th-exam">Exame / Data</th>
+              <th className="th-vet">Responsável</th>
+              <th className="th-pending">Etapas / SLA</th>
             </tr>
           </thead>
           <tbody>
@@ -355,6 +358,7 @@ export function DocumentQueue({ documents, total, page, pageSize, loading, error
               const date = examDate(doc)
               const days = parseDaysInGroup(doc)
               const progress = getExamDetailProgress(doc)
+              const stages = getDocumentStages(doc, progress, 10)
               return (
                 <tr key={doc.id}>
                   <td className="td-check">
@@ -366,36 +370,41 @@ export function DocumentQueue({ documents, total, page, pageSize, loading, error
                   </td>
                   <td className="td-exam">
                     <span className="print-exam">{exam}</span>
-                    <span className="print-date">{date || 'Data a conferir'}</span>
+                    <span className="print-date">
+                      <CalendarDays size={8} aria-hidden="true" />
+                      {date || 'Data a conferir'}
+                    </span>
                   </td>
                   <td className="td-vet">
-                    <span>{responsible}</span>
+                    <div className="print-vet">
+                      <span className="print-avatar" aria-hidden="true">
+                        {doc.responsible_vet_id && doc.responsible_vet_avatar_url ? (
+                          <img src={doc.responsible_vet_avatar_url} alt="" />
+                        ) : (
+                          <UserRound size={9} />
+                        )}
+                      </span>
+                      <span className="print-vet-name">{responsible}</span>
+                    </div>
                   </td>
                   <td className="td-pending">
-                    <div className="print-stages">
-                      <span className={`print-stage-tag${progress.originReceived ? ' is-done' : ''}`}>
-                        {progress.originChannel === 'whatsapp' ? 'WhatsApp' : 'E-mail'} {progress.originReceived ? '✓' : '—'}
-                      </span>
-                      <span className={`print-stage-tag${progress.groupSent ? ' is-done' : ''}`}>
-                        Grupo {progress.groupSent ? '✓' : '—'}
-                      </span>
-                      <span className={`print-stage-tag${progress.nexusLinked ? ' is-done' : ''}`}>
-                        Cadastro {progress.nexusLinked ? '✓' : '—'}
-                      </span>
-                      <span className={`print-stage-tag${progress.contactCompleted ? ' is-done' : ''}`}>
-                        Contato {progress.contactCompleted ? '✓' : '—'}
-                      </span>
-                    </div>
-                    {days !== null && (
-                      <span className="print-sla">
-                        {days === 0 ? 'SLA: hoje' : `SLA: ${days}d`}
-                      </span>
-                    )}
-                  </td>
-                  <td className="td-notes">
-                    <div className="print-notes-space">
-                      <span className="print-notes-line" />
-                      <span className="print-notes-line" />
+                    <div className="print-pending">
+                      <div className="print-stages">
+                        {stages.map(stage => (
+                          <span
+                            key={stage.label}
+                            className={`print-stage-pill${stage.done ? ' is-done' : stage.attention ? ' needs-attention' : ''}`}
+                            title={stage.label}
+                          >
+                            {stage.icon}
+                          </span>
+                        ))}
+                      </div>
+                      {days !== null && (
+                        <span className={`print-sla${days >= 4 ? ' is-late' : days >= 2 ? ' is-warning' : ''}`}>
+                          {days === 0 ? 'hoje' : `${days}d`}
+                        </span>
+                      )}
                     </div>
                   </td>
                 </tr>
