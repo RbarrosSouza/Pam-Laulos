@@ -2,6 +2,12 @@
 
 Sistema de monitoramento de exames laboratoriais veterinários para a clínica PamVet. Centraliza o acompanhamento de exames desde o pedido até a entrega do resultado ao tutor.
 
+## Reação de contato no grupo — OP07
+
+O OP07 está ativo para colocar ✅ na mensagem original do exame quando todos os seus itens tiverem contato registrado no Pam Laudos. A reação usa uma fila separada e um corte de ativação; não edita a mensagem, reenvia o PDF ou confirma contato clínico.
+
+Em 18/10/2026, a migração 14 e o serviço Edge foram instalados, ainda com a função desabilitada. Os testes locais passaram, e um teste isolado no canal confirmou uma única reação na mensagem de fixture, sem registrar contato clínico. A ativação da rotina de um minuto e seu corte prospectivo ainda serão registrados no [runbook do OP07](docs/exames/reacao-contato-op07.md).
+
 ## Stack
 
 - **Frontend**: React 18 + TypeScript + Vite
