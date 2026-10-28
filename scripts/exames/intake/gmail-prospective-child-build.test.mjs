@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import crypto from 'node:crypto';import vm from 'node:vm';
 import {buildProspectiveGmailChild} from './gmail-prospective-child-build.mjs';
-import {inspectMessage,decodeOriginal,fail,object,stableId,unwrap,validateWindow,header,senderAddress} from '../operacional-runtime.mjs';
+import {inspectMessage,decodeOriginal,attachmentIntakeReceipt,fail,object,stableId,unwrap,validateWindow,header,senderAddress} from '../operacional-runtime.mjs';
 const cutoff='2026-10-28T10:00:00.000Z',collector='gmail_prospective_'+crypto.createHash('sha256').update(cutoff).digest('hex').slice(0,16);
 const oldCfg={enabled:true,mailbox:'synthetic@example.invalid',intakeCutoff:'2026-10-01T00:00:00.000Z',manualMessageId:'',includeSpamTrash:false};
 const legacy="if(cfg.manualMessageId&&$execution.mode!=='test')throw new Error('Seleção de mensagem só pode ser usada manualmente');";
@@ -12,8 +12,9 @@ const source=()=>({nodes:[node('Configuração','n8n-nodes-base.code',{jsCode:'c
   node('PDF ou aviso disponível','n8n-nodes-base.if'),
   node('Marcar mensagem excluída','n8n-nodes-base.code',{jsCode:'return [];'}),
   node('Registrar falha de origem','n8n-nodes-base.httpRequest',{jsonBody:'fixture'}),
+  node('Próximo anexo','n8n-nodes-base.code',{jsCode:attachmentIntakeReceipt.toString()+'\nreturn $input.all().map(item=>({json:attachmentIntakeReceipt(item.json,$(\'Um anexo por vez\').item.json)}));'}),
   node('Reconciliar reservas vencidas','n8n-nodes-base.httpRequest'),node('Gmail - conferir conta OAuth','n8n-nodes-base.httpRequest'),
-  node('agenda','n8n-nodes-base.scheduleTrigger'),node('manual','n8n-nodes-base.manualTrigger')],connections:{'Origem de link Hopelab':{main:[[],[]]},'PDF ou aviso disponível':{main:[[],[]]}},settings:{}});
+  node('agenda','n8n-nodes-base.scheduleTrigger'),node('manual','n8n-nodes-base.manualTrigger')],connections:{'Origem de link Hopelab':{main:[[],[]]},'PDF ou aviso disponível':{main:[[],[]]},'Validar bytes e SHA-256':{main:[[],[{node:'Registrar falha de origem',type:'main',index:0}]]}},settings:{}});
 
 test('child restricts to one prospective identity and excludes all independent triggers and global reconcile',async()=>{
   const child=buildProspectiveGmailChild(source(),cutoff,collector);assert.equal(child.active,false);
@@ -53,8 +54,8 @@ test('anonymous octet-stream and inline PDF require original bytes, matching par
   assert.equal(decoded.json.sha256,crypto.createHash('sha256').update(bytes).digest('hex'));
   const notPdf=Buffer.alloc(bytes.length,0);assert.throws(()=>decoder({data:notPdf.toString('base64url'),size:notPdf.length},{...origin,documentId:'fixture-document'},{...cfg,driveFolderId:'fixture-folder'}),/gmail_pdf_signature_missing/);
   const expression=child.nodes.find(n=>n.name==='Registrar falha de origem').parameters.jsonBody;
-  const evaluate=error=>new vm.Script(expression.slice(3,-3).trim()).runInNewContext({$json:{error:{message:error}},$:()=>({item:{json:{documentId:'fixture-document'}}})});
-  const signatureError=evaluate('gmail_pdf_signature_missing');assert.match(signatureError.payload.review_reason,/assinatura PDF/);
+  const evaluate=code=>new vm.Script(expression.slice(3,-3).trim()).runInNewContext({$json:{originFailureCode:code},$:()=>({item:{json:{documentId:'fixture-document'}}})});
+  const signatureError=evaluate('invalid_pdf_signature');assert.match(signatureError.payload.review_reason,/assinatura PDF/);
   assert(!JSON.stringify(evaluate('provider-secret-text')).includes('provider-secret-text'));
 });
 
@@ -72,4 +73,25 @@ test('actual child selector sends only the fourth pending part to reservation am
   assert(!selected.some(item=>['0','1','2'].includes(item.json.source.metadata.gmail_part_id)));
   const missing=await select.runInNewContext({$input:{all:()=>all},$:()=>({first:()=>({json:{bridgeTargets:[{kind:'gmail_part',part_id:'missing'}]}})})});
   assert.equal(missing[0].json.messageExcluded,true);assert.equal(missing[0].json.reason,'target_attachment_not_found');
+});
+
+test('a proven signature failure stays bound to its exact part through the child receipt',async()=>{
+  const child=buildProspectiveGmailChild(source(),cutoff,collector);
+  const code=name=>new vm.Script('(async()=>{'+child.nodes.find(n=>n.name===name).parameters.jsCode+'})()');
+  const origin={message:{id:'abcdef01'},source:{message_id:'abcdef01',attachment_id:'gmail-part:["3","locator"]'},messageAttachmentCount:1};
+  const identify=code('Identificar falha exata de origem'), preserve=code('Preservar falha exata para recibo'), receipt=code('Próximo anexo');
+  const find=async error=>(await identify.runInNewContext({$json:{error},$:()=>({item:{json:origin}})}))[0].json;
+  const found=await find('gmail_pdf_signature_missing [line 3]');
+  assert.equal(found.originFailureCode,'invalid_pdf_signature');
+  assert.equal((await find({message:'gmail_pdf_signature_missing'})).originFailureCode,'invalid_pdf_signature');
+  assert.equal((await find({message:'gmail_pdf_signature_missing [line 12]'})).originFailureCode,'invalid_pdf_signature');
+  assert.equal((await find('x gmail_pdf_signature_missing [line 3]')).originFailureCode,null);
+  assert.equal((await find('gmail_pdf_signature_missing [line 3] extra')).originFailureCode,null);
+  const kept=(await preserve.runInNewContext({$:name=>({item:{json:name==='Um anexo por vez'?origin:found}})}))[0].json;
+  const result=(await receipt.runInNewContext({object,fail,$input:{all:()=>[{json:kept}]},$:()=>({item:{json:origin}})}))[0].json;
+  assert.equal(result.attachment_id,origin.source.attachment_id);assert.equal(result.reason,'invalid_pdf_signature');assert.equal(result.disposition,'pending');
+  const mismatch=(await preserve.runInNewContext({$:name=>({item:{json:name==='Um anexo por vez'?{...origin,source:{...origin.source,attachment_id:'other'}}:found}})}))[0].json;
+  assert.equal(mismatch.failureReason,null);
+  const generic=await find('arbitrary provider failure');
+  assert.equal(generic.originFailureCode,null);
 });

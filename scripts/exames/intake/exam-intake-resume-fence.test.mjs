@@ -149,7 +149,7 @@ test('runtime recovers a committed finish whose ACK was lost by replaying real f
   let state=loadAuditState([],cfg,'finish-original',now),context,finishResult;
   for(let guard=0;guard<20;guard++) {
     context=nextAuditOperation(state,cfg,Date.now());
-    const body=context.target==='gmail'?{messages:[]}:await invoke(context);
+    const body=context.target==='gmail'?{messages:[],resultSizeEstimate:0}:await invoke(context);
     if(context.action==='intake_finish') {finishResult=body;break;}
     state=applyAuditResponse(context,{statusCode:200,body},cfg,Date.now());
   }

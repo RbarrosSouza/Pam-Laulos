@@ -154,6 +154,17 @@ test('empty Gmail page requires explicit zero estimate and 204 never means a ver
   assert.equal(failed.phase,'gmail_list');assert.equal(failed.halt,true);
 });
 
+test('known PDF signature failure is bound to the stable part, including a changed Gmail locator',()=>{
+  const config={...cfg,captureAttachmentDetails:true};
+  const initial=loadAuditState([],config,'fixture-bad-pdf',now);
+  const state={...initial,phase:'bridge',bridgeMode:'new',bridgeMessageId:'abcdef01',bridgeJob:{origins:[{attachment_id:'gmail-part:["3","old"]'}],lookupItems:[{status:'not_found'}],unsupportedIds:[]}};
+  const op=nextAuditOperation(state,config,now);
+  const updated=applyAuditResponse(op,ok({completed:false,issues:[{message_id:'abcdef01',attachment_id:'gmail-part:["3","new"]',reason:'invalid_pdf_signature'}]}),config,now);
+  assert.equal(updated.lookupJobs[0].bridgeIssues[0].code,'invalid_pdf_signature');
+  const other=applyAuditResponse(op,ok({completed:false,issues:[{message_id:'abcdef01',attachment_id:'gmail-part:["2","new"]',reason:'invalid_pdf_signature'}]}),config,now);
+  assert.equal(other.lookupJobs[0].bridgeIssues[0].code,'source_retry_unconfirmed');
+});
+
 test('rechecking unknown origins leaves them pending, rejects forged page/ack, and repeats complete UUID passes', () => {
   const config = { ...cfg, recheckPending: true };
   const receipt = '10000000-0000-4000-a000-000000000001';

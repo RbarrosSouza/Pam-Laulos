@@ -65,3 +65,13 @@ test('a real attachment without metadata shows an honest fallback',()=>{
  const item={...row,row_kind:'receipt',row_id:'22222222-2222-4222-8222-222222222222',document_id:null,position:null,sender:null,original_name:null,pet_name:null,client_name:null,exam_type:null,issue_kind:'processing',status:'overdue',reason:'source_reservation_unproven'};
  assert(view.isExamFailures(fixture({rows:[item]})));const html=render({data:fixture({rows:[item]})});assert.match(html,/Arquivo sem nome/);assert(!html.includes('anexo null'));
 });
+
+test('Outlook receipt reasons are presented clearly',()=>{
+ const pending={...row,row_kind:'receipt',row_id:'22222222-2222-4222-8222-222222222222',document_id:null,position:1,sender:null,original_name:null,pet_name:null,client_name:null,exam_type:null,issue_kind:'processing',status:'overdue'};
+ for(const [code,label] of Object.entries({outlook_child_unconfirmed:'Processamento precisa de confirmação',outlook_attachment_or_reservation_failed:'Não foi possível obter ou registrar o arquivo',outlook_non_pdf_review:'Formato do arquivo precisa de conferência',outlook_attachment_metadata_invalid:'Dados do anexo precisam de conferência',outlook_attachment_format_review:'Formato do arquivo precisa de conferência'})){const html=render({data:fixture({rows:[{...pending,reason:code}]})});assert(html.includes(label));}
+});
+
+test('missing PDF signature is described without inferring corruption',()=>{
+ const pending={...row,row_kind:'receipt',row_id:'22222222-2222-4222-8222-222222222222',document_id:null,position:4,sender:null,original_name:null,pet_name:null,client_name:null,exam_type:null,issue_kind:'processing',status:'failed',reason:'invalid_pdf_signature'};
+ const html=render({data:fixture({rows:[pending]})});assert.match(html,/Arquivo sem assinatura PDF válida/);assert(!html.includes('corrompido'));
+});

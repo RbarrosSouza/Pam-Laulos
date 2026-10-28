@@ -40,7 +40,7 @@ if(request.collector_id!==${JSON.stringify(collectorId)}||request.account_id!==$
   swap(validation,'!source.attachment?.gmailAttachmentId', '(!source.attachment?.gmailAttachmentId && source.attachment?.partId===undefined)');
   // Do not persist arbitrary provider error text or invent a clinical diagnosis.
   // Preserve the one known signature failure explicitly for this origin.
-  node('Registrar falha de origem').parameters.jsonBody=`={{ (()=>{const msg=String($json.error?.message||'');const signature=msg.includes('gmail_pdf_signature_missing');return {action:'source_error',payload:{document_id:$('Decidir recebimento').item.json.documentId,error:signature?'Arquivo sem assinatura PDF comprovada':'Não foi possível preservar o original Gmail/Drive',review_reason:signature?'Arquivo sem assinatura PDF; conferir o original':'Conferir o anexo original e a pendência de armazenamento'}};})() }}`;
+  node('Registrar falha de origem').parameters.jsonBody=`={{ (()=>{const signature=$json.originFailureCode==='invalid_pdf_signature';return {action:'source_error',payload:{document_id:$('Decidir recebimento').item.json.documentId,error:signature?'Arquivo sem assinatura PDF comprovada':'Não foi possível preservar o original Gmail/Drive',review_reason:signature?'Arquivo sem assinatura PDF; conferir o original':'Conferir o anexo original e a pendência de armazenamento'}};})() }}`;
   const template=node('Gmail - MIME sem bytes'), inlineHttp=structuredClone(template);
   inlineHttp.id=crypto.randomUUID();inlineHttp.name='Gmail - obter bytes inline exatos';inlineHttp.position=[0,0];inlineHttp.onError='continueErrorOutput';
   const fields=depth=>{const one=n=>'partId,mimeType,filename,body(attachmentId,size,data)'+(n?',parts('+one(n-1)+')':',parts(partId)');return 'id,payload('+one(depth)+')';};
@@ -73,6 +73,25 @@ return selected.map(item=>({json:{...item.json,messageAttachmentCount:selected.l
   connections[selectCode.name]={main:[[{node:selectedIf.name,type:'main',index:0}],[{node:'Marcar falha da mensagem',type:'main',index:0}]]};
   connections[selectedIf.name]={main:[[{node:'Um anexo por vez',type:'main',index:0}],[{node:'Marcar mensagem excluída',type:'main',index:0}]]};
   node('Marcar mensagem excluída').parameters.jsCode="const reason=$json.reason||'outside_window_or_no_pdf_no_exam_hint';return [{json:{intakeReceipt:true,kind:'message',message_id:$('Mensagem disponível').item.json.id,disposition:reason==='target_attachment_not_found'?'failed':'excluded',reason}}];";
+  // Preserve only the known signature failure across source_error's HTTP node.
+  // Pair it with this exact origin; arbitrary provider errors remain generic.
+  const identifyFailure={id:crypto.randomUUID(),name:'Identificar falha exata de origem',type:'n8n-nodes-base.code',typeVersion:2,position:[0,0],parameters:{jsCode:`
+const origin=$('Um anexo por vez').item.json,source=origin?.source;
+if(!source||typeof source.attachment_id!=='string'||typeof origin.message?.id!=='string')throw new Error('FAILURE_ORIGIN_UNPROVEN');
+const error=typeof $json.error==='string'?$json.error:typeof $json.error?.message==='string'?$json.error.message:'';
+const signature=/^gmail_pdf_signature_missing(?:\\s+\\[line \\d+\\])?$/.test(error);
+return [{json:{...$json,originFailureCode:signature?'invalid_pdf_signature':null,originFailureAttachmentId:source.attachment_id,originFailureMessageId:origin.message.id}}];`}};
+  const preserveFailure={id:crypto.randomUUID(),name:'Preservar falha exata para recibo',type:'n8n-nodes-base.code',typeVersion:2,position:[0,0],parameters:{jsCode:`
+const failure=$('Identificar falha exata de origem').item.json,origin=$('Um anexo por vez').item.json;
+const proven=failure?.originFailureAttachmentId===origin?.source?.attachment_id&&failure?.originFailureMessageId===origin?.message?.id;
+return [{json:{pending:true,recovery:'next_scan_same_source',failureReason:proven&&failure.originFailureCode==='invalid_pdf_signature'?'invalid_pdf_signature':null}}];`}};
+  for(const [name,connection] of Object.entries(connections))if(name!=='Registrar falha de origem')for(const outputs of connection.main||[])for(const edge of outputs||[])if(edge.node==='Registrar falha de origem')edge.node=identifyFailure.name;
+  nodes.push(identifyFailure,preserveFailure);
+  connections[identifyFailure.name]={main:[[{node:'Registrar falha de origem',type:'main',index:0}]]};
+  connections['Registrar falha de origem']={main:[[{node:preserveFailure.name,type:'main',index:0}],[{node:preserveFailure.name,type:'main',index:0}]]};
+  connections[preserveFailure.name]={main:[[{node:'Próximo anexo',type:'main',index:0}]]};
+  swap(node('Próximo anexo'),"reason = origin.missing === true ? origin.pendingReason || 'original_metadata_pending' : 'original_storage_pending';",
+    "reason = origin.missing === true ? origin.pendingReason || 'original_metadata_pending' : result.failureReason === 'invalid_pdf_signature' ? 'invalid_pdf_signature' : 'original_storage_pending';");
   // Trigger only from the parent; no schedule, webhook, manual path, or global reconcile.
   const remove=new Set(nodes.filter(n=>n.type.endsWith('.scheduleTrigger')||n.type.endsWith('.manualTrigger')||n.name==='Reconciliar reservas vencidas').map(n=>n.name));
   const filtered=nodes.filter(n=>!remove.has(n.name));for(const name of remove)delete connections[name];

@@ -150,7 +150,7 @@ function auditBridgeTargets(origins,items,unsupportedIds=[]) {
   return [...unique.values()];
 }
 function auditBridgeIssues(context,response) {
-  const codes=new Set(['source_reservation_unproven','original_storage_pending','intake_receipt_unproven','target_attachment_not_found','source_retry_unconfirmed']);
+  const codes=new Set(['source_reservation_unproven','original_storage_pending','intake_receipt_unproven','target_attachment_not_found','source_retry_unconfirmed','invalid_pdf_signature']);
   const provided=Array.isArray(response?.body?.issues)?response.body.issues.slice(0,200):[],out=[];
   for(const target of context.payload.targets){
     const issue=provided.find(item=>item&&item.message_id===context.payload.message_id&&codes.has(item.reason)
