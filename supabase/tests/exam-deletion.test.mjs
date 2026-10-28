@@ -28,6 +28,7 @@ try {
   await db.exec(await readFile(new URL('20261028000040_exam_document_deletion.sql',migrations),'utf8'));
   await db.exec('CREATE TABLE public.exam_document_reaction(document_id uuid REFERENCES public.exam_document(id)); GRANT ALL ON public.exam_document_reaction TO service_role');
   await db.exec(await readFile(new URL('20261028000041_exam_delete_after_group.sql',migrations),'utf8'));
+  await db.exec(await readFile(new URL('20261028000042_exam_delete_empty_aliases.sql',migrations),'utf8'));
   await db.query('INSERT INTO auth.users(id) VALUES($1)',[actor]);await db.query("INSERT INTO exam_document_member(user_id,role) VALUES($1,'vet')",[actor]);
   await role('service_role');
   await db.query("UPDATE exam_document_configuration SET ingestion_enabled=true");
@@ -39,13 +40,19 @@ try {
   const withReaction=(await rpc('reserve_exam_document_source',[JSON.stringify({channel:'manual',account_id:'account',message_id:'reaction',attachment_id:'d',original_name:'test.pdf'})])).document_id;
   await db.query('INSERT INTO exam_document_reaction(document_id) VALUES($1)',[withReaction]);
   await assert.rejects(rpc('begin_exam_document_deletion',[withReaction,1,actor,'DELETAR']),/reação de contato/);
+  const alias=(await one("INSERT INTO exam_document(original_name,canonical_document_id) VALUES('duplicate.pdf',$1) RETURNING id",[sent])).id;
   const sentVersion=(await one('SELECT version FROM exam_document WHERE id=$1',[sent])).version;
   assert.equal((await rpc('begin_exam_document_deletion',[sent,sentVersion,actor,'DELETAR'])).state,'deleting');
   assert.equal((await rpc('finish_exam_document_deletion',[sent,actor,'DELETAR'])).state,'deleted');
+  assert.equal((await one('SELECT deletion_state FROM exam_document WHERE id=$1',[alias])).deletion_state,'deleted');
+  assert.equal((await one('SELECT original_name FROM exam_document WHERE id=$1',[alias])).original_name,'Ficha excluída');
   await assert.rejects(db.query('INSERT INTO exam_document_reaction(document_id) VALUES($1)',[sent]),/Ficha em exclusão/);
   const linked=(await rpc('reserve_exam_document_source',[JSON.stringify({channel:'manual',account_id:'account',message_id:'linked',attachment_id:'b',original_name:'linked.pdf'})])).document_id;
   await db.query("INSERT INTO exam_document(original_name,previous_document_id) VALUES('version.pdf',$1)",[linked]);
   await assert.rejects(rpc('begin_exam_document_deletion',[linked,1,actor,'DELETAR']),/outra versão/);
+  const unsafeAlias=(await rpc('reserve_exam_document_source',[JSON.stringify({channel:'manual',account_id:'account',message_id:'unsafe-alias',attachment_id:'e',original_name:'test.pdf'})])).document_id;
+  await db.query("INSERT INTO exam_document(original_name,canonical_document_id,extracted_data) VALUES('own-data.pdf',$1,'{\"pet_name\":\"test\"}')",[unsafeAlias]);
+  await assert.rejects(rpc('begin_exam_document_deletion',[unsafeAlias,1,actor,'DELETAR']),/dados próprios/);
   const input={channel:'email',account_id:'account',message_id:'message',attachment_id:'attachment',original_name:'boleto.pdf',metadata:{subject:'private'}};
   const reserved=await rpc('reserve_exam_document_source',[JSON.stringify(input)]),id=reserved.document_id;
   const source=(await one('SELECT id FROM exam_document_source WHERE document_id=$1',[id])).id;
