@@ -51,10 +51,11 @@ test('the actual Dashboard inserts the new section before its existing queues an
   sonner:{toast:{success:()=>{}}},'@/hooks/useExamDocuments':{useExamDocuments:()=>query,useDocumentAction:()=>({mutateAsync:async()=>{writeCount++}})},
   '@/hooks/useExamCards':{useExamCards:()=>({...query,data:[]})},'@/lib/document-status':{documentLabel:()=>'',documentIsOverdue:()=>false},'@/lib/fireworks':{triggerFireworksAt:()=>{}},'./cockpit.css':{},
  });
- const {HomeIntakeIssues}=load('src/components/dashboard/HomeIntakeIssues.tsx',{'@/hooks/useIntakePanel':{useIntakePanel:()=>({data:intakePreviewFixture('pending'),isPending:false,isError:false,isFetching:false,refetch:async()=>{}})},'./HomeIntakeIssuesView':{HomeIntakeIssuesView}});
+ const examView=load('src/components/intake/ExamFailuresView.tsx',{'./IntakeReceiptsView':intake});
+ const {HomeIntakeIssues}=load('src/components/dashboard/HomeIntakeIssues.tsx',{'@/hooks/useExamIntakeFailures':{useExamIntakeFailures:()=>({data:{contract:'exam_intake_exam_failures_v1',as_of:new Date().toISOString(),attention_cutoff:'2026-10-28T12:00:00Z',coverage_status:'unproven',channels:[{provider:'gmail',activity:'recent',last_checked:new Date().toISOString()},{provider:'outlook',activity:'not_configured',last_checked:null},{provider:'chatwoot',activity:'not_configured',last_checked:null}],total:0,has_more:false,next_cursor:null,rows:[],unclassified_receipts_total:0,unclassified_documents_total:0},isPending:false,isError:false,isFetching:false,refetch:async()=>{}})},'@/components/intake/ExamFailuresView':examView});
  const {Dashboard}=load('src/pages/Dashboard.tsx',{'framer-motion':{AnimatePresence:Fragment},'@/components/dashboard/CockpitDashboard':{CockpitDashboard},'@/components/dashboard/HomeIntakeIssues':{HomeIntakeIssues},'@/components/tracking/TrackingDetail':{TrackingDetail:()=>null},'@/hooks/useRealtimeExams':{useRealtimeExams:()=>{realtime++}}});
  const html=renderToStaticMarkup(createElement(Dashboard));
- const order=['Início','Falhas e pendências','Filtros de pendências','Falta contato','Falta cadastro','Falta grupo','Aguardando lab','Falta entrar em contato'].map(text=>html.indexOf(text));
+ const order=['Início','Exames que precisam de atenção','Filtros de pendências','Falta contato','Falta cadastro','Falta grupo','Aguardando lab','Falta entrar em contato'].map(text=>html.indexOf(text));
  for(let i=0;i<order.length;i++){assert(order[i]>=0);if(i)assert(order[i]>order[i-1]);}
  assert.equal(realtime,1);assert.equal(writeCount,0);
 });

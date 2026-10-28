@@ -1,6 +1,6 @@
-import {useIntakePanel} from '@/hooks/useIntakePanel'
-import {HomeIntakeIssuesView} from './HomeIntakeIssuesView'
+import {useExamIntakeFailures} from '@/hooks/useExamIntakeFailures'
+import {ExamFailuresView} from '@/components/intake/ExamFailuresView'
 export function HomeIntakeIssues(){
-  const query=useIntakePanel()
-  return <HomeIntakeIssuesView data={query.data} loading={query.isPending} error={query.isError} refreshing={query.isFetching} now={query.now} paused={query.snapshotPaused} onRefresh={()=>void query.refetch()}/>
+  const query=useExamIntakeFailures()
+  return <ExamFailuresView compact data={query.data} loading={query.isPending} error={query.isError} refreshing={query.isFetching} paused={query.fetchStatus==='paused'} onRefresh={()=>void query.refetch()}/>
 }
