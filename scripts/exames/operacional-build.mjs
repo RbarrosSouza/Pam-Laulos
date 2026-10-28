@@ -37,6 +37,8 @@ function applyHopelabIntake(workflow){
   if(existing)Object.assign(existing,{parameters,...extra});else workflow.nodes.push({id,name,type:'n8n-nodes-base.'+type,typeVersion,position,parameters,...extra});
  };
  const condition=expression=>{const parameters=clone(node('Precisa baixar').parameters);parameters.conditions.conditions[0].leftValue=expression;return parameters;};
+ node('Decidir recebimento').parameters.jsCode=bundle(['fail','object','decideReservation'])+"return [{json:decideReservation($('Um anexo por vez').item.json,$json)}];";
+ node('Adiar sweep quando upload pendente').parameters.jsCode="return [{json:{pending:$json.excluded===true?false:$json.document?.file_status!=='saved',excluded:$json.excluded===true,document_id:$json.document_id}}];";
  const connect=(from,outputs)=>{workflow.connections[from]={main:outputs.map(names=>names.map(name=>({node:name,type:'main',index:0})))};};
  node('Janela de recebimento').parameters.jsCode=bundle(['fail','validateWindow','listQuery'])+"const cfg=$json;const window={...cfg,windowStart:cfg.intakeCutoff,sweepEnd:new Date().toISOString()};return [{json:{...window,listQuery:listQuery(window)}}];";
  node('Enumerar anexos e ausência').parameters.jsCode=bundle([...base,'inspectMessage','inspectHopelabNotice'])+"const cfg=$('Janela de recebimento').first().json;const expectedId=$('Mensagem disponível').item.json.id;const notice=inspectHopelabNotice($json,expectedId,cfg);if(notice)return [{json:{hopelabNotice:notice}}];const result=inspectMessage($json,expectedId,cfg);return result.excluded?[{json:{messageExcluded:true}}]:result.origins.map(json=>({json:{...json,resetAttachments:true}}));";

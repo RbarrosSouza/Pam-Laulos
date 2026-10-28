@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, FileText, History, Link2, Loader2, Mail, MoreVertical, Phone, Settings2, UserRound, UserRoundPlus } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Copy, FileText, History, Link2, Loader2, Mail, MoreVertical, Phone, Settings2, Trash2, UserRound, UserRoundPlus } from 'lucide-react'
 import { WhatsappLogo } from '@phosphor-icons/react/dist/csr/WhatsappLogo'
 import { toast } from 'sonner'
 import { useExamAuth } from '@/contexts/exam-auth'
 import { useDocumentAction, useExamDocument } from '@/hooks/useExamDocuments'
 import { useVets, type Vet } from '@/hooks/useVets'
 import { DocumentCorrection, DocumentGroupConfirmation, DocumentProvenance } from '@/components/documents/DocumentControls'
+import { DocumentDelete } from '@/components/documents/DocumentDelete'
 import { DocumentForm, DocumentHistory, DocumentPreview, DocumentSteps } from '@/components/documents/ExamDocumentPanels'
 import { ExamDetailSheet } from '@/components/documents/ExamDetailSheet'
 import { DocumentVersionReview } from '@/components/documents/DocumentVersionReview'
@@ -20,10 +21,10 @@ import '@fontsource/dm-sans/latin-500.css'
 import '@fontsource/dm-sans/latin-600.css'
 import './exam-document-detail.css'
 
-type Panel = 'responsible' | 'contact' | 'patient' | 'pdf' | 'more' | 'identity' | 'steps' | 'history' | 'success' | null
+type Panel = 'responsible' | 'contact' | 'patient' | 'pdf' | 'more' | 'identity' | 'steps' | 'history' | 'success' | 'delete' | null
 const panelTitles: Record<Exclude<Panel, null>, string> = {
   responsible: 'Responsável pelo exame', contact: 'Contato com o tutor', patient: 'Adicionar exame ao cadastro',
-  pdf: 'PDF do exame', more: 'Opções do exame', identity: 'Dados do exame', steps: 'Etapas e pendências', history: 'Histórico do exame', success: 'Contato registrado',
+  delete: 'Excluir ficha', pdf: 'PDF do exame', more: 'Opções do exame', identity: 'Dados do exame', steps: 'Etapas e pendências', history: 'Histórico do exame', success: 'Contato registrado',
 }
 function displayDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value)
@@ -44,6 +45,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
 
   const initialPanel = (searchParams.get('panel') as Panel) || null
   const [panel, setPanel] = useState<Panel>(initialPanel)
+  const [deleting, setDeleting] = useState(false)
   const [savingVetId, setSavingVetId] = useState<string | null>(null)
   const [justCompleted, setJustCompleted] = useState(false)
   const [isCelebrating, setIsCelebrating] = useState(false)
@@ -234,7 +236,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
       </main>
       <footer className="exam-detail-footer"><button className="exam-detail-primary" onClick={() => setPanel('patient')}><UserRoundPlus size={25} /><span>{progress.nexusLinked ? 'Ver exame no cadastro' : doc.pet_id ? 'Acompanhar cadastro' : 'Adicionar exame ao cadastro'}</span><ChevronRight size={21} /></button></footer>
     </div>
-    <ExamDetailSheet open={panel !== null} onOpenChange={open => { if (!open) close() }} title={panel ? panelTitles[panel] : ''} wide={panel === 'pdf'} centered={panel === 'success'}>
+    <ExamDetailSheet open={panel !== null} onOpenChange={open => { if (!open && !deleting) close() }} title={panel ? panelTitles[panel] : ''} wide={panel === 'pdf'} centered={panel === 'success'}>
       {panel === 'responsible' && <div className="exam-detail-team">
         {doc.responsible_vet_source === 'conflict' && !doc.responsible_vet_id && <p className="exam-detail-hint">Responsável a conferir. Selecione uma veterinária da equipe.</p>}
         {vets.isLoading ? <p className="exam-detail-hint flex items-center gap-2" role="status"><Loader2 size={20} className="animate-spin" />Carregando equipe…</p> : vets.error ? <div role="alert"><p className="exam-detail-hint">Não foi possível carregar a equipe.</p><button className="exam-detail-primary" onClick={() => void vets.refetch()}>Tentar novamente</button></div> : !vets.data?.length ? <p className="exam-detail-hint" role="status">Nenhuma veterinária ativa disponível.</p> : <ul className="exam-detail-team-list" aria-label="Veterinárias ativas">{vets.data.map(vet => {
@@ -267,9 +269,11 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
         <button onClick={() => setPanel('steps')}><Link2 size={21} />Etapas e pendências<ChevronRight size={18} /></button>
         <button onClick={() => setPanel('history')}><History size={21} />Histórico e origem<ChevronRight size={18} /></button>
         <button onClick={() => void copyLink()}><Copy size={21} />Copiar link do exame</button>
+        <button className="exam-detail-delete-option" onClick={() => setPanel('delete')}><Trash2 size={21} />Excluir ficha<ChevronRight size={18} /></button>
         <details><summary>Versão corrigida</summary>{doc.previous_document_id ? <p>Original preservado: <Link to={`/novos-exames/${doc.previous_document_id}`} onClick={close}>{documentDisplayId(doc.previous_document_id)}</Link></p> : <DocumentCorrection doc={doc} />}</details>
         <p className="exam-detail-reference">{documentDisplayId(doc.id)} · recebido em {new Date(doc.received_at).toLocaleString('pt-BR')}</p>
       </div>}
+      {panel === 'delete' && <DocumentDelete doc={doc} backTarget={backTarget} onCancel={() => setPanel('more')} onPendingChange={setDeleting} />}
       {panel === 'success' && <div className="exam-detail-success" role="status"><span className="exam-detail-success-mark"><Check size={42} strokeWidth={2.5} /></span><h3>{isContactDone ? 'Contato concluído' : 'Contato registrado'}</h3><p>{doc.completed ? 'Todas as etapas deste exame estão concluídas.' : progress.contactCompleted ? 'O contato com o tutor foi registrado. Acompanhe as etapas restantes na tela do exame.' : 'O contato foi salvo para os itens selecionados. Acompanhe o andamento na tela do exame.'}</p><button className="exam-detail-primary" onClick={close}>Voltar ao exame<Check size={20} /></button></div>}
     </ExamDetailSheet>
   </div>
