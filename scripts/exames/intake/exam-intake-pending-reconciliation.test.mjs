@@ -44,4 +44,3 @@ test('mismatched identity, non-saved and excluded cannot become saved',async()=>
  await db.query("UPDATE exam_intake_receipt SET disposition='excluded' WHERE id=$1",[second]);await assert.rejects(resolve(second),/identity not proven|Excluded/);
  assert.equal((await one('SELECT disposition FROM exam_intake_receipt WHERE id=$1',[second])).disposition,'excluded');
 });
-
