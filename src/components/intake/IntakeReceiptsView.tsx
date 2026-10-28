@@ -1,0 +1,120 @@
+type Sweep = { id:string; mode:string; status:string; received_from:string; received_through:string; finished_at:string|null; coverageComplete:boolean|null; allPreserved:boolean|null; scanFinished:boolean|null; counts:Record<string,number>|null }
+type Collector = { collector_id:string; provider:string; monitored:boolean; heartbeat_at:string; progress_at:string; stale_after_seconds:number; last_success_at:string|null; latest_sweep:Sweep|null; checkpoint:{received_through:string|null; revision:number} }
+type Row = { id?:string; collector_id?:string|null; document_id?:string|null; original_name?:string; message_id?:string; attachment_id?:string; received_at?:string|null; last_seen_at?:string; first_seen_at?:string; created_at?:string; disposition?:string; status?:string; group_status?:string; reason?:string; reason_code?:string; hold_reason?:string|null; state?:string; stage?:string; code?:string }
+type Historical = { cutoff:string|null; pre_cutoff_entries_without_document_total:number; pre_cutoff_entries_without_document_has_more:boolean; pre_cutoff_entries_without_document:Row[]; pre_cutoff_unresolved_origin_total:number; pre_cutoff_unresolved_origins_has_more:boolean; pre_cutoff_unresolved_origins:Row[]; pre_cutoff_saved_without_group_total:number; pre_cutoff_saved_without_group_has_more:boolean; pre_cutoff_saved_without_group:Row[] }
+export type IntakePanel = {
+  contract:'exam_intake_panel_v2'; as_of:string; collectors:Collector[];
+  summary:{ notification_cutoff:string|null; cutoff_configured:boolean; entries_without_document_total:number; unresolved_origin_total:number; saved_without_group_total:number; group_uncertain_total:number; pending_alert_total:number; version_hold_total:number; received_at_unknown_total:number };
+  entries_without_document_total:number; entries_without_document_has_more:boolean; entries_without_document:Row[];
+  unresolved_origin_total:number; unresolved_origins_has_more:boolean; unresolved_origins:Row[];
+  saved_without_group_total:number; saved_without_group_has_more:boolean; saved_without_group:Row[];
+  group_uncertain_total:number; group_uncertain_has_more:boolean; group_uncertain:Row[];
+  pending_alert_total:number; pending_alert_has_more:boolean; pending_alerts:Row[];
+  version_hold_total:number; version_hold_has_more:boolean; version_holds:Row[];
+  historical:Historical; incident_total:number; incident_has_more:boolean; incidents:Row[]; receipt_total:number; receipt_has_more:boolean; receipts:Row[]; alerts:Row[];
+}
+const queueFields = [
+  ['entries_without_document','entries_without_document_total','entries_without_document_has_more'],
+  ['unresolved_origins','unresolved_origin_total','unresolved_origins_has_more'],
+  ['saved_without_group','saved_without_group_total','saved_without_group_has_more'],
+  ['group_uncertain','group_uncertain_total','group_uncertain_has_more'],
+  ['pending_alerts','pending_alert_total','pending_alert_has_more'],
+  ['version_holds','version_hold_total','version_hold_has_more'],
+  ['incidents','incident_total','incident_has_more'],['receipts','receipt_total','receipt_has_more'],
+] as const
+const object = (v:unknown):v is Record<string,unknown> => !!v&&typeof v==='object'&&!Array.isArray(v)
+const count = (v:unknown):v is number => typeof v==='number'&&Number.isSafeInteger(v)&&v>=0
+const rows = (v:unknown):v is Row[] => Array.isArray(v)&&v.every(object)
+const nullableDate = (v:unknown) => v===null||(typeof v==='string'&&Number.isFinite(Date.parse(v)))
+export function isIntakePanel(v:unknown):v is IntakePanel {
+  if(!object(v)||v.contract!=='exam_intake_panel_v2'||typeof v.as_of!=='string'||!Number.isFinite(Date.parse(v.as_of))||!object(v.summary)||!object(v.historical)||!Array.isArray(v.collectors))return false
+  for(const [list,total,more] of queueFields){if(!rows(v[list])||!count(v[total])||typeof v[more]!=='boolean'||v[list].length>v[total]||(v[more]===false&&v[list].length!==v[total]))return false}
+  for(const [,total] of queueFields.slice(0,6))if(v.summary[total]!==v[total])return false
+  if(!rows(v.alerts)||typeof v.summary.cutoff_configured!=='boolean'||!nullableDate(v.summary.notification_cutoff)||!count(v.summary.received_at_unknown_total))return false
+  for(const c of v.collectors){
+    if(!object(c)||typeof c.collector_id!=='string'||typeof c.provider!=='string'||typeof c.monitored!=='boolean'||typeof c.heartbeat_at!=='string'||typeof c.progress_at!=='string'||!count(c.stale_after_seconds)||!object(c.checkpoint)||!nullableDate(c.checkpoint.received_through))return false
+    const s=c.latest_sweep
+    if(s!==null&&(!object(s)||typeof s.received_from!=='string'||typeof s.received_through!=='string'||!['coverageComplete','allPreserved','scanFinished'].every(k=>s[k]===null||typeof s[k]==='boolean')||!(s.counts===null||object(s.counts))))return false
+  }
+  for(const [list,total,more] of [['pre_cutoff_entries_without_document','pre_cutoff_entries_without_document_total','pre_cutoff_entries_without_document_has_more'],['pre_cutoff_unresolved_origins','pre_cutoff_unresolved_origin_total','pre_cutoff_unresolved_origins_has_more'],['pre_cutoff_saved_without_group','pre_cutoff_saved_without_group_total','pre_cutoff_saved_without_group_has_more']]){
+    if(!rows(v.historical[list])||!count(v.historical[total])||typeof v.historical[more]!=='boolean'||v.historical[list].length>v.historical[total]||(v.historical[more]===false&&v.historical[list].length!==v.historical[total]))return false
+  }
+  return true
+}
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+export const intakeDocumentHref=(id:unknown)=>typeof id==='string'&&uuid.test(id)?`/novos-exames/${id}`:null
+const labels:Record<string,string>={ gmail:'Gmail',outlook:'Outlook',chatwoot:'WhatsApp',discovered:'Aguardando processamento',saved:'Original preservado',pending:'Aguardando resolução',failed:'Falha informada',excluded:'Excluído com justificativa',open:'Pendente',acknowledged:'Em acompanhamento',resolved:'Resolvido',reserved:'Reservado',started:'Envio iniciado',submitted:'Entrega a confirmar',sent:'Entregue',uncertain:'Entrega incerta',blocked:'Aviso aguardando ativação',not_queued:'Envio ainda não preparado',cancelled:'Cancelado',inventory_pending:'Inventário dos anexos pendente',document_binding_pending:'Documento ainda sem vínculo comprovado',awaiting_snapshot:'Captura do original pendente',missing_link:'Link do original ausente',changed_content_review:'Conteúdo atualizado, aguardando revisão',historical_snapshot_unavailable:'Original histórico sem comprovação' }
+const label=(v?:string|null)=>v?labels[v]||'A conferir':'A conferir'
+const date=(v?:string|null)=>v&&Number.isFinite(Date.parse(v))?new Date(v).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}):'Não comprovada'
+export function intakeSnapshotStatus(asOf:string,now=Date.now(),paused=false){
+  if(paused)return 'paused'
+  const time=Date.parse(asOf)
+  if(!Number.isFinite(time)||!Number.isFinite(now)||time>now+120_000)return 'invalid'
+  return now-time>120_000?'stale':'current'
+}
+export function IntakeSnapshotNotice({asOf,now=Date.now(),paused=false,refreshing=false,onRefresh}:{asOf:string;now?:number;paused?:boolean;refreshing?:boolean;onRefresh?:()=>void}){
+  const state=intakeSnapshotStatus(asOf,now,paused)
+  if(state==='current')return null
+  return <div role="status" data-intake-snapshot={state} className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><p className="font-medium">{state==='paused'?'Atualização pausada':state==='stale'?'Consulta antiga':'Horário da consulta não comprovado'}</p><p className="mt-1">Dados da consulta de {date(asOf)}. O estado atual dos recebimentos não foi confirmado; as contagens abaixo pertencem a essa consulta.</p>{onRefresh&&<button type="button" disabled={refreshing} className="mt-3 rounded-lg border px-3 py-2 disabled:opacity-50" onClick={onRefresh}>{refreshing?'Consultando…':'Atualizar conferência'}</button>}</div>
+}
+const surface='rounded-2xl border bg-[hsl(var(--card))]'
+const muted='text-sm text-[hsl(var(--muted-foreground))]'
+export function IntakeHeader({refreshing=false,onRefresh}:{refreshing?:boolean;onRefresh?:()=>void}){
+  return <header className="flex flex-wrap items-center justify-between gap-4"><div><p className="mb-1 text-xs font-semibold uppercase tracking-widest text-[hsl(var(--primary))]">Recebimentos</p><h1 className="text-2xl font-semibold tracking-tight">Conferência dos exames</h1><p className={muted}>Cobertura das coletas, originais preservados e entregas pendentes.</p></div>{onRefresh&&<button type="button" className="rounded-lg border bg-[hsl(var(--card))] px-4 py-2 text-sm font-medium disabled:opacity-60" disabled={refreshing} onClick={onRefresh}>{refreshing?'Atualizando…':'Atualizar conferência'}</button>}</header>
+}
+function Proof({value,yes,no}:{value:boolean|null|undefined;yes:string;no:string}){
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${value===true?'bg-emerald-50 text-emerald-800':value===false?'bg-amber-50 text-amber-900':'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]'}`}>{value===true?yes:value===false?no:'Ainda sem conclusão'}</span>
+}
+function DocumentLink({id}:{id?:string|null}){
+  const href=intakeDocumentHref(id)
+  return href?<a href={href} className="shrink-0 text-sm font-medium text-[hsl(var(--primary))] underline underline-offset-4">Abrir exame</a>:null
+}
+function Support({row}:{row:Row}){
+  const ref=[row.collector_id,row.message_id,row.attachment_id,row.stage,row.code||row.reason_code,row.id].filter(Boolean)
+  return ref.length?<details className="mt-2 text-xs text-[hsl(var(--muted-foreground))]"><summary className="cursor-pointer">Referência para suporte</summary><p className="mt-1 break-all">{ref.join(' · ')}</p></details>:null
+}
+type QueueProps={id:string;title:string;total:number;rows:Row[];more?:boolean;description:string;kind?:'entry'|'origin'|'group'|'alert'|'hold'|'incident'|'receipt'}
+function Queue({id,title,total,rows,more,description,kind='entry'}:QueueProps){
+  return <section id={id} className={`${surface} scroll-mt-6 p-4 md:p-5`}><div className="mb-3 flex items-center gap-3"><h2 className="font-semibold">{title}</h2><span className="rounded-full bg-[hsl(var(--muted))] px-2.5 py-0.5 text-sm tabular-nums">{total}</span></div><p className={`${muted} mb-4`}>{description}</p>{rows.length===0?<p className={muted}>Nenhuma pendência registrada nesta fila.</p>:<div className="divide-y">{rows.map((r,index)=><article key={r.id||r.document_id||`${r.message_id}-${r.attachment_id}-${index}`} className="py-3 first:pt-0 last:pb-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="break-words text-sm font-medium">{r.original_name||(kind==='alert'?'Aviso de ocorrência':kind==='incident'?'Ocorrência em acompanhamento':kind==='origin'?'Original aguardando resolução':kind==='receipt'?'Recibo de recebimento':'Entrada aguardando documento')}</p><p className={`${muted} mt-1`}>{label(kind==='hold'?r.reason:r.group_status||r.disposition||r.state||r.status||r.reason)}</p>{r.hold_reason&&<p className="mt-1 text-sm text-amber-800">{label(r.hold_reason)}</p>}<p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{date(r.received_at||r.last_seen_at||r.first_seen_at||r.created_at)}</p></div><DocumentLink id={r.document_id}/></div><Support row={r}/></article>)}</div>}{more&&<p className="mt-4 border-t pt-3 text-sm font-medium">Exibindo {rows.length} de {total}. Existem outros registros nesta fila.</p>}</section>
+}
+const providers=['gmail','outlook','chatwoot'] as const
+export function intakeCollectorStatus(collector:Collector,asOf:string,now=Date.now(),paused=false){
+  const snapshot=intakeSnapshotStatus(asOf,now,paused)
+  if(snapshot!=='current')return snapshot==='paused'?'Atualização pausada':snapshot==='stale'?'Consulta antiga':'Horário da consulta não comprovado'
+  const limit=Math.min(collector.stale_after_seconds,900)*1000
+  const stale=[collector.heartbeat_at,collector.progress_at].some(value=>!Number.isFinite(Date.parse(value))||Date.parse(value)>now+120_000||now-Date.parse(value)>limit)
+  if(stale)return 'Conferência desatualizada'
+  return collector.latest_sweep?.mode==='audit'||!collector.monitored?'Conferência em modo auditoria':'Coleta com atividade recente'
+}
+function CollectorCoverage({collector:c,asOf,now,paused}:{collector:Collector;asOf:string;now:number;paused:boolean}){
+  const sweep=c.latest_sweep,status=intakeCollectorStatus(c,asOf,now,paused)
+  return <div className="space-y-3"><p className={`text-xs font-medium ${status==='Conferência desatualizada'?'text-amber-800':'text-[hsl(var(--muted-foreground))]'}`}>{status}</p>{status==='Conferência desatualizada'&&<p className="text-sm text-amber-900">Não há atividade e progresso recentes dentro de 15 minutos. A janela abaixo não comprova os recebimentos mais recentes.</p>}{sweep?<><p className={muted}>{sweep.mode==='audit'?'Janela da auditoria':'Janela da coleta'}: <span className="font-medium text-[hsl(var(--foreground))]">{date(sweep.received_from)} até {date(sweep.received_through)}</span></p><div className="flex flex-wrap gap-2"><Proof value={sweep.coverageComplete} yes="Entradas inventariadas" no="Inventário incompleto"/><Proof value={sweep.allPreserved} yes="Originais resolvidos" no="Originais pendentes"/><Proof value={sweep.scanFinished} yes="Conferência concluída" no="Conferência incompleta"/></div>{sweep.counts&&<p className={muted}>{sweep.counts.messages??0} mensagens · {sweep.counts.pages??0} páginas · {sweep.counts.saved??0} originais preservados · {sweep.counts.excluded??0} exclusões justificadas</p>}<p className="text-xs text-[hsl(var(--muted-foreground))]">A conclusão vale para esta janela. Pendências anteriores continuam nas filas até sua resolução. “Resolvidos” inclui exclusões justificadas.</p></>:<p className={muted}>Sem janela de varredura comprovada.</p>}<dl className="grid gap-2 border-t pt-3 text-xs text-[hsl(var(--muted-foreground))]"><div><dt className="inline">Última atividade: </dt><dd className="inline">{date(c.heartbeat_at)}</dd></div><div><dt className="inline">Último progresso: </dt><dd className="inline">{date(c.progress_at)}</dd></div><div><dt className="inline">Última conferência completa dos originais: </dt><dd className="inline">{date(c.last_success_at)}</dd></div><div><dt className="inline">Coleta operacional avançou até: </dt><dd className="inline">{date(c.checkpoint.received_through)}</dd></div></dl><details className="text-xs text-[hsl(var(--muted-foreground))]"><summary className="cursor-pointer">Identificação da coleta</summary><p className="mt-1 break-all">{c.collector_id}</p></details></div>
+}
+export function IntakeCoverage({data,now=Date.now(),paused=false}:{data:IntakePanel;now?:number;paused?:boolean}){
+  return <section className="space-y-3"><h2 className="text-lg font-semibold">Cobertura por canal</h2><div className="grid items-start gap-4 lg:grid-cols-3">{providers.map(provider=>{
+    const collectors=data.collectors.filter(collector=>collector.provider===provider)
+    return <article data-intake-provider={provider} key={provider} className={`${surface} p-5`}><h3 className="mb-3 text-lg font-semibold">{label(provider)}</h3>{collectors.length?<div className="divide-y space-y-4">{collectors.map((collector,index)=><div key={collector.collector_id} className={index?'pt-4':''}><CollectorCoverage collector={collector} asOf={data.as_of} now={now} paused={paused}/></div>)}</div>:<><p className="text-sm font-medium text-amber-900">Nenhuma varredura registrada para este canal.</p><p className={`${muted} mt-2`}>Sem prova de cobertura de {label(provider)} nesta conferência. A ausência de registros não confirma que todos os recebimentos foram processados.</p></>}</article>
+  })}</div></section>
+}
+export function IntakeReceiptsView({data,refreshing=false,onRefresh,now=Date.now(),paused=false}:{data:IntakePanel;refreshing?:boolean;onRefresh?:()=>void;now?:number;paused?:boolean}){
+  const queues:QueueProps[]=[
+    {id:'sem-documento',title:'Entradas sem documento vinculado',total:data.entries_without_document_total,rows:data.entries_without_document,more:data.entries_without_document_has_more,description:'Mensagens já descobertas sem vínculo comprovado com um documento nos recibos.'},
+    {id:'origens-pendentes',title:'Originais pendentes',total:data.unresolved_origin_total,rows:data.unresolved_origins,more:data.unresolved_origins_has_more,description:'Anexos ou links recebidos com preservação ou resolução pendente.',kind:'origin'},
+    {id:'sem-grupo',title:'Originais salvos, grupo pendente',total:data.saved_without_group_total,rows:data.saved_without_group,more:data.saved_without_group_has_more,description:'Documentos preservados sem entrega comprovada ao grupo. Inclui revisões e envios incertos.',kind:'group'},
+    {id:'grupo-incerto',title:'Entrega ao grupo incerta',total:data.group_uncertain_total,rows:data.group_uncertain,more:data.group_uncertain_has_more,description:'O envio precisa de confirmação pelo recibo do provedor antes de qualquer nova tentativa.',kind:'group'},
+    {id:'versoes-revisao',title:'Versões em revisão',total:data.version_hold_total,rows:data.version_holds,more:data.version_hold_has_more,description:'Originais com envio ao grupo retido até a captura ou revisão da versão.',kind:'hold'},
+  ]
+  const history=data.historical
+  return <main className="mx-auto max-w-6xl space-y-6 p-4 md:p-8"><IntakeHeader refreshing={refreshing} onRefresh={onRefresh}/>
+    <IntakeSnapshotNotice asOf={data.as_of} now={now} paused={paused} refreshing={refreshing} onRefresh={onRefresh}/>
+    <aside className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950"><p className="font-medium">A cobertura vale para as janelas comprovadas abaixo.</p><p className="mt-1">Zero pendências não comprova todo o histórico das caixas. Os números refletem os registros já inventariados e os documentos presentes no sistema.</p></aside>
+    <div className={`flex flex-wrap justify-between gap-2 ${muted}`}><p>Consulta: {date(data.as_of)} · horário de Brasília</p><p>Corte operacional: {data.summary.cutoff_configured?date(data.summary.notification_cutoff):'Não configurado'}</p></div>
+    {!data.summary.cutoff_configured&&<p role="status" className="rounded-xl border p-4 text-sm">O corte operacional não está configurado. Ainda não é possível separar os registros antigos das filas atuais.</p>}
+    <IntakeCoverage data={data} now={now} paused={paused}/>
+    <section className={`${surface} overflow-hidden`}><h2 className="border-b px-5 py-4 text-lg font-semibold">O que precisa de atenção</h2><div className="divide-y">{queues.map(q=><a key={q.id} href={`#${q.id}`} className="flex items-center justify-between gap-4 px-5 py-3 text-sm hover:bg-[hsl(var(--muted))]"><span>{q.title}</span><span className="font-semibold tabular-nums">{q.total} <span aria-hidden="true" className="ml-2 text-[hsl(var(--muted-foreground))]">↓</span></span></a>)}</div><p className="border-t px-5 py-3 text-xs text-[hsl(var(--muted-foreground))]">As filas podem compartilhar registros. Uma mensagem com parte dos anexos salvos continua com os demais em “Originais pendentes”.</p></section>
+    {data.summary.received_at_unknown_total>0&&<p role="status" className="text-sm text-amber-900">{data.summary.received_at_unknown_total} entrada(s) sem documento vinculado também estão sem data de recebimento comprovada.</p>}
+    <div className="grid items-start gap-4 lg:grid-cols-2">{queues.map(q=><Queue key={q.id} {...q}/>)}</div>
+    <details className={`${surface} p-5`}><summary className="cursor-pointer text-lg font-semibold">Histórico anterior ao corte operacional</summary><p className={`${muted} mt-3`}>Registros anteriores a {date(history.cutoff)}. Esta consulta não envia avisos nem repete documentos. O histórico das caixas ainda pode conter mensagens não inventariadas.</p><div className="mt-4 grid items-start gap-4 lg:grid-cols-2"><Queue id="historico-sem-documento" title="Entradas antigas sem documento" total={history.pre_cutoff_entries_without_document_total} rows={history.pre_cutoff_entries_without_document} more={history.pre_cutoff_entries_without_document_has_more} description="Sem vínculo comprovado nos recibos do histórico."/><Queue id="historico-origens" title="Originais antigos pendentes" total={history.pre_cutoff_unresolved_origin_total} rows={history.pre_cutoff_unresolved_origins} more={history.pre_cutoff_unresolved_origins_has_more} description="Recibos antigos ainda sem resolução." kind="origin"/><Queue id="historico-grupo" title="Originais antigos sem entrega ao grupo" total={history.pre_cutoff_saved_without_group_total} rows={history.pre_cutoff_saved_without_group} more={history.pre_cutoff_saved_without_group_has_more} description="Preservados, sem entrega comprovada no registro do sistema." kind="group"/></div></details>
+    <details className={`${surface} p-5`}><summary className="cursor-pointer text-lg font-semibold">Ocorrências e recibos registrados</summary><div className="mt-4 grid items-start gap-4 lg:grid-cols-2"><Queue id="ocorrencias" title="Ocorrências em acompanhamento" total={data.incident_total} rows={data.incidents} more={data.incident_has_more} description="Ocorrências abertas ou já reconhecidas pela equipe." kind="incident"/><Queue id="recibos" title="Recibos registrados" total={data.receipt_total} rows={data.receipts} more={data.receipt_has_more} description="Inclui preservados, excluídos com justificativa e registros pendentes." kind="receipt"/></div></details>
+  </main>
+}

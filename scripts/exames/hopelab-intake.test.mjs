@@ -103,7 +103,7 @@ test('download requires prior reservation, bound URL, status200, PDF MIME and ex
 
 test('generated flow reserves both source types before GET, has no remote credentials and rejoins the existing hash/Drive path',async()=>{
  const {intake:w}=await buildWorkflows(),n=name=>w.nodes.find(node=>node.name===name);
- assert.equal(w.nodes.length,50);
+ assert.equal(w.nodes.length,53);
  assert.equal(w.connections['Enumerar anexos e ausência'].main[0][0].node,'Aviso Hopelab autorizado');
  assert.equal(w.connections['Aviso Hopelab autorizado'].main[1][0].node,'PDF ou aviso disponível');
  assert.equal(w.connections['Extrair link Hopelab autorizado'].main[0][0].node,'PDF ou aviso disponível');

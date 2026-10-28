@@ -1,0 +1,4 @@
+export function versionReviewPreviewFixture(blocked=false){
+  const current='33333333-3333-4333-8333-333333333333',previous='44444444-4444-4444-8444-444444444444'
+  return {contract:'exam_intake_version_review_v1',document_id:current,hold:{state:'held',reason:blocked?'historical_snapshot_unavailable':'changed_content_review',previous_document_id:previous,created_at:'2026-10-27T21:00:00Z',released_at:null},current:{document_id:current,original_name:'Resultado atual demonstrativo.pdf',sha256:'a'.repeat(64),file_status:'saved',group_status:'uncertain'},previous:{document_id:previous,original_name:'Resultado anterior demonstrativo.pdf',sha256:blocked?null:'b'.repeat(64),file_status:blocked?'pending':'saved',group_status:'sent'},review_allowed:true,can_link_previous:!blocked,blocking_reason:blocked?'previous_original_not_preserved':null,decision:null}
+}

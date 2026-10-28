@@ -5,7 +5,7 @@ import { useExamAuth } from '@/contexts/exam-auth'
 import { callDocumentService, useDocumentAction, useDocumentCandidates, useDocumentEvents } from '@/hooks/useExamDocuments'
 import { DocumentBadge } from '@/components/documents/DocumentBadge'
 import { documentEditSnapshot } from '@/lib/document-status'
-import type { DocumentCandidate, DocumentFields, ExamDocument } from '@/types/exam-document'
+import type { DocumentCandidate, DocumentEvent, DocumentFields, ExamDocument } from '@/types/exam-document'
 
 const inputClass = 'w-full rounded-lg border border-[hsl(var(--input))] bg-[hsl(var(--card))] px-3 py-2 text-sm'
 const buttonClass = 'rounded-lg bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white disabled:opacity-50'
@@ -39,6 +39,18 @@ function defaultExamDate(doc: ExamDocument): string {
 }
 const destinationLabels: Record<string, string> = { drive: 'Cópia no Drive', processing: 'Leitura do PDF', group: 'Aviso ao grupo', nexus: 'Anexação no PAM Nexus' }
 const eventLabels: Record<string, string> = { received: 'Documento recebido', file_saved: 'Original salvo', extracted: 'Dados extraídos', extraction_updated: 'Dados extraídos', reviewed: 'Conferência registrada', link_confirmed: 'Cadastro confirmado', link_auto_confirmed: 'Cadastro identificado automaticamente', identification_pending: 'Cadastro pendente de seleção', assigned: 'Responsável definido', responsible_vet_assigned: 'Veterinária responsável definida', responsible_vet_resolved: 'Identificação da veterinária responsável', contact_recorded: 'Contato registrado', correction_linked: 'Versão corrigida vinculada', group_released: 'Aviso ao grupo liberado', group_confirmed_by_team: 'Entrega conferida pela equipe', delivery_completed: 'Etapa atualizada', retry_requested: 'Nova tentativa solicitada', group_exception: 'Exceção de grupo registrada' }
+
+Object.assign(eventLabels, {
+  intake_version_reviewed: 'Revisão da atualização registrada',
+  intake_version_review_inconclusive: 'Atualização mantida em revisão',
+})
+function documentEventLabel(event:DocumentEvent){
+  if(event.event_type==='intake_version_reviewed'||event.event_type==='intake_version_review_inconclusive'){
+    const decisions:Record<string,string>={clinical_complement_confirmed:'Complemento clínico confirmado',clinical_correction_confirmed:'Correção confirmada',inconclusive:'Revisão inconclusiva; versão mantida retida'}
+    return decisions[String(event.details?.reason_code)]||eventLabels[event.event_type]
+  }
+  return eventLabels[event.event_type]||event.event_type
+}
 
 export function DocumentPreview({ doc }: { doc: ExamDocument }) {
   const [url, setUrl] = useState<string | null>(null)
@@ -182,5 +194,5 @@ export function DocumentSteps({ doc }: { doc: ExamDocument }) {
 
 export function DocumentHistory({ id }: { id: string }) {
   const events = useDocumentEvents(id)
-  return <section className={sectionClass}><h2 className="font-semibold">Histórico</h2>{events.isLoading ? <p className="text-sm">Carregando…</p> : events.error ? <p role="alert" className="text-sm text-red-600">Não foi possível carregar o histórico.</p> : <ol className="space-y-3">{events.data?.map(event => <li key={event.id} className="text-sm"><p>{eventLabels[event.event_type] || event.event_type}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{new Date(event.created_at).toLocaleString('pt-BR')}{event.actor_id && ' · ação registrada pela equipe'}</p></li>)}</ol>}</section>
+  return <section className={sectionClass}><h2 className="font-semibold">Histórico</h2>{events.isLoading ? <p className="text-sm">Carregando…</p> : events.error ? <p role="alert" className="text-sm text-red-600">Não foi possível carregar o histórico.</p> : <ol className="space-y-3">{events.data?.map(event => <li key={event.id} className="text-sm"><p>{documentEventLabel(event)}</p><p className="text-xs text-[hsl(var(--muted-foreground))]">{new Date(event.created_at).toLocaleString('pt-BR')}{event.actor_id && ' · ação registrada pela equipe'}</p></li>)}</ol>}</section>
 }

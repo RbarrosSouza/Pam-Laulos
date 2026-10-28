@@ -15,7 +15,8 @@ const message={id:'synthetic-message',threadId:'synthetic-thread',internalDate:S
 const n=(w,name)=>w.nodes.find(n=>n.name===name);
 const asyncCode=async(w,name,input,outputs={})=>{
  const look={Configuração:[{json:cfg}],'Janela de recebimento':[{json:cfg}],...outputs};
- const sandbox={Buffer,require:k=>{assert.equal(k,'crypto');return crypto;},$json:input.json,$input:{first:()=>input,all:()=>[input]},$execution:{id:'synthetic-execution'},$:name=>({first:()=>look[name]?.[0],item:look[name]?.at(-1),all:()=>look[name]||[]}),helpers:{getBinaryDataBuffer:async()=>input.binary?.data?.bytes??bytes,prepareBinaryData:async(v,name,mime)=>({bytes:Buffer.from(v),fileName:name,mimeType:mime})},Date,console:undefined};
+ const inputs=Array.isArray(input)?input:[input];
+ const sandbox={Buffer,require:k=>{assert.equal(k,'crypto');return crypto;},$json:inputs[0]?.json,$input:{first:()=>inputs[0],all:()=>inputs},$execution:{id:'synthetic-execution'},$getWorkflowStaticData:()=>outputs.__staticData||{},$:name=>({first:()=>look[name]?.[0],item:look[name]?.at(-1),all:()=>look[name]||[]}),helpers:{getBinaryDataBuffer:async()=>inputs[0]?.binary?.data?.bytes??bytes,prepareBinaryData:async(v,name,mime)=>({bytes:Buffer.from(v),fileName:name,mimeType:mime})},Date,console:undefined};
  return new vm.Script('(async function(){'+n(w,name).parameters.jsCode+'}).call(this)').runInNewContext(sandbox);
 };
 const expression=(value,json,outputs={})=>new vm.Script('('+value.slice(3,-2).trim()+')').runInNewContext({$json:json,$:name=>({first:()=>outputs[name],item:outputs[name]}),encodeURIComponent,Math,Date,$response:outputs.$response});
@@ -39,7 +40,7 @@ test('four paused operational workflows: only current actions, valid graph, exis
    function parse(v){if(typeof v==='string'&&v.startsWith('={{')){parser.getExpressionCode(v.slice(1));count++;}else if(Array.isArray(v))v.forEach(parse);else if(v&&typeof v==='object')Object.values(v).forEach(parse);}
    for(const node of w.nodes)parse(node.parameters);t.diagnostic(kind+': '+count+' expressions parsed by local Tournament');
   }
-  const literal=JSON.stringify(w);assert(!/collection_|begin_staging|staging_result|fixture|clinical_pilot|runtimePhase|approvalId|\$getWorkflowStaticData|structuredClone/i.test(literal));
+  const literal=JSON.stringify(w);assert(!/collection_|begin_staging|staging_result|fixture|clinical_pilot|runtimePhase|approvalId|structuredClone/i.test(literal));
   await assert.rejects(asyncCode(w,'Configuração',{json:{}}),/EXAMES_OPERACIONAL_PAUSADO/);
   const saved=JSON.parse(await fs.readFile(new URL('../../n8n/exames/OPERACIONAL-0'+({intake:1,processing:2,group:3,nexus:4}[kind])+'.json',import.meta.url),'utf8'));assert.deepEqual(saved,w);
  }
@@ -86,7 +87,7 @@ test('lost upload ACK resumes same ID through metadata/readback, never PATCHes e
 test('failure after reserving one attachment persists source_error, returns to attachment loop, next scan retains cutoff',()=>{
  const w=workflows.intake;for(const name of ['Gmail - baixar PDF reservado','Drive - criar metadados com ID fixo','Drive - gravar bytes no ID fixo']){assert.equal(n(w,name).onError,'continueErrorOutput');assert.equal(w.connections[name].main[1][0].node,'Registrar falha de origem');}
  assert.equal(w.connections['Registrar falha de origem'].main[0][0].node,'Manter janela para recuperação');assert.equal(w.connections['Manter janela para recuperação'].main[0][0].node,'Próximo anexo');assert.equal(w.connections['Próximo anexo'].main[0][0].node,'Um anexo por vez');assert.equal(w.connections['Confirmar armazenamento'].main[1][0].node,'Manter janela para recuperação');
- assert(n(w,'Janela de recebimento').parameters.jsCode.includes('windowStart:cfg.intakeCutoff'));assert(!JSON.stringify(w).includes('staticData'));
+ assert(n(w,'Janela de recebimento').parameters.jsCode.includes('windowStart:cfg.intakeCutoff'));assert(!n(w,'Janela de recebimento').parameters.jsCode.includes('staticData'));
 });
 
 test('processing reuses page/value evidence validator; empty text/model failure stays review, source context cannot be replaced',async()=>{
@@ -118,8 +119,53 @@ test('worker lease recovery and real backend contracts remain available; no depe
 test('nested attachment loop resets only on a fresh message and clears the flag on every return',async()=>{
  const w=workflows.intake;const reset=n(w,'Um anexo por vez').parameters.options.reset;
  assert.equal(expression(reset,{resetAttachments:true}),true);
- const returned=await asyncCode(w,'Próximo anexo',{json:{resetAttachments:true,document_id:docId}});assert.equal(expression(reset,returned[0].json),false);
+ const origin=a.inspectMessage(message,message.id,cfg).origins[0];
+ const returned=await asyncCode(w,'Próximo anexo',{json:{resetAttachments:true,document_id:docId,status:'saved'}},{'Um anexo por vez':[{json:origin}]});assert.equal(expression(reset,returned[0].json),false);
  for(const [name,c]of Object.entries(w.connections))for(const output of c.main)for(const edge of output)if(edge.node==='Um anexo por vez')assert(['PDF ou aviso disponível','Próximo anexo'].includes(name),name);
+});
+
+test('metadata and reservation failures continue their own loops and leave the scan incomplete',async()=>{
+ const workflow=workflows.intake;
+ for(const name of ['Gmail - MIME sem bytes','Enumerar anexos e ausência','Gmail - corpo do aviso Hopelab','Extrair link Hopelab autorizado']){
+  assert.equal(n(workflow,name).onError,'continueErrorOutput');assert.equal(workflow.connections[name].main[1][0].node,'Marcar falha da mensagem');
+ }
+ for(const name of ['Reservar origem','Decidir recebimento']){
+  assert.equal(n(workflow,name).onError,'continueErrorOutput');assert.equal(workflow.connections[name].main[1][0].node,'Marcar falha da reserva');
+ }
+ assert.equal(workflow.connections['Marcar falha da mensagem'].main[0][0].node,'Uma mensagem por vez');
+ assert.equal(workflow.connections['Marcar falha da reserva'].main[0][0].node,'Próximo anexo');
+ const failedMessage=await asyncCode(workflow,'Marcar falha da mensagem',{json:{error:'transport failure'}},{'Mensagem disponível':[{json:{id:'broken-message'}}]});
+ const origin=a.inspectMessage(message,message.id,cfg).origins[0];
+ const failedReservation=await asyncCode(workflow,'Marcar falha da reserva',{json:{error:'reservation failure'}});
+ const failedAttachment=await asyncCode(workflow,'Próximo anexo',failedReservation,{'Um anexo por vez':[{json:origin}]});
+ const second={...origin,source:{...origin.source,attachment_id:'second-part'}};
+ const savedAttachment=await asyncCode(workflow,'Próximo anexo',{json:{status:'saved',document_id:docId}},{'Um anexo por vez':[{json:second}]});
+ const result=await asyncCode(workflow,'Confirmar varredura concluída',[...failedMessage,...failedAttachment,...savedAttachment],{'IDs de mensagens':[{json:{id:'broken-message'}},{json:{id:message.id}}]});
+ assert.equal(result[0].json.scanFinished,false);assert.equal(result[0].json.counts.messages_failed,1);assert.equal(result[0].json.counts.failed,1);assert.equal(result[0].json.counts.saved,1);assert.equal(result[0].json.counts.attachments,2);
+ assert.equal(result[0].json.issues[1].reason,'source_reservation_unproven');assert.equal(result[0].json.checkpointAdvanced,false);
+});
+
+test('four nameless/same-named PDF parts retain four receipts; pending originals prevent a successful scan',async()=>{
+ const four=structuredClone(message);four.payload.parts=Array.from({length:4},(_,index)=>({partId:String(index+1),mimeType:'application/pdf',filename:index<2?'':'original.pdf',body:{attachmentId:'part-'+index,size:bytes.length}}));
+ const origins=a.inspectMessage(four,four.id,cfg).origins;assert.equal(origins.length,4);assert.equal(new Set(origins.map(origin=>origin.source.attachment_id)).size,4);
+ const receipts=origins.map((origin,index)=>a.attachmentIntakeReceipt(index===3?{pending:true}:{status:'saved'},origin));
+ const incomplete=a.summarizeIntakeReceipts(receipts,[four.id]);assert.equal(incomplete.scanFinished,false);assert.equal(incomplete.counts.attachments,4);assert.equal(incomplete.counts.saved,3);assert.equal(incomplete.counts.pending,1);assert.equal(incomplete.issues[0].reason,'original_storage_pending');
+ const complete=a.summarizeIntakeReceipts(origins.map(origin=>a.attachmentIntakeReceipt({pending:false},origin)),[four.id]);assert.equal(complete.scanFinished,true);assert.equal(complete.counts.already_saved,4);
+ const missing=a.summarizeIntakeReceipts(origins.slice(0,3).map(origin=>a.attachmentIntakeReceipt({status:'saved'},origin)),[four.id]);assert.equal(missing.scanFinished,false);assert.equal(missing.counts.attachments_missing,1);assert.equal(missing.issues[0].reason,'attachment_receipt_count_mismatch');
+ assert.equal(a.summarizeIntakeReceipts(receipts,[four.id,'never-returned']).counts.messages_failed,1);
+ assert.equal(a.summarizeIntakeReceipts([...receipts,receipts[0]],[four.id]).counts.unproven,1);
+ assert.equal(a.summarizeIntakeReceipts([{emptySweep:true}],[]).scanFinished,true);
+});
+
+test('scan audit persists only bounded counts and timestamps without clinical payloads or provider IDs',async()=>{
+ const state={intakeAuditHistory:Array.from({length:25},(_,index)=>({executionId:'previous-'+index,checkedAt:'2026-10-16T00:00:00Z',counts:{messages:0},scanFinished:true}))};
+ const origin=a.inspectMessage(message,message.id,cfg).origins[0];
+ const receipt=a.attachmentIntakeReceipt({status:'saved',document_id:docId},origin);
+ const result=await asyncCode(workflows.intake,'Confirmar varredura concluída',[{json:receipt}],{'IDs de mensagens':[{json:{id:message.id}}],__staticData:state});
+ assert.equal(result[0].json.scanFinished,false);assert.equal(state.intakeAuditHistory.length,20);assert.equal(state.lastIntakeAudit.executionId,'synthetic-execution');assert.equal(state.lastIntakeAudit.counts.attachments_missing,1);
+ assert.deepEqual(Object.keys(state.lastIntakeAudit).sort(),['checkedAt','counts','executionId','scanFinished']);
+ assert(!JSON.stringify(state).includes(message.id));assert(!JSON.stringify(state).includes(docId));assert(!JSON.stringify(state).includes('laboratorio@example.invalid'));
+ for(const workflow of Object.values(workflows))assert.equal(workflow.settings.saveDataErrorExecution,'none');
 });
 
 test('the same intake supports a selected manual message, and refuses that selection in scheduled mode',()=>{
@@ -140,12 +186,42 @@ test('external configuration binds references without modifying neutral template
  await assert.rejects(buildWorkflows({config:{apiKey:'must-never-be-accepted'}}),/Unknown operational/);
 });
 
-test('exam_candidate comes only from Subject; unknown sender PDFs are still preserved',()=>{
+test('subject candidacy does not come from sender or body; unknown sender PDFs are still preserved',()=>{
  assert.equal(CONFIG.dedicatedMailbox,false);
  const financial=structuredClone(message);financial.snippet='Resultado de exame apenas no corpo';financial.payload.headers.find(h=>h.name==='From').value='Exames Resultado <laboratorio@example.invalid>';financial.payload.headers.find(h=>h.name==='Subject').value='Boleto e nota fiscal';
  const fromKnown=a.inspectMessage(financial,financial.id,{...cfg,allowedSenders:['laboratorio@example.invalid']}).origins[0];assert.equal(fromKnown.source.metadata.exam_candidate,false);financial.payload.headers.find(h=>h.name==='Subject').value='Resultado financeiro';assert.equal(a.inspectMessage(financial,financial.id,cfg).origins[0].source.metadata.exam_candidate,false);assert.equal(fromKnown.source.metadata.sender_allowlisted,true);
  const decision=a.decideReservation(fromKnown,{document_id:docId,document:{id:docId,file_status:'pending'}});assert.equal(decision.skip,false);
  const exam=structuredClone(message);exam.payload.headers.find(h=>h.name==='Subject').value='Resultado do exame veterinário';const origin=a.inspectMessage(exam,exam.id,cfg).origins[0];assert.equal(origin.source.metadata.exam_candidate,true);assert.equal(origin.source.metadata.unknown_sender,true);assert.equal(a.decideReservation(origin,{document_id:docId,document:{id:docId,file_status:'pending'}}).skip,false);
+});
+
+test('a forwarded generic subject accepts a specific clinical filename without changing sender trust or patient identity',async()=>{
+ const forwarded=structuredClone(message);forwarded.payload.headers.find(header=>header.name==='Subject').value='ENC:';
+ forwarded.payload.parts=[{...forwarded.payload.parts[0],filename:'Hemograma - Paciente A - Tutor A.pdf'}];
+ const previousSubjectOnlyCandidate=cfg.examSubjectHints.some(hint=>'ENC:'.toLowerCase().includes(hint.toLowerCase()));assert.equal(previousSubjectOnlyCandidate,false);
+ const origin=a.inspectMessage(forwarded,forwarded.id,cfg).origins[0];
+ assert.equal(origin.source.metadata.exam_candidate,true);assert.equal(origin.source.metadata.exam_candidate_basis,'attachment_filename');assert.equal(origin.needsReview,false);
+ assert.equal(origin.source.metadata.unknown_sender,true);assert.equal(origin.source.metadata.sender_allowlisted,false);assert.equal(origin.source.original_name,'Hemograma - Paciente A - Tutor A.pdf');
+ assert.equal(origin.source.pet_name,undefined);assert.equal(origin.source.client_name,undefined);
+ const emitted=await asyncCode(workflows.intake,'Enumerar anexos e ausência',{json:forwarded},{'Mensagem disponível':[{json:{id:forwarded.id}}]});assert.equal(emitted[0].json.source.metadata.exam_candidate,true);
+});
+
+test('filename candidacy is restricted to its own clinical attachment in mixed forwarded emails',()=>{
+ const forwarded=structuredClone(message);forwarded.payload.headers.find(header=>header.name==='Subject').value='ENC:';
+ const names=['Hemograma - Paciente A - Responsável A.pdf','boleto.pdf','original.pdf','Ultrassom - paciente.PDF'];
+ forwarded.payload.parts=names.map((filename,index)=>({...forwarded.payload.parts[0],partId:String(index+1),filename,body:{attachmentId:'part-'+index,size:bytes.length}}));
+ const origins=a.inspectMessage(forwarded,forwarded.id,cfg).origins;
+ assert.deepEqual(origins.map(origin=>origin.source.metadata.exam_candidate),[true,false,false,true]);
+ assert.deepEqual(origins.map(origin=>origin.needsReview),[false,true,true,false]);
+ assert.equal(new Set(origins.map(origin=>origin.source.attachment_id)).size,4);assert(origins.every(origin=>origin.source.metadata.unknown_sender===true));
+ const unconfigured=a.inspectMessage(forwarded,forwarded.id,{...cfg,examSubjectHints:['exame','laudo']}).origins;assert(unconfigured.every(origin=>origin.source.metadata.exam_candidate===false));
+});
+
+test('generic, financial, opaque and disguised filename hints remain pending with a generic subject',()=>{
+ const forwarded=structuredClone(message);forwarded.payload.headers.find(header=>header.name==='Subject').value='ENC:';
+ for(const filename of ['arquivo.pdf','original.pdf','contrato.pdf','exame.pdf','laudo.pdf','Nota fiscal hemograma.pdf','Hemograma boleto.pdf','hemograma.pdf.exe','hemogramatico.pdf','Laudo financeiro.pdf']){
+  forwarded.payload.parts=[{...forwarded.payload.parts[0],filename}];const origin=a.inspectMessage(forwarded,forwarded.id,cfg).origins[0];
+  assert.equal(origin.source.metadata.exam_candidate,false,filename);assert.equal(origin.needsReview,true,filename);assert.equal(origin.pendingReason,'pdf_sem_indicio_exame',filename);
+ }
 });
 
 

@@ -86,6 +86,29 @@ function applyNotificationPresentation(workflow, kind){
   node('Conferir entrega sem reenviar').parameters.jsCode=findExamDelivery.toString()+`\nconst task=$('Uma confirmação por vez').item.json;const list=[];for(const i of $input.all()){const body=i.json;list.push(...(body.payload||body.messages||[]));}\nconst found=findExamDelivery(list,task,$('Configuração').first().json);\nlet outcome={status:'uncertain',error:'Entrega não comprovada nas páginas consultadas; conferir no PamLaudos',external_status:'reconciliation_inconclusive'};\nif(found.length===1){const m=found[0];const sent=$('Configuração').first().json.providerConfirmationStatuses.includes(String(m.status));outcome={status:sent?'sent':m.status==='failed'?'uncertain':'submitted',external_id:String(m.id),external_status:String(m.status||'api_created'),correlation:'[EXAM:'+task.document.id+':DELIVERY:'+task.id+']'};}\nreturn [{json:{task,outcome}}];\n`;
  }
 }
+function applyIntakeAccounting(workflow){
+ const node=name=>workflow.nodes.find(item=>item.name===name);
+ const connect=(from,outputs)=>{workflow.connections[from]={main:outputs.map(names=>names.map(name=>({node:name,type:'main',index:0})))};};
+ const add=(name,position,jsCode)=>{
+  const existing=node(name);if(existing){existing.parameters={jsCode};return;}
+  const hex=crypto.createHash('sha256').update('pamvet-intake-accounting:'+name).digest('hex');
+  workflow.nodes.push({id:hex.slice(0,8)+'-'+hex.slice(8,12)+'-5'+hex.slice(13,16)+'-a'+hex.slice(17,20)+'-'+hex.slice(20,32),name,type:'n8n-nodes-base.code',typeVersion:2,position,parameters:{jsCode}});
+ };
+ add('Marcar falha da mensagem',[1680,-520],"return [{json:{intakeReceipt:true,kind:'message',message_id:$('Mensagem disponível').item.json.id,disposition:'failed',reason:'message_metadata_or_notice_unproven'}}];");
+ add('Marcar mensagem excluída',[1680,-280],"return [{json:{intakeReceipt:true,kind:'message',message_id:$('Mensagem disponível').item.json.id,disposition:'excluded',reason:$json.reason||'outside_window_or_no_pdf_no_exam_hint'}}];");
+ add('Marcar falha da reserva',[2400,-520],"return [{json:{intakeFailure:true}}];");
+ for(const name of ['Gmail - MIME sem bytes','Enumerar anexos e ausência','Gmail - corpo do aviso Hopelab','Extrair link Hopelab autorizado']){
+  node(name).onError='continueErrorOutput';workflow.connections[name].main[1]=[{node:'Marcar falha da mensagem',type:'main',index:0}];
+ }
+ for(const name of ['Reservar origem','Decidir recebimento']){
+  node(name).onError='continueErrorOutput';workflow.connections[name].main[1]=[{node:'Marcar falha da reserva',type:'main',index:0}];
+ }
+ node('Enumerar anexos e ausência').parameters.jsCode=node('Enumerar anexos e ausência').parameters.jsCode.replace('messageExcluded:true}}]', 'messageExcluded:true,reason:result.reason}}]');
+ node('Próximo anexo').parameters.jsCode='function fail(code){throw new Error(code);}\n'+intakeRuntime.object.toString()+'\n'+intakeRuntime.attachmentIntakeReceipt.toString()+"\nreturn $input.all().map(item=>({json:attachmentIntakeReceipt(item.json,$('Um anexo por vez').item.json)}));";
+ node('Confirmar varredura concluída').parameters.jsCode='function fail(code){throw new Error(code);}\n'+intakeRuntime.object.toString()+'\n'+intakeRuntime.summarizeIntakeReceipts.toString()+"\nconst cfg=$('Configuração').first().json;const expected=cfg.manualMessageId?[cfg.manualMessageId]:$('IDs de mensagens').all().filter(item=>!item.json.emptySweep).map(item=>item.json.id);const summary=summarizeIntakeReceipts($input.all().map(item=>item.json),expected);const audit={checkedAt:new Date().toISOString(),executionId:String($execution.id),scanFinished:summary.scanFinished,counts:summary.counts};const state=$getWorkflowStaticData('global');state.lastIntakeAudit=audit;state.intakeAuditHistory=[...(Array.isArray(state.intakeAuditHistory)?state.intakeAuditHistory:[]).filter(item=>item.executionId!==audit.executionId),audit].slice(-20);return [{json:summary}];";
+ connect('Marcar falha da mensagem',[['Uma mensagem por vez']]);connect('Marcar mensagem excluída',[['Uma mensagem por vez']]);connect('Marcar falha da reserva',[['Próximo anexo']]);
+ connect('PDF ou aviso disponível',[['Um anexo por vez'],['Marcar mensagem excluída']]);
+}
 function validatePrivateSettings(settings){
  if(!settings||typeof settings!=='object'||Array.isArray(settings)||Object.keys(settings).some(k=>!['config','credentials'].includes(k)))throw new Error('Use only {config,credentials}; never put secret values in this file');
  const configuration=settings.config??{};
@@ -103,7 +126,7 @@ export async function buildWorkflows(settings={}){
  const result={};
  for(let i=0;i<templates.length;i++){
   const workflow=clone(templates[i]);
-  if(KINDS[i]==='intake')applyHopelabIntake(workflow);
+  if(KINDS[i]==='intake'){applyHopelabIntake(workflow);applyIntakeAccounting(workflow);}
   applyNotificationPresentation(workflow,KINDS[i]);
   for(const node of workflow.nodes){
    if(node.name==='Configuração')node.parameters.jsCode=node.parameters.jsCode.replace(configLiteral(workflow),JSON.stringify(config,null,2));

@@ -13,8 +13,8 @@ type Section = {
 export const APP_SECTIONS: Section[] = [
   { id: 'home', to: '/', label: 'Início', icon: House, matches: path => path === '/' },
   { id: 'exams', to: '/novos-exames', label: 'Exames', icon: Files,
-    matches: path => path.startsWith('/novos-exames') || ['/tracking', '/late'].includes(path),
-    tabs: [{ to: '/novos-exames', label: 'Recebidos' }, { to: '/tracking', label: 'Rastreamento', includes: ['/late'] }] },
+    matches: path => path.startsWith('/novos-exames') || ['/tracking', '/late', '/recebimentos'].includes(path),
+    tabs: [{ to: '/novos-exames', label: 'Recebidos' }, { to: '/tracking', label: 'Rastreamento', includes: ['/late'] }, { to: '/recebimentos', label: 'Conferência' }] },
   { id: 'samples', to: '/ship', label: 'Amostras', icon: Package,
     matches: path => ['/ship', '/shipments'].includes(path),
     tabs: [{ to: '/ship', label: 'Enviar amostras' }, { to: '/shipments', label: 'Histórico de envios' }] },

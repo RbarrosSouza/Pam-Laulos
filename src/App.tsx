@@ -5,6 +5,7 @@ import { AnimatePresence, MotionConfig } from 'framer-motion'
 import { Shell } from '@/components/layout/Shell'
 import { RouteBoundary } from '@/components/layout/RouteBoundary'
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(module => ({ default: module.Dashboard })))
+const IntakeReceipts = lazy(() => import('@/pages/IntakeReceipts').then(module => ({ default: module.IntakeReceipts })))
 const Tracking = lazy(() => import('@/pages/Tracking').then(module => ({ default: module.Tracking })))
 const Settings = lazy(() => import('@/pages/Settings').then(module => ({ default: module.Settings })))
 const ShipSamples = lazy(() => import('@/pages/ShipSamples').then(module => ({ default: module.ShipSamples })))
@@ -38,6 +39,7 @@ function AnimatedRoutes() {
           <Route path="/novos-exames" element={<Page><NewExams /></Page>} />
           <Route path="/novos-exames/:documentId" element={<Page><ExamDocumentDetail /></Page>} />
           <Route path="/" element={<Page><Dashboard /></Page>} />
+          <Route path="/recebimentos" element={<Page><IntakeReceipts /></Page>} />
           <Route path="/tracking" element={<Page><Tracking /></Page>} />
           <Route path="/ship" element={<Page><ShipSamples /></Page>} />
           <Route path="/shipments" element={<Page><ShipmentHistory /></Page>} />

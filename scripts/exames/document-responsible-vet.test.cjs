@@ -101,6 +101,8 @@ function harness(options = {}) {
     '@/components/documents/DocumentControls': { DocumentCorrection: 'DocumentCorrection', DocumentGroupConfirmation: 'DocumentGroupConfirmation', DocumentProvenance: 'DocumentProvenance' },
     '@/components/documents/ExamDocumentPanels': { DocumentForm: 'DocumentForm', DocumentHistory: 'DocumentHistory', DocumentPreview: 'DocumentPreview', DocumentSteps: 'DocumentSteps' },
     '@/components/documents/ExamDetailSheet': { ExamDetailSheet: 'ExamDetailSheet' },
+    // Version review has its own isolated tests; keep this harness focused on responsibility.
+    '@/components/documents/DocumentVersionReview': { DocumentVersionReview: 'DocumentVersionReview' },
     '@/lib/document-status': load('src/lib/document-status.ts'),
     '@/lib/exam-detail-progress': load('src/lib/exam-detail-progress.ts'),
   });

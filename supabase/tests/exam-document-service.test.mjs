@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
+import {verifyHopelabNoticeV2Reservation} from '../../scripts/exames/intake/hopelab-notice-v2-runtime.mjs';
 const require=createRequire(import.meta.url);
 const ts=require('typescript');
 const documentId='30000000-0000-0000-0000-000000000001';
@@ -19,10 +20,11 @@ const objects=new Map();
 const calls=[];
 const clientKeys=[];
 const authCalls=[];
-let docs, tasks, stageClaimed=true, uploadFails=false, recorded=[], composioCalls=[], composioFails=false, driveFetchEnabled=false;
+let docs, tasks, stageClaimed=true, uploadFails=false, recorded=[], composioCalls=[], composioFails=false, driveFetchEnabled=false, intakeClaim=null, v2SourceReserved=false;
 function reset() {
   objects.clear(); calls.length=0; clientKeys.length=0; authCalls.length=0; recorded=[];
   env.set("EXAM_INGESTION_API_KEY","fixture-worker-secret"); stageClaimed=true; uploadFails=false;
+  env.delete('EXAM_INTAKE_MONITOR_API_KEY'); intakeClaim=null; v2SourceReserved=false;
   env.delete("EXAM_SUPABASE_SECRET_KEY_NAME"); env.delete("SUPABASE_SECRET_KEYS");
   composioCalls=[]; composioFails=false; driveFetchEnabled=false;
   docs=[{id:documentId,sha256:hash,size_bytes:fixtureBytes.byteLength,mime_type:'application/pdf',original_name:'fixture.pdf',
@@ -68,7 +70,14 @@ const client={
     async createSignedUrl(path,ttl){calls.push({op:'signed',bucket,path,ttl});return {data:{signedUrl:'https://fixture.invalid/signed-private-url'},error:null}},
   }}},
   async rpc(name,args){calls.push({op:'rpc',name,args});
+    if(name==='reserve_exam_intake_alert') return {data:intakeClaim || {claimed:false},error:null};
     if(name==='reserve_exam_document_source') return {data:{document_id:sourceId},error:null};
+    if(name==='reserve_exam_intake_source') {
+      const source=args.p_source;
+      v2SourceReserved=source?.metadata?.hopelab_notice_protocol==='gmail_notice_link_v2';
+      return {data:v2SourceReserved ? {document_id:documentId,hopelab_notice_v2:{contract:'hopelab_notice_v2_hold_v1',source_id:sourceId,notice_id:source.message_id,url_sha256:source.metadata.link_sha256,group_hold_enforced:true}} : {document_id:sourceId},error:null};
+    }
+    if(name==='stage_exam_intake_file') return {data:{document_id:documentId,document:{...docs[0]},claimed:stageClaimed,delivery_id:taskId,lease_token:token,...(v2SourceReserved?{notice_snapshots_recorded:1,group_hold:true}:{})},error:null};
     if(name==='stage_exam_document_file') return {data:{document_id:documentId,document:{...docs[0]},claimed:stageClaimed,delivery_id:taskId,lease_token:token},error:null};
     if(name==='complete_exam_document_delivery') return {data:{task:{status:'completed'},exame_id:'fixture-exam'},error:null};
     return {data:{name,args},error:null};
@@ -91,8 +100,14 @@ const keySource=await readFile(new URL('../functions/exam-document-service/supab
 vm.runInNewContext(ts.transpileModule(keySource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:keyExports});
 let handler;
 const source=await readFile(new URL('../functions/exam-document-service/index.ts',import.meta.url),'utf8');
+const intakeSource=await readFile(new URL('../functions/exam-document-service/intake-service-routes.ts',import.meta.url),'utf8');
+const intakeExports={};
+vm.runInNewContext(ts.transpileModule(intakeSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:intakeExports,TextEncoder});
+const monitorAuthExports={};
+const monitorAuthSource=await readFile(new URL('../functions/exam-document-service/intake-monitor-auth.ts',import.meta.url),'utf8');
+vm.runInNewContext(ts.transpileModule(monitorAuthSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:monitorAuthExports});
 const script=ts.transpileModule(source.replace(/^import .*;\s*$/gm,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
-vm.runInNewContext(script,{selectExamSupabasePrivilegedKey:keyExports.selectExamSupabasePrivilegedKey,createClient:(_url,key)=>{clientKeys.push(key);return client},Deno:{env:{get:k=>env.get(k)},serve(fn){handler=fn}},Request,Response,File,Blob,FormData,URL,URLSearchParams,
+vm.runInNewContext(script,{...monitorAuthExports,intakeActions:intakeExports.intakeActions,runIntakeAction:intakeExports.runIntakeAction,selectExamSupabasePrivilegedKey:keyExports.selectExamSupabasePrivilegedKey,createClient:(_url,key)=>{clientKeys.push(key);return client},Deno:{env:{get:k=>env.get(k)},serve(fn){handler=fn}},Request,Response,File,Blob,FormData,URL,URLSearchParams,
   crypto,TextDecoder,TextEncoder,Uint8Array,ArrayBuffer,Date,
   oauthDriveReaderConfig:readerExports.oauthDriveReaderConfig,
   readOAuthDriveOriginal:readerExports.readOAuthDriveOriginal,
@@ -112,6 +127,9 @@ vm.runInNewContext(script,{selectExamSupabasePrivilegedKey:keyExports.selectExam
 });
 async function request(action,payload={},auth='fixture-worker-secret') {
   return handler(new Request('https://fixture.invalid/exam-document-service',{method:'POST',headers:{'Content-Type':'application/json',...(auth ? {Authorization:`Bearer ${auth}`} : {})},body:JSON.stringify({action,payload})}));
+}
+async function monitorRequest(action,payload={},auth='e'.repeat(64)) {
+  return handler(new Request('https://fixture.invalid/exam-document-service',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${auth}`,'X-Exam-Intake-Monitor':'1'},body:JSON.stringify({action,payload})}));
 }
 async function manual() {
   const form=new FormData();form.set('action','upload');form.set('payload',JSON.stringify({message_id:'fixture-upload'}));
@@ -307,5 +325,98 @@ await check('private Storage stays first even with Composio selected but unconfi
 await check('signed URLs expire and never become permanent document fields',async()=>{
   const res=await request('file_url',{document_id:documentId},'fixture-user-token');assert.equal(res.status,200);
   assert.equal((await res.json()).expires_in,60);assert.equal(calls.find(c=>c.op==='signed').ttl,60);
+});
+await check('intake routes remain worker-only for authenticated team members',async()=>{
+  for(const action of ['intake_begin','intake_event','intake_finish','intake_health','intake_status','intake_lookup_source','intake_alert_reserve','intake_alert_begin','intake_alert_result','reserve_intake_source','stage_intake_file']) assert.equal((await request(action,{},'fixture-user-token')).status,403);
+  assert.equal(calls.filter(c=>c.op==='rpc').length,0);
+});
+await check('intake event requires fenced identifiers before recording any receipt',async()=>{
+  const res=await request('intake_event',{sweep_id:sourceId,run_token:token,event:{kind:'heartbeat'}});assert.equal(res.status,200);
+  const call=calls.find(c=>c.name==='record_exam_intake_event');assert.equal(call.args.p_sweep_id,sourceId);assert.equal(call.args.p_run_token,token);
+  calls.length=0;assert.equal((await request('intake_event',{sweep_id:'bad',run_token:token,event:{}})).status,400);assert.equal(calls.length,0);
+});
+await check('intake alert hashes its final content on the server and rejects an empty message',async()=>{
+  const res=await request('intake_alert_begin',{alert_id:taskId,lease_token:token,destination_key:'whatsapp_primary',content:'Falha na coleta',content_sha256:'untrusted'});assert.equal(res.status,200);
+  const expected=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('Falha na coleta'));
+  assert.equal(calls.find(c=>c.name==='begin_exam_intake_alert').args.p_content_sha256,[...new Uint8Array(expected)].map(b=>b.toString(16).padStart(2,'0')).join(''));
+  calls.length=0;assert.equal((await request('intake_alert_begin',{alert_id:taskId,lease_token:token,content:' '})).status,400);assert.equal(calls.length,0);
+});
+await check('new version staging cannot inject privileged staging paths',async()=>{
+  assert.equal((await request('stage_intake_file',{document_id:documentId,file:{sha256:hash,size_bytes:100,staging_bucket:'private-injection',staging_path:'overwrite'},worker:'ingestion'})).status,200);
+  const file=calls.find(c=>c.name==='stage_exam_intake_file').args.p_file;assert.equal(file.staging_bucket,undefined);assert.equal(file.staging_path,undefined);assert.equal(file.sha256,hash);
+});
+await check('dedicated monitor reaches exactly the five monitor actions without user membership',async()=>{
+  const monitor='e'.repeat(64);env.set('EXAM_INTAKE_MONITOR_API_KEY',monitor);
+  const actions=[['intake_health',{}],['intake_status',{}],['intake_alert_reserve',{worker:'gas-monitor'}],['intake_alert_begin',{alert_id:taskId,lease_token:token,destination_key:'whatsapp_primary',content:'Pendência'}],['intake_alert_result',{alert_id:taskId,lease_token:token,outcome:{status:'uncertain',content_sha256:hash}}]];
+  for(const [action,payload] of actions){const res=await monitorRequest(action,payload,monitor);assert.equal(res.status,200,action);const body=await res.json();if(action==='intake_status')assert.equal(body.authorization_scope,'intake_monitor');}
+  assert.equal(authCalls.length,0);assert.equal(calls.filter(c=>c.op==='rpc').length,5);
+});
+await check('broad worker never receives the dedicated monitor scope ACK',async()=>{
+  env.set('EXAM_INTAKE_MONITOR_API_KEY','e'.repeat(64));const res=await request('intake_status');assert.equal(res.status,200);assert.equal((await res.json()).authorization_scope,undefined);
+});
+await check('monitor cannot read originals, create sources, mutate collectors or use other worker routes',async()=>{
+  const monitor='e'.repeat(64);env.set('EXAM_INTAKE_MONITOR_API_KEY',monitor);
+  for(const action of ['file','file_url','upload','attach_nexus','reserve_source','stage_file','reserve_intake_source','stage_intake_file','extract','extraction_result','reserve_tasks','task_result','source_error','reconcile','collection_checkpoint','collection_begin','collection_event','collection_commit','intake_begin','intake_event','intake_finish','intake_lookup_source','reaction_preview','reaction_reserve_tasks','reaction_begin','reaction_result','pending_summary_preview','pending_summary_reserve','pending_summary_begin','pending_summary_result','unknown'])assert.equal((await request(action,{},monitor)).status,403,action);
+  assert.equal(calls.length,0);assert.equal(authCalls.length,0);
+});
+await check('monitor rejects multipart before parsing or storage access',async()=>{
+  const monitor='e'.repeat(64);env.set('EXAM_INTAKE_MONITOR_API_KEY',monitor);
+  const res=await handler(new Request('https://fixture.invalid/exam-document-service',{method:'POST',headers:{Authorization:'Bearer '+monitor,'Content-Type':'multipart/form-data; boundary=invalid'},body:'not a form'}));
+  assert.equal(res.status,403);assert.equal(calls.length,0);
+});
+await check('monitor supports exact raw dedicated token while explicit misconfigured monitor intent has no fallback',async()=>{
+  const monitor='e'.repeat(64);env.set('EXAM_INTAKE_MONITOR_API_KEY',monitor);
+  const raw=await handler(new Request('https://fixture.invalid/exam-document-service',{method:'POST',headers:{Authorization:monitor,'Content-Type':'application/json'},body:JSON.stringify({action:'intake_status',payload:{}})}));assert.equal(raw.status,200);assert.equal((await raw.json()).authorization_scope,'intake_monitor');
+  calls.length=0;env.set('EXAM_INGESTION_API_KEY',monitor);let res=await monitorRequest('intake_status',{},monitor);assert.equal(res.status,401);assert.equal((await res.json()).error,'Autenticação do monitor inválida');assert.equal(calls.length,0);
+  env.set('EXAM_INTAKE_MONITOR_API_KEY','invalid');res=await monitorRequest('intake_status',{},monitor);assert.equal(res.status,401);assert.equal((await res.json()).error,'Autenticação do monitor inválida');assert.equal(calls.length,0);
+});
+await check('monitor alert reservation strips source/document identifiers and unrelated metadata',async()=>{
+  const monitor='e'.repeat(64);env.set('EXAM_INTAKE_MONITOR_API_KEY',monitor);intakeClaim={claimed:true,alert:{id:taskId,lease_token:token,destination_key:'whatsapp_primary',worker:'other-private-data'},incident:{stage:'health',code:'collector_heartbeat_stale',document_id:documentId,receipt_id:sourceId,incident_key:'private-key'}};
+  const res=await request('intake_alert_reserve',{worker:'gas-monitor'},monitor);assert.equal(res.status,200);assert.deepEqual(await res.json(),{claimed:true,alert:{id:taskId,lease_token:token,destination_key:'whatsapp_primary'},incident:{stage:'health',code:'collector_heartbeat_stale'}});
+});
+await check('published reaction routes retain worker RPC arguments after intake integration',async()=>{
+  const requests=[['reaction_preview',{},'preview_exam_contact_reactions',{}],['reaction_reserve_tasks',{worker:'reaction-worker',limit:2},'reserve_exam_contact_reactions',{p_worker:'reaction-worker',p_limit:2}],['reaction_begin',{reaction_id:taskId,lease_token:token,destination_key:'whatsapp_primary',external_message_id:'42',emoji:'👀',actor_id:7},'begin_exam_contact_reaction',{p_reaction_id:taskId,p_lease_token:token,p_destination_key:'whatsapp_primary',p_external_message_id:'42',p_emoji:'👀',p_actor_id:7}],['reaction_result',{reaction_id:taskId,lease_token:token,outcome:{status:'uncertain'}},'record_exam_contact_reaction_result',{p_reaction_id:taskId,p_lease_token:token,p_outcome:{status:'uncertain'}}]];
+  for(const [action,payload,name,args] of requests){assert.equal((await request(action,payload)).status,200);assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{op:'rpc',name,args});}
+  calls.length=0;assert.equal((await request('reaction_begin',{reaction_id:taskId,lease_token:token,actor_id:'7'})).status,400);assert.equal(calls.length,0);
+});
+await check('existing n8n reserve_source and stage_file preserve a v2 wrapper ACK and snapshot result end to end',async()=>{
+  const origin={source:{channel:'email',account_id:'gmail:offline@example.invalid',message_id:'1111222233334444',attachment_id:'hopelab-link:'+hash,metadata:{provider:'hopelab_link',hopelab_notice_protocol:'gmail_notice_link_v2',gmail_message_id:'1111222233334444',link_sha256:hash}}};
+  const reserve=await request('reserve_source',{source:origin.source});assert.equal(reserve.status,200);const ack=await reserve.json();assert.doesNotThrow(()=>verifyHopelabNoticeV2Reservation(origin,ack));
+  assert.equal(calls.at(-1).name,'reserve_exam_intake_source');assert.deepEqual(calls.at(-1).args.p_source,origin.source);
+  const staged=await request('stage_file',{document_id:ack.document_id,file:{sha256:hash,size_bytes:fixtureBytes.length,drive_file_id:'offline-drive',staging_bucket:'forbidden',staging_path:'forbidden'},worker:'n8n-intake'});assert.equal(staged.status,200);const result=await staged.json();assert.equal(result.notice_snapshots_recorded,1);assert.equal(result.group_hold,true);
+  assert.equal(calls.at(-1).name,'stage_exam_intake_file');assert.equal(calls.at(-1).args.p_worker,'n8n-intake');assert.equal(calls.at(-1).args.p_file.staging_bucket,undefined);assert.equal(calls.at(-1).args.p_file.staging_path,undefined);
+  assert.equal(calls.some(c=>['reserve_exam_document_source','stage_exam_document_file'].includes(c.name)),false);
+});
+await check('legacy n8n actions use transparent wrappers without fabricating a v2 ACK or snapshot',async()=>{
+  const source={channel:'email',account_id:'offline@example.invalid',message_id:'legacy-fixture',attachment_id:'pdf'};
+  let res=await request('reserve_source',{source});assert.equal(res.status,200);assert.deepEqual(await res.json(),{document_id:sourceId});
+  res=await request('stage_file',{document_id:sourceId,file:{sha256:hash,size_bytes:fixtureBytes.length}});assert.equal(res.status,200);const stage=await res.json();assert.equal(stage.claimed,true);assert.equal(stage.notice_snapshots_recorded,undefined);assert.equal(stage.group_hold,undefined);
+  assert.deepEqual(calls.filter(c=>c.op==='rpc').map(c=>c.name),['reserve_exam_intake_source','stage_exam_intake_file']);
+});
+await check('source lookup is worker-only and forwards bounded identities to its read-only RPC without writes',async()=>{
+  const identities=[{account_id:'gmail:fixture@example.invalid',message_id:'1111222233334444',attachment_id:'gmail-part:0',partition_key:'mailbox'}];
+  const res=await request('intake_lookup_source',{collector_id:'gmail-audit',identities,document_id:'ignored',status:'saved'});assert.equal(res.status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'lookup_exam_intake_sources',args:{p_collector_id:'gmail-audit',p_identities:identities}}]);
+  assert.equal(recorded.length,0);assert.equal(objects.size,0);
+});
+await check('malformed, empty, extra-field or oversized lookups fail before any RPC',async()=>{
+  const identity={account_id:'gmail:fixture@example.invalid',message_id:'1111222233334444',attachment_id:'pdf'};
+  for(const payload of [{},{collector_id:'gmail-audit',identities:[]},{collector_id:'gmail-audit',identities:Array(101).fill(identity)},{collector_id:'gmail-audit',identities:[{...identity,source_id:sourceId}]},{collector_id:'gmail-audit',identities:[{...identity,account_id:''}]},{collector_id:'gmail-audit',identities:[{...identity,message_id:7}]}])assert.equal((await request('intake_lookup_source',payload)).status,400);
+  assert.equal(calls.length,0);
+});
+await check('bad monitor configuration never interrupts a valid ingestion worker or member original-file read',async()=>{
+  for(const bad of ['short-invalid-secret','fixture-worker-secret']){
+    env.set('EXAM_INTAKE_MONITOR_API_KEY',bad);assert.equal((await request('reserve_source',{})).status,200);
+    objects.set(`exam_documents_staging:${documentId}/original.pdf`,fixtureBytes);assert.equal((await request('file',{document_id:documentId},'fixture-user-token')).status,200);
+    const rpcCount=calls.filter(c=>c.op==='rpc').length,authCount=authCalls.length;
+    const refused=await monitorRequest('intake_status',{},bad);assert.equal(refused.status,401);assert.equal(calls.filter(c=>c.op==='rpc').length,rpcCount);assert.equal(authCalls.length,authCount);
+    const ordinary=await request('intake_status');assert.equal(ordinary.status,200);assert.equal((await ordinary.json()).authorization_scope,undefined);
+  }
+});
+await check('equal valid 64-character secrets keep worker/JWT live but monitor intent cannot get ACK or reach RPC',async()=>{
+  const shared='a'.repeat(64);env.set('EXAM_INGESTION_API_KEY',shared);env.set('EXAM_INTAKE_MONITOR_API_KEY',shared);
+  assert.equal((await request('reserve_source',{},shared)).status,200);objects.set(`exam_documents_staging:${documentId}/original.pdf`,fixtureBytes);assert.equal((await request('file',{document_id:documentId},'fixture-user-token')).status,200);
+  const before=calls.length;for(const action of ['intake_status','intake_health','intake_alert_reserve'])assert.equal((await monitorRequest(action,{},shared)).status,401);assert.equal(calls.length,before);
+  const ordinary=await request('intake_status',{},shared);assert.equal(ordinary.status,200);assert.equal((await ordinary.json()).authorization_scope,undefined);
 });
 console.log(`PASS: ${count} Edge handler scenarios with isolated adapters; live Supabase/Drive/WhatsApp still require homologation.`);
