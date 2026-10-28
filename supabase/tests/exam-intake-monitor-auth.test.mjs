@@ -29,7 +29,7 @@ test('dedicated action allowlist excludes every clinical/file/ingestion/collecti
     assert.doesNotThrow(() => api.authorizeExamIntakeMonitorAction(true, action, false));
     assert.throws(() => api.authorizeExamIntakeMonitorAction(true, action, true), (e) => e.status === 403);
   }
-  for (const action of ['file','file_url','upload','reserve_source','reserve_intake_source','stage_intake_file','collection_begin','intake_event','intake_finish','intake_lookup_source','reaction_begin','pending_summary_begin','unknown']) assert.throws(() => api.authorizeExamIntakeMonitorAction(true, action, false), (e) => e.status === 403);
+  for (const action of ['file','file_url','upload','reserve_source','reserve_intake_source','stage_intake_file','collection_begin','intake_resume','intake_event','intake_finish','intake_lookup_source','intake_list_pending_sources','intake_resolve_receipt_saved','reaction_begin','pending_summary_begin','unknown']) assert.throws(() => api.authorizeExamIntakeMonitorAction(true, action, false), (e) => e.status === 403);
   assert.doesNotThrow(() => api.authorizeExamIntakeMonitorAction(false, 'file', true));
 });
 test('only authenticated monitor scope survives even if a SQL result already contains a forged ACK', () => {

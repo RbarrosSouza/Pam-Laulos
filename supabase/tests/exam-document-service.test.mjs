@@ -336,7 +336,7 @@ await check('signed URLs expire and never become permanent document fields',asyn
   assert.equal((await res.json()).expires_in,60);assert.equal(calls.find(c=>c.op==='signed').ttl,60);
 });
 await check('intake routes remain worker-only for authenticated team members',async()=>{
-  for(const action of ['intake_begin','intake_event','intake_finish','intake_health','intake_status','intake_lookup_source','intake_alert_reserve','intake_alert_begin','intake_alert_result','reserve_intake_source','stage_intake_file']) assert.equal((await request(action,{},'fixture-user-token')).status,403);
+  for(const action of ['intake_begin','intake_resume','intake_event','intake_finish','intake_health','intake_status','intake_lookup_source','intake_list_pending_sources','intake_resolve_receipt_saved','intake_alert_reserve','intake_alert_begin','intake_alert_result','reserve_intake_source','stage_intake_file']) assert.equal((await request(action,{},'fixture-user-token')).status,403);
   assert.equal(calls.filter(c=>c.op==='rpc').length,0);
 });
 await check('intake event requires fenced identifiers before recording any receipt',async()=>{
@@ -365,7 +365,7 @@ await check('broad worker never receives the dedicated monitor scope ACK',async(
 });
 await check('monitor cannot read originals, create sources, mutate collectors or use other worker routes',async()=>{
   const monitor='e'.repeat(64);env.set('EXAM_INTAKE_MONITOR_API_KEY',monitor);
-  for(const action of ['file','file_url','upload','attach_nexus','reserve_source','stage_file','reserve_intake_source','stage_intake_file','extract','extraction_result','reserve_tasks','task_result','source_error','reconcile','collection_checkpoint','collection_begin','collection_event','collection_commit','intake_begin','intake_event','intake_finish','intake_lookup_source','reaction_preview','reaction_reserve_tasks','reaction_begin','reaction_result','pending_summary_preview','pending_summary_reserve','pending_summary_begin','pending_summary_result','unknown'])assert.equal((await request(action,{},monitor)).status,403,action);
+  for(const action of ['file','file_url','upload','attach_nexus','reserve_source','stage_file','reserve_intake_source','stage_intake_file','extract','extraction_result','reserve_tasks','task_result','source_error','reconcile','collection_checkpoint','collection_begin','collection_event','collection_commit','intake_begin','intake_resume','intake_event','intake_finish','intake_lookup_source','intake_list_pending_sources','intake_resolve_receipt_saved','reaction_preview','reaction_reserve_tasks','reaction_begin','reaction_result','pending_summary_preview','pending_summary_reserve','pending_summary_begin','pending_summary_result','unknown'])assert.equal((await request(action,{},monitor)).status,403,action);
   assert.equal(calls.length,0);assert.equal(authCalls.length,0);
 });
 await check('monitor rejects multipart before parsing or storage access',async()=>{
@@ -413,6 +413,20 @@ await check('malformed, empty, extra-field or oversized lookups fail before any 
   for(const payload of [{},{collector_id:'gmail-audit',identities:[]},{collector_id:'gmail-audit',identities:Array(101).fill(identity)},{collector_id:'gmail-audit',identities:[{...identity,source_id:sourceId}]},{collector_id:'gmail-audit',identities:[{...identity,account_id:''}]},{collector_id:'gmail-audit',identities:[{...identity,message_id:7}]}])assert.equal((await request('intake_lookup_source',payload)).status,400);
   assert.equal(calls.length,0);
 });
+await check('pending receipt pagination and resolution forward only validated worker arguments',async()=>{
+  const page={collector_id:'gmail_audit_v2',after_receipt_id:sourceId,limit:50};
+  assert.equal((await request('intake_list_pending_sources',page)).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{op:'rpc',name:'list_exam_intake_pending_sources',args:{p_collector_id:page.collector_id,p_after_receipt_id:sourceId,p_limit:50}});
+  const resolution={receipt_id:sourceId,source_id:taskId,document_id:documentId};
+  assert.equal((await request('intake_resolve_receipt_saved',resolution)).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{op:'rpc',name:'resolve_exam_intake_receipt_saved',args:{p_receipt_id:sourceId,p_source_id:taskId,p_document_id:documentId}});
+  assert.equal(recorded.length,0);assert.equal(objects.size,0);
+});
+await check('invalid receipt page and resolution fail before RPC',async()=>{
+  for(const bad of [{},{collector_id:''},{collector_id:'gmail_audit_v2',limit:0},{collector_id:'gmail_audit_v2',limit:101},{collector_id:'gmail_audit_v2',limit:'50'},{collector_id:'gmail_audit_v2',after_receipt_id:'bad'},{collector_id:'gmail_audit_v2',other:true}]) assert.equal((await request('intake_list_pending_sources',bad)).status,400);
+  for(const bad of [{},{receipt_id:sourceId,source_id:'bad',document_id:documentId},{receipt_id:sourceId,source_id:taskId,document_id:documentId,other:true}]) assert.equal((await request('intake_resolve_receipt_saved',bad)).status,400);
+  assert.equal(calls.length,0);
+});
 await check('bad monitor configuration never interrupts a valid ingestion worker or member original-file read',async()=>{
   for(const bad of ['short-invalid-secret','fixture-worker-secret']){
     env.set('EXAM_INTAKE_MONITOR_API_KEY',bad);assert.equal((await request('reserve_source',{})).status,200);
@@ -427,6 +441,17 @@ await check('equal valid 64-character secrets keep worker/JWT live but monitor i
   assert.equal((await request('reserve_source',{},shared)).status,200);objects.set(`exam_documents_staging:${documentId}/original.pdf`,fixtureBytes);assert.equal((await request('file',{document_id:documentId},'fixture-user-token')).status,200);
   const before=calls.length;for(const action of ['intake_status','intake_health','intake_alert_reserve'])assert.equal((await monitorRequest(action,{},shared)).status,401);assert.equal(calls.length,before);
   const ordinary=await request('intake_status',{},shared);assert.equal(ordinary.status,200);assert.equal((await ordinary.json()).authorization_scope,undefined);
+});
+await check('audit resume forwards the complete fence and idempotency nonce through the actual worker handler',async()=>{
+  const payload={collector_id:'gmail_audit_v2',scope_key:hash,request_id:sourceId,sweep_id:documentId,run_token:token,resume_request_id:taskId,ttl_seconds:3600};
+  const res=await request('intake_resume',payload);assert.equal(res.status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'resume_exam_intake_sweep',args:{p_collector_id:payload.collector_id,p_scope_key:hash,p_request_id:sourceId,p_sweep_id:documentId,p_run_token:token,p_resume_request_id:taskId,p_ttl_seconds:3600}}]);
+  assert.equal(recorded.length,0);assert.equal(objects.size,0);
+});
+await check('audit resume refuses malformed identity, missing fence, and coercible TTL before any RPC',async()=>{
+  const payload={collector_id:'gmail_audit_v2',scope_key:hash,request_id:sourceId,sweep_id:documentId,run_token:token,resume_request_id:taskId};
+  for(const bad of [{...payload,collector_id:''},{...payload,scope_key:'bad'},{...payload,request_id:'bad'},{...payload,sweep_id:null},{...payload,run_token:undefined},{...payload,resume_request_id:undefined},{...payload,ttl_seconds:59},{...payload,ttl_seconds:3601},{...payload,ttl_seconds:900.5},{...payload,ttl_seconds:'900'},{...payload,mode:'operational'}])assert.equal((await request('intake_resume',bad)).status,400);
+  assert.equal(calls.length,0);
 });
 await check('deletion requires a real member, exact confirmation and version; storage succeeds before finish',async()=>{
   const payload={document_id:documentId,expected_version:1,confirmation:'DELETAR'};

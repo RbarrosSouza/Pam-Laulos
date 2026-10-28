@@ -1,0 +1,49 @@
+.exam-conference-page { width: 100%; max-width: 1200px; margin: 0 auto; padding: 32px; }
+.exam-conference-page > header { margin-bottom: 24px; }
+.exam-conference-page h1 { font-size: 24px; font-weight: 600; letter-spacing: -.025em; }
+.exam-conference { border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--card)); padding: 24px; }
+.exam-conference-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.exam-conference-header h2 { font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: -.015em; }
+.exam-conference-header p { max-width: 68ch; margin-top: 6px; font-size: 14px; line-height: 1.6; color: hsl(var(--muted-foreground)); }
+.exam-conference-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 44px; padding: 8px 16px; border: 1px solid hsl(var(--border)); border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; background: hsl(var(--card)); color: hsl(var(--foreground)); }
+.exam-conference-button:hover:not(:disabled) { background: hsl(var(--muted)); }
+.exam-conference-button:disabled { color: hsl(var(--muted-foreground)); opacity: .55; cursor: default; }
+.exam-conference :is(button, a, summary):focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 4px; }
+.exam-conference-link { font-size: 13px; font-weight: 500; color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 4px; }
+.exam-conference-link:hover { text-decoration-thickness: 2px; }
+.exam-conference-coverage, .exam-conference-notice { margin-top: 20px; border-radius: 8px; background: light-dark(#faf5e9, #332b19); color: light-dark(#74511a, #eed4a2); font-size: 13px; line-height: 1.6; }
+.exam-conference-coverage { color-scheme: light; }
+.dark .exam-conference-coverage, .dark .exam-conference-notice { color-scheme: dark; }
+.exam-conference-coverage summary { min-height: 44px; padding: 12px 16px; cursor: pointer; }
+.exam-conference-coverage ul { padding: 0 16px 16px 32px; display: grid; gap: 6px; }
+.exam-conference-notice { padding: 12px 16px; }
+.exam-conference-message { padding: 28px 0 8px; font-size: 14px; color: hsl(var(--muted-foreground)); line-height: 1.6; }
+.exam-conference-list { margin-top: 12px; }
+.exam-conference-row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) 100px; gap: 24px; align-items: start; padding: 24px 0; }
+.exam-conference-row + .exam-conference-row { border-top: 1px solid hsl(var(--border)); }
+.exam-conference-identity, .exam-conference-issue { min-width: 0; overflow-wrap: anywhere; }
+.exam-conference-name { font-size: 14px; font-weight: 600; line-height: 1.6; }
+.exam-conference-file, .exam-conference-meta { font-size: 12px; line-height: 1.7; color: hsl(var(--muted-foreground)); }
+.exam-conference-file { margin-top: 4px; }
+.exam-conference-meta { margin-top: 6px; font-variant-numeric: tabular-nums; }
+.exam-conference-stage { font-size: 12px; font-weight: 500; color: hsl(var(--muted-foreground)); }
+.exam-conference-issue p { margin-top: 3px; font-size: 14px; line-height: 1.6; }
+.exam-conference-open { justify-self: end; display: inline-flex; align-items: center; min-height: 44px; margin-top: -8px; }
+.exam-conference-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid hsl(var(--border)); padding-top: 20px; font-size: 12px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+.exam-conference-pagination span { text-align: center; }
+@media (max-width: 900px) {
+  .exam-conference-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 24px; }
+  .exam-conference-open { grid-column: 1 / -1; justify-self: start; margin-top: 0; }
+}
+@media (max-width: 600px) {
+  .exam-conference-page { padding: 24px 16px; }
+  .exam-conference-page h1 { font-size: 22px; }
+  .exam-conference { padding: 20px 16px; }
+  .exam-conference-header { flex-wrap: wrap; gap: 16px; }
+  .exam-conference-header h2 { font-size: 17px; }
+  .exam-conference-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 20px 0; }
+  .exam-conference-open { grid-column: auto; }
+  .exam-conference-pagination { flex-wrap: wrap; }
+  .exam-conference-pagination span { flex: 1; min-width: 80px; }
+  .exam-conference-button { padding-inline: 12px; }
+}

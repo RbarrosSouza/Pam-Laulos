@@ -1,5 +1,4 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import type {ReactNode} from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { RefreshCw, Search, Check } from 'lucide-react'
 import { WhatsappLogo } from '@phosphor-icons/react/dist/csr/WhatsappLogo'
@@ -16,7 +15,6 @@ export type CockpitSquareId = 'contact' | 'review' | 'group_failed' | 'lab'
 
 interface CockpitDashboardProps {
   onOpenCard?: (card: ExamCard, button: HTMLButtonElement) => void
-  beforeQueues?:ReactNode
 }
 
 function field(doc: ExamDocument, key: 'pet_name' | 'client_name' | 'exam_type', fallback: string) {
@@ -39,7 +37,7 @@ function parseDaysInGroup(doc: ExamDocument): number {
   return Math.floor(diffHours / 24)
 }
 
-export function CockpitDashboard({ onOpenCard, beforeQueues }: CockpitDashboardProps) {
+export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
   const navigate = useNavigate()
   const [activeSquare, setActiveSquare] = useState<CockpitSquareId>('contact')
   const [search, setSearch] = useState('')
@@ -178,8 +176,6 @@ export function CockpitDashboard({ onOpenCard, beforeQueues }: CockpitDashboardP
           </button>
         </div>
       </header>
-
-      {beforeQueues}
 
       {/* OS 4 QUADRADOS DE PENDÊNCIA (IMPECCABLE MINIMALIST) */}
       <nav className="cockpit-nav-grid" aria-label="Filtros de pendências">

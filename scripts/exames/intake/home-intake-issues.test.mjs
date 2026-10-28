@@ -41,8 +41,8 @@ test('a completed recent window leaves older pending incidents visible and links
  assert.equal(panel.collectors[0].latest_sweep.scanFinished,true);
  const html=render({data:panel});assert.match(html,/Original aguardando resolução além do prazo/);assert.match(html,/18\/10\/2026/);assert.match(html,/href="\/novos-exames\/11111111-1111-4111-8111-111111111111"/);assert.match(html,/pendências anteriores continuam até sua resolução/);
 });
-test('the actual Dashboard inserts the new section before its existing queues and retains their order',()=>{
- let realtime=0,writeCount=0;
+test('the actual Dashboard keeps its operational queues without mounting or querying intake failures',()=>{
+ let realtime=0,writeCount=0,intakeReads=0;
  const icon=()=>createElement('span');
  const query={data:{count:0,documents:[]},isLoading:false,isFetching:false,refetch:async()=>{}};
  const {CockpitDashboard}=load('src/components/dashboard/CockpitDashboard.tsx',{
@@ -51,12 +51,12 @@ test('the actual Dashboard inserts the new section before its existing queues an
   sonner:{toast:{success:()=>{}}},'@/hooks/useExamDocuments':{useExamDocuments:()=>query,useDocumentAction:()=>({mutateAsync:async()=>{writeCount++}})},
   '@/hooks/useExamCards':{useExamCards:()=>({...query,data:[]})},'@/lib/document-status':{documentLabel:()=>'',documentIsOverdue:()=>false},'@/lib/fireworks':{triggerFireworksAt:()=>{}},'./cockpit.css':{},
  });
- const {HomeIntakeIssues}=load('src/components/dashboard/HomeIntakeIssues.tsx',{'@/hooks/useIntakePanel':{useIntakePanel:()=>({data:intakePreviewFixture('pending'),isPending:false,isError:false,isFetching:false,refetch:async()=>{}})},'./HomeIntakeIssuesView':{HomeIntakeIssuesView}});
+ const HomeIntakeIssues=()=>{intakeReads++;return createElement('section',null,'Exames que precisam de atenção')};
  const {Dashboard}=load('src/pages/Dashboard.tsx',{'framer-motion':{AnimatePresence:Fragment},'@/components/dashboard/CockpitDashboard':{CockpitDashboard},'@/components/dashboard/HomeIntakeIssues':{HomeIntakeIssues},'@/components/tracking/TrackingDetail':{TrackingDetail:()=>null},'@/hooks/useRealtimeExams':{useRealtimeExams:()=>{realtime++}}});
  const html=renderToStaticMarkup(createElement(Dashboard));
- const order=['Início','Falhas e pendências','Filtros de pendências','Falta contato','Falta cadastro','Falta grupo','Aguardando lab','Falta entrar em contato'].map(text=>html.indexOf(text));
+ const order=['Início','Filtros de pendências','Falta contato','Falta cadastro','Falta grupo','Aguardando lab','Falta entrar em contato'].map(text=>html.indexOf(text));
  for(let i=0;i<order.length;i++){assert(order[i]>=0);if(i)assert(order[i]>order[i-1]);}
- assert.equal(realtime,1);assert.equal(writeCount,0);
+ assert.equal(realtime,1);assert.equal(writeCount,0);assert.equal(intakeReads,0);assert(!html.includes('Exames que precisam de atenção'));assert(!html.includes('conferência de todos os recebimentos'));
 });
 test('the shared read-only query is authenticated per user, reuses a 30s cache and rejects incomplete contracts',async()=>{
  let options,auth={session:{user:{id:'synthetic-user-a'}},membership:{role:'admin'}},response={data:intakePreviewFixture('empty'),error:null};const calls=[];
