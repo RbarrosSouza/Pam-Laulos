@@ -138,3 +138,16 @@ test('saved unreadable PDFs and explicit clinical PDF preservation errors are ac
  await db.exec('RESET ROLE');await db.query("UPDATE exam_document SET confirmed_data='{\"pet_name\":null,\"client_name\":\"Outro nome\"}'::jsonb WHERE id=$1",[doc]);
  await memberRole();const revised=(await rpc('get_exam_intake_exam_failures',[100,0])).rows.find(r=>r.document_id===doc);assert.equal(revised.reason,'review_file');assert.equal(revised.pet_name,null);assert.equal(revised.client_name,null);
 });
+
+test('an attachment that fails before reservation has no document row to display individually',async()=>{
+ await db.exec('RESET ROLE');
+ await db.query("UPDATE exam_document_configuration SET attention_cutoff=now()-interval '2 hours',attention_gmail_collector_id='coverage-fixture-gmail'");
+ const sweep=(await one("SELECT id FROM exam_collection_sweep WHERE collector_id='coverage-fixture-gmail' LIMIT 1")).id;
+ await memberRole();const before=await rpc('get_exam_intake_exam_failures',[100,0]);
+ await db.exec('RESET ROLE');
+ await db.query("INSERT INTO exam_collection_message(sweep_id,folder_id,message_id,intake_received_at,intake_manifest) VALUES($1,'mailbox','pre-reserve-failure',now()-interval '30 minutes','[{\"attachment_id\":\"part-four\",\"artifact_kind\":\"attachment\"}]'::jsonb)",[sweep]);
+ await db.query("INSERT INTO exam_intake_receipt(collector_id,partition_key,message_id,attachment_id,artifact_kind,disposition,reason_code) VALUES('coverage-fixture-gmail','mailbox','pre-reserve-failure','part-four','attachment','pending','source_origin_not_recorded')");
+ await memberRole();const after=await rpc('get_exam_intake_exam_failures',[100,0]);
+ assert.equal(after.unclassified_receipts_total,before.unclassified_receipts_total+1);
+ assert.equal(after.total,before.total);assert(!after.rows.some(row=>row.message_id==='pre-reserve-failure'||row.attachment_id==='part-four'));
+});

@@ -56,3 +56,12 @@ test('unreadable file is shown honestly with a safe link and no invented name',(
 test('review of an unconfirmed file does not imply a group delivery',()=>{
  const html=render({data:fixture({rows:[{...row,exam_type:null,issue_kind:'processing',status:'overdue',reason:'review_file'}]})});assert.match(html,/Conferir conteúdo do arquivo/);assert.match(html,/Abrir registro/);assert(!html.includes('Envio ao grupo atrasado'));
 });
+test('pending source with no document displays one real attachment without pretending it has a document',()=>{
+ const pending={...row,row_kind:'receipt',row_id:'22222222-2222-4222-8222-222222222222',document_id:null,position:4,sender:'lab@example.invalid',original_name:null,pet_name:null,client_name:null,exam_type:null,issue_kind:'processing',status:'failed',reason:'source_reservation_unproven'};
+ const f=fixture({rows:[pending]});assert(view.isExamFailures(f));const html=render({data:f});assert.match(html,/Arquivo sem nome · anexo 4/);assert.match(html,/lab@example.invalid/);assert.match(html,/Não foi possível registrar a origem do arquivo/);assert(!html.includes('/novos-exames/'));assert(!view.isExamFailures(fixture({rows:[{...pending,position:0}]})));assert(!view.isExamFailures(fixture({rows:[{...pending,row_id:'javascript:alert(1)'}]})));
+});
+
+test('a real attachment without metadata shows an honest fallback',()=>{
+ const item={...row,row_kind:'receipt',row_id:'22222222-2222-4222-8222-222222222222',document_id:null,position:null,sender:null,original_name:null,pet_name:null,client_name:null,exam_type:null,issue_kind:'processing',status:'overdue',reason:'source_reservation_unproven'};
+ assert(view.isExamFailures(fixture({rows:[item]})));const html=render({data:fixture({rows:[item]})});assert.match(html,/Arquivo sem nome/);assert(!html.includes('anexo null'));
+});

@@ -66,6 +66,19 @@ test('all PDF parts reserved separately, unknown sender/name does not suppress b
  const bad=bytes.toString('base64url')+'!';assert.throws(()=>a.decodeOriginal({data:bad,size:bytes.length},decision[0].json,cfg),/base64url/);
 });
 
+test('Gmail without subject or filename still reserves and validates each PDF for reading', async()=>{
+ const unnamed=structuredClone(message); unnamed.payload.headers=unnamed.payload.headers.filter(h=>h.name!=='Subject');
+ for(const part of unnamed.payload.parts) part.filename='';
+ const result=a.inspectMessage(unnamed,unnamed.id,cfg); assert.equal(result.origins.length,2);
+ for(const origin of result.origins){
+  assert.equal(origin.attachment.name,'original.pdf'); assert.equal(origin.source.metadata.exam_candidate,false);
+  const reservation={document_id:docId,document:{id:docId,file_status:'pending',identification_status:'review'}};
+  const decision=a.decideReservation(origin,reservation); assert.equal(decision.skip,false);
+  const decoded=a.decodeOriginal({data:bytes.toString('base64url'),size:bytes.length},decision,cfg);
+  assert.equal(decoded.json.sha256,digest);
+ }
+});
+
 test('saved source skips download; forwarded hash dedupe uses canonical document/folder/Drive ID and never creates a new file',async()=>{
  const origin=a.inspectMessage(message,message.id,cfg).origins[0];assert(a.decideReservation(origin,{document_id:docId,document:{id:docId,file_status:'saved'}}).skip);
  const decoded={...origin,documentId:docId,sha256:digest,sizeBytes:bytes.length,folderId:'new-request-folder'};

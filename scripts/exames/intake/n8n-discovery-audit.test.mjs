@@ -105,6 +105,75 @@ test('authorized manual pilot is enabled only for test/manual execution, keeps w
   assert.throws(() => new vm.Script('(function(){' + code + '})()').runInNewContext(sandbox('trigger')), /MANUAL_REVIEW_ONLY/);
 });
 
+test('pending receipts are rechecked by exact origin and cursor advances only after confirmed idempotent resolutions', () => {
+  const config = { ...cfg, recheckPending: true };
+  const receipt = '10000000-0000-4000-a000-000000000001';
+  const row = { receipt_id: receipt, account_id: 'gmail:fixture@example.invalid', partition_key: 'mailbox',
+    message_id: 'abcdef01', attachment_id: 'gmail-part:["1","pdf-1"]', artifact_kind: 'attachment' };
+  let state = loadAuditState([], config, 'fixture', now);
+  state = applyAuditResponse(nextAuditOperation(state, config, now), ok(run), config, now);
+  let op = nextAuditOperation(state, config, now);
+  assert.equal(op.action, 'intake_list_pending_sources'); assert.equal(op.payload.after_receipt_id, null);
+  state = applyAuditResponse(op, ok({ contract: 'exam_intake_pending_source_page_v1', collector_id: config.collectorId,
+    items: [row], next_cursor: receipt }), config, now);
+  op = nextAuditOperation(state, config, now); assert.equal(op.action, 'intake_lookup_source');
+  const lookup = savedLookup(op.payload.identities);
+  state = applyAuditResponse(op, ok(lookup), config, now);
+  op = nextAuditOperation(state, config, now); assert.equal(op.action, 'intake_resolve_receipt_saved');
+  const request = structuredClone(op.payload);
+  const lost = applyAuditFailure(op, 'AUDIT_PROVIDER_OR_BACKEND_UNAVAILABLE', now);
+  assert.equal(lost.recheckCursor, null); assert.deepEqual(lost.recheckResolutions[0].receipt_id, receipt);
+  const restored = { ...lost, halt: false };
+  assert.deepEqual(nextAuditOperation(restored, config, now).payload, request);
+  state = applyAuditResponse(nextAuditOperation(restored, config, now), ok({ contract: 'exam_intake_receipt_resolution_v1',
+    receipt_id: receipt, source_id: request.source_id, document_id: request.document_id, sha256: 'a'.repeat(64), size_bytes: 100,
+    disposition: 'saved', already_saved: true }), config, now);
+  assert.equal(state.recheckCursor, null);
+  const next = nextAuditOperation(state, config, now);
+  assert.equal(next.state.recheckCursor, receipt); assert.equal(next.state.phase, 'gmail_list');
+});
+
+test('an in-flight old message-only retry returns to lookup instead of processing every attachment', () => {
+  const config={...cfg,recheckPending:true};
+  const receipt={receipt_id:'10000000-0000-4000-a000-000000000001',account_id:'gmail:fixture@example.invalid',partition_key:'mailbox',message_id:'abcdef01',attachment_id:'gmail-part:["3","old-locator"]',artifact_kind:'attachment'};
+  const initial=loadAuditState([],config,'fixture-old-state',now);
+  const state={...initial,phase:'bridge',bridgeMode:'recheck',bridgeMessageId:receipt.message_id,recheckBridgeQueue:[receipt.message_id],recheckItems:[receipt]};
+  const op=nextAuditOperation(state,config,now);
+  assert.equal(op.target,'backend');assert.equal(op.action,'intake_lookup_source');assert.equal(op.payload.identities[0].attachment_id,receipt.attachment_id);
+  assert.equal(op.state.recheckBridgeQueue,undefined);assert.equal(op.state.bridgeMode,undefined);
+});
+
+test('empty Gmail page requires explicit zero estimate and 204 never means a verified empty page', () => {
+  const state={...loadAuditState([],cfg,'fixture-empty-page',now),phase:'gmail_list',receivedFrom:'2026-10-27T00:00:00Z',receivedThrough:'2026-10-27T01:00:00Z',cursor:null};
+  const op=nextAuditOperation(state,cfg,now);
+  assert.match(decodeURIComponent(op.url),/fields=messages\(id\),nextPageToken,resultSizeEstimate/);
+  const accepted=applyAuditResponse(op,ok({resultSizeEstimate:0}),cfg,now);
+  assert.equal(accepted.phase,'events');
+  assert.throws(()=>applyAuditResponse(op,ok({}),cfg,now),/INTAKE_AUDIT_GMAIL_EMPTY_UNPROVEN/);
+  const failed=applyAuditResponse(op,{statusCode:204,body:''},cfg,now);
+  assert.equal(failed.phase,'gmail_list');assert.equal(failed.halt,true);
+});
+
+test('rechecking unknown origins leaves them pending, rejects forged page/ack, and repeats complete UUID passes', () => {
+  const config = { ...cfg, recheckPending: true };
+  const receipt = '10000000-0000-4000-a000-000000000001';
+  const row = { receipt_id: receipt, account_id: 'gmail:fixture@example.invalid', partition_key: 'mailbox',
+    message_id: 'abcdef01', attachment_id: 'pdf-1', artifact_kind: 'attachment' };
+  let state = loadAuditState([], config, 'fixture', now);
+  state = applyAuditResponse(nextAuditOperation(state, config, now), ok(run), config, now);
+  const op = nextAuditOperation(state, config, now);
+  const page = { contract: 'exam_intake_pending_source_page_v1', collector_id: config.collectorId, items: [row], next_cursor: null };
+  assert.throws(() => applyAuditResponse(op, ok({ ...page, items: [{ ...row, account_id: 'other' }] }), config, now), /IDENTITY_INVALID/);
+  assert.throws(() => applyAuditResponse(op, ok({ ...page, next_cursor: '20000000-0000-4000-a000-000000000001' }), config, now), /CURSOR_INVALID/);
+  state = applyAuditResponse(op, ok(page), config, now);
+  const lookup = nextAuditOperation(state, config, now);
+  state = applyAuditResponse(lookup, ok(unknownLookup(lookup.payload.identities)), config, now);
+  assert.equal(state.recheckResolutions.length, 0);
+  const next = nextAuditOperation(state, config, now);
+  assert.equal(next.state.recheckCursor, null); assert.equal(next.state.phase, 'gmail_list');
+  assert(!next.action?.includes('resolve'));
+});
+
 test('Gmail persists all message IDs before metadata, accounts for four unnamed PDFs and declares every outcome pending', async () => {
   const result = await simulate(cfg, async operation => operation.state.phase === 'gmail_list'
     ? ok({ messages: [{ id: 'abcdef01' }] }) : ok(gmailMetadata('abcdef01', 4)));
@@ -121,6 +190,20 @@ test('Gmail persists all message IDs before metadata, accounts for four unnamed 
   const listing = result.requests.find(request => request.state.phase === 'gmail_list');
   const query = decodeURIComponent(listing.url);
   assert(!query.includes('has:attachment')); assert(!query.includes('subject:'));
+});
+
+test('per-attachment details are declared before processing with names or null and controlled sender metadata',async()=>{
+  const config={...cfg,captureAttachmentDetails:true};
+  const result=await simulate(config,async operation=>{
+    if(operation.state.phase==='gmail_list')return ok({messages:[{id:'abcdef01'}]});
+    const m=gmailMetadata('abcdef01',4);m.payload.headers=[{name:'From',value:'Pessoa fictícia <fixture@example.invalid>'}];
+    m.payload.parts[0].filename='Exame A.pdf';m.payload.parts[1].filename='';m.payload.parts[2].filename='https://example.invalid/secret';m.payload.parts[3].filename='bad\nname.pdf';return ok(m);
+  });
+  const details=result.events.filter(e=>e.kind==='attachment_details');assert.equal(details.length,4);
+  assert.deepEqual(details.map(d=>d.position),[1,2,3,4]);assert.deepEqual(details.map(d=>d.display_name),['Exame A.pdf',null,null,null]);
+  assert(details.every(d=>d.sender==='fixture@example.invalid'&&d.mime_type==='application/pdf'));
+  assert(result.order.indexOf('origins_declared')<result.order.indexOf('attachment_details'));
+  assert(result.order.lastIndexOf('attachment_details')<result.order.indexOf('origin_outcome'));
 });
 
 test('no-PDF metadata stays as an explicit review notice; lack of subject or known sender never drops the message', async () => {
@@ -341,4 +424,171 @@ test('Hopelab body failure preserves already discovered non-PDF attachments and 
   assert.equal(origins.length, 2); assert(origins.some(origin => origin.attachment_id === 'gmail-part:["1","logo"]'));
   assert(result.events.some(event => event.kind === 'origin_outcome' && event.disposition === 'failed'));
   assert(result.events.some(event => event.kind === 'origin_outcome' && event.code === 'unsupported_attachment_requires_review'));
+});
+
+const continuousCfg = { ...cfg, allowScheduled: true, continuous: true, overlapSeconds: 300, maxRepeatedFailures: 3, notificationMode: 'home_only' };
+
+test('scheduled candidate remains inactive, keeps budget 100, allows its schedule and contains no alert or provider write action', () => {
+  const workflow = buildN8nAuditWorkflow('gmail', source, 'syntheticPrivateTable', { scheduledCandidate: true });
+  assert.equal(workflow.active, false); assert.equal(workflow.nodes.find(node => node.type.endsWith('scheduleTrigger')).disabled, false);
+  const code = workflow.nodes.find(node => node.name === 'Configuração de auditoria').parameters.jsCode;
+  const settings = new vm.Script('(function(){' + code + '})()').runInNewContext({ require: () => crypto, $execution: { mode: 'trigger' } })[0].json;
+  assert.equal(settings.maxActions, 100); assert.equal(settings.maxMillis, 180000); assert.equal(settings.leaseMillis, 900000);
+  assert.equal(settings.notificationMode, 'home_only'); assert.equal(settings.monitoring, false); assert.equal(settings.collectorId, cfg.collectorId);
+  assert(workflow.nodes.filter(node => node.type.endsWith('httpRequest')).every(node => node.parameters.method === 'GET' || node.name === 'Ledger — evento durável'));
+  assert(!JSON.stringify(workflow).includes('intake_reserve_alert')); assert(workflow.nodes.every(node => !node.credentials?.chatwootApi));
+  assert.throws(() => buildN8nAuditWorkflow('chatwoot', source, 'syntheticPrivateTable', { scheduledCandidate: true }), /Gmail-only/);
+});
+
+test('prospective candidate requires an exact cutoff and a separate collector, with no history before activation', () => {
+  const cutoff='2026-10-25T18:00:00.000Z';
+  const workflow=buildN8nAuditWorkflow('gmail',source,'syntheticPrivateTable',{scheduledCandidate:true,prospectiveCutoff:cutoff});
+  const code=workflow.nodes.find(n=>n.name==='Configuração de auditoria').parameters.jsCode;
+  const settings=new vm.Script('(function(){'+code+'})()').runInNewContext({require:()=>crypto,$execution:{mode:'trigger'}})[0].json;
+  assert.equal(workflow.active,false);assert.equal(settings.intakeCutoff,cutoff);assert.equal(settings.prospective,true);assert.equal(settings.includeSpamTrash,true);
+  assert.match(settings.collectorId,/^gmail_prospective_[a-f\d]{16}$/);assert.notEqual(settings.collectorId,cfg.collectorId);
+  const first=loadAuditState([],settings,'delayed-first-start',now);
+  assert.equal(first.receivedFrom,cutoff);assert.equal(first.receivedThrough,'2026-10-26T18:00:00.000Z');
+  const completed={...first,phase:'done',sweepId:run.sweep_id,finishResult:{coverageComplete:true},coverageProof:{sweepId:run.sweep_id,receivedThrough:first.receivedThrough}};
+  const {row}=persisted(completed,settings);
+  const next=loadAuditState([row],settings,'next-day',now);
+  assert.equal(next.receivedFrom,'2026-10-26T17:55:00.000Z');assert.equal(next.receivedThrough,'2026-10-27T17:55:00.000Z');
+  assert.throws(()=>buildN8nAuditWorkflow('gmail',source,'syntheticPrivateTable',{scheduledCandidate:true,prospectiveCutoff:'2026-10-25'}),/canonical UTC/);
+  assert.throws(()=>buildN8nAuditWorkflow('gmail',source,'syntheticPrivateTable',{manualPilot:true,prospectiveCutoff:cutoff}),/activation cutoff/);
+  assert.throws(()=>validateAuditConfig({...settings,includeSpamTrash:false},'trigger'),/PROSPECTIVE_POLICY/);
+});
+
+test('manual prospective canary rejects scheduled mode and persists a non-resumable pause on uncertain child',()=>{
+  const workflow=buildN8nAuditWorkflow('gmail',source,'syntheticPrivateTable',{scheduledCandidate:true,prospectiveCutoff:'2026-10-27T00:00:00.000Z',bridgeWorkflowId:'syntheticChildId',canary:true,canaryMessageId:'abcdef01'});
+  assert.equal(workflow.active,false);assert.equal(workflow.nodes.find(n=>n.type.endsWith('scheduleTrigger')).disabled,true);
+  const code=workflow.nodes.find(n=>n.name==='Configuração de auditoria').parameters.jsCode;
+  const get=mode=>new vm.Script('(function(){'+code+'})()').runInNewContext({require:()=>crypto,$execution:{mode}})[0].json;
+  assert.throws(()=>get('trigger'),/MANUAL_REVIEW_ONLY/);const config=get('test');
+  let state=loadAuditState([],config,'canary',now);state={...state,phase:'bridge',bridgeMode:'new',bridgeMessageId:'abcdef01',bridgeJob:{origins:[{attachment_id:'gmail-part:["0","fixture"]'}],lookupItems:[{status:'not_found'}],unsupportedIds:[]}};
+  state=applyAuditResponse(nextAuditOperation(state,config,now),{statusCode:200,body:{completed:false}},config,now);
+  assert.equal(state.canaryPaused,true);assert.equal(state.halt,true);assert.equal(state.phase,'lookup');
+  const {row}=persisted(state,config);assert.throws(()=>loadAuditState([row],config,'attempt-again',now+1000),/CANARY_PAUSED_AFTER_FAILURE/);
+  assert.throws(()=>loadAuditState([row],{...config,canaryMessageId:'abcdef02'},'different-fixture',now+1000),/STATE_IDENTITY_INVALID/);
+  assert.throws(()=>loadAuditState([row],{...config,canary:false,allowScheduled:true},'promoted',now+1000),/STATE_IDENTITY_INVALID/);
+  const separate=buildN8nAuditWorkflow('gmail',source,'syntheticPrivateTable',{scheduledCandidate:true,prospectiveCutoff:'2026-10-27T00:00:00.000Z',bridgeWorkflowId:'syntheticChildId',canary:true,canaryMessageId:'abcdef01',canaryCollectorId:'gmail_canary_recheck_test1234',canaryRecheckOnly:true});
+  const separateCode=separate.nodes.find(n=>n.name==='Configuração de auditoria').parameters.jsCode;
+  assert.equal(new vm.Script('(function(){'+separateCode+'})()').runInNewContext({require:()=>crypto,$execution:{mode:'test'}})[0].json.collectorId,'gmail_canary_recheck_test1234');
+  assert(!separate.nodes.some(n=>n.type.endsWith('.executeWorkflow')));
+  assert.throws(()=>buildN8nAuditWorkflow('gmail',source,'syntheticPrivateTable',{scheduledCandidate:true,prospectiveCutoff:'2026-10-27T00:00:00.000Z',canaryCollectorId:'gmail_canary_recheck_test1234'}),/only for a manual canary/);
+});
+
+test('a permanently failing first window becomes a durable gap, while later windows advance and retries alternate',()=>{
+  const later=Date.parse('2026-10-30T12:00:00Z');
+  const config={...cfg,continuous:true,allowScheduled:true,overlapSeconds:300,maxRepeatedFailures:3,notificationMode:'home_only',
+    prospective:true,intakeCutoff:'2026-10-27T00:00:00.000Z'};
+  const completed=(s,success)=>({...s,phase:'done',sweepId:run.sweep_id,finishResult:{coverageComplete:success}});
+  const restart=s=>loadAuditState([persisted(s,config).row],config,'next',later);
+  const first=loadAuditState([],config,'start',later);assert.equal(first.receivedFrom,config.intakeCutoff);assert.equal(first.receivedThrough,'2026-10-28T00:00:00.000Z');
+  const current=restart(completed(first,false));assert.equal(current.windowKind,'current');assert.equal(current.receivedFrom,'2026-10-27T23:55:00.000Z');
+  assert.equal(current.receivedThrough,'2026-10-28T23:55:00.000Z');assert.equal(current.coverageGaps.length,1);assert.equal(current.coverageProof,null);
+  const retry=restart(completed(current,true));assert.equal(retry.windowKind,'retry');assert.equal(retry.receivedFrom,first.receivedFrom);assert.equal(retry.receivedThrough,first.receivedThrough);
+  const again=restart(completed(retry,false));assert.equal(again.windowKind,'current');assert.equal(again.receivedFrom,'2026-10-28T23:50:00.000Z');
+  assert.equal(again.coverageGaps.length,1);assert.equal(again.coverageProof,null);assert.equal(again.coverageHadGap,true);
+  const nextRetry=restart(completed(again,true));assert.equal(nextRetry.windowKind,'retry');
+  const recovered=restart(completed(nextRetry,true));assert.equal(recovered.windowKind,'current');assert.equal(recovered.coverageGaps.length,0);
+  assert.equal(recovered.coverageHadGap,true);assert.equal(recovered.coverageProof,null);
+});
+
+test('completed enumeration advances the next time window even with pending preservation while SQL checkpoint stays unchanged', async () => {
+  const first = await simulate(continuousCfg, async operation => operation.state.phase === 'gmail_list'
+    ? ok({ messages: [{ id: 'abcdef01' }] }) : ok(gmailMetadata('abcdef01', 1)));
+  assert.equal(first.result.coverageComplete, true); assert.equal(first.result.allPreserved, false); assert.equal(first.result.scanFinished, false);
+  assert.equal(first.result.checkpointAdvanced, false); assert.equal(first.state.coverageProof.receivedThrough, first.state.receivedThrough);
+  const next = loadAuditState([first.row], continuousCfg, 'next-window', now + 600000);
+  assert.equal(next.receivedFrom, new Date(Date.parse(first.state.receivedThrough) - 300000).toISOString());
+  assert.equal(next.receivedThrough, new Date(now + 599000).toISOString());
+  assert.notEqual(next.requestId, first.state.requestId); assert.equal(next.coverageProof.sweepId, first.state.sweepId);
+});
+
+test('a prior manual pilot proof is adopted without changing collector identity or rechecking the entire prior day', async () => {
+  const first = await simulate(cfg, async () => ok({ messages: [],resultSizeEstimate: 0 }));
+  assert.equal(first.state.coverageProof, undefined);
+  const next = loadAuditState([first.row], continuousCfg, 'scheduled-after-pilot', now + 600000);
+  assert.equal(next.identityHash, first.state.identityHash);
+  assert.equal(next.receivedFrom, new Date(Date.parse(first.state.receivedThrough) - 300000).toISOString());
+  assert.equal(next.coverageProof.sweepId, first.state.sweepId);
+});
+
+test('three repeated uncertain backend ACKs close the attempt as incomplete and retry from the same proved time through the new now', () => {
+  let state = loadAuditState([], continuousCfg, 'first', now);
+  const from = state.receivedFrom;
+  state = applyAuditResponse(nextAuditOperation(state, continuousCfg, now), ok(run), continuousCfg, now);
+  state = applyAuditResponse(nextAuditOperation(state, continuousCfg, now), ok({ messages: [{ id: 'abcdef01' }], nextPageToken: 'next' }), continuousCfg, now);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    state.halt = false;
+    state = applyAuditFailure(nextAuditOperation(state, continuousCfg, now), 'AUDIT_BACKEND_UNAVAILABLE', now);
+  }
+  assert.equal(state.failureStreak.count, 3); assert.equal(state.pendingEvents[0].kind, 'page_discovered');
+  const saved = persisted(state, continuousCfg);
+  const resumed = loadAuditState([saved.row], continuousCfg, 'close-incomplete', now + 900001);
+  assert.equal(resumed.phase, 'finish'); assert.equal(resumed.abortIncomplete, true); assert.equal(resumed.coverageProof, null);
+  const finish = nextAuditOperation(resumed, continuousCfg, now + 900001);
+  assert.equal(finish.action, 'intake_finish');
+  state = applyAuditResponse(finish, ok({ coverageComplete: false, allPreserved: false, scanFinished: false, checkpointAdvanced: false }), continuousCfg, now + 900001);
+  const closed = persisted(state, continuousCfg), next = loadAuditState([closed.row], continuousCfg, 'retry-window', now + 1800000);
+  assert.equal(next.receivedFrom, from); assert.equal(next.receivedThrough, new Date(now + 1799000).toISOString());
+  assert.equal(next.coverageProof, null); assert.notEqual(next.requestId, state.requestId);
+});
+
+test('resumption nonce is persisted before its HTTP request and a lost ACK preserves nonce, window and pending page', () => {
+  const recoveryCfg = { ...cfg, resumeFence: true };
+  let state = loadAuditState([], recoveryCfg, 'first', now);
+  state = applyAuditResponse(nextAuditOperation(state, recoveryCfg, now), ok(run), recoveryCfg, now);
+  state = applyAuditResponse(nextAuditOperation(state, recoveryCfg, now), ok({ messages: [{ id: 'abcdef01' }], nextPageToken: 'next' }), recoveryCfg, now);
+  const page = state.pendingEvents[0], saved = persisted({ ...state, releaseLease: true }, recoveryCfg);
+  const resumed = loadAuditState([saved.row], recoveryCfg, 'second', now + 60000), durable = persisted(resumed, recoveryCfg);
+  const request = nextAuditOperation(durable.state, recoveryCfg, now + 60000);
+  assert.equal(request.action, 'intake_resume');
+  assert.equal(JSON.parse(durable.row.state_json).resumeRequest.resumeRequestId, request.payload.resume_request_id);
+  const lost = applyAuditFailure(request, 'AUDIT_BACKEND_UNAVAILABLE', now + 60000), lostRow = persisted({ ...lost, releaseLease: true }, recoveryCfg);
+  const retry = loadAuditState([lostRow.row], recoveryCfg, 'third', now + 120000), replay = nextAuditOperation(retry, recoveryCfg, now + 120000);
+  assert.deepEqual(replay.payload, request.payload); assert.deepEqual(retry.pendingEvents[0], page);
+  const reply = { ...run, run_token: '33333333-3333-4333-a333-333333333333', resumed: true, replayed: true,
+    collector_id: cfg.collectorId, scope_key: request.payload.scope_key, request_id: state.requestId,
+    received_from: state.receivedFrom, received_through: state.receivedThrough, expires_at: new Date(now + 3600000).toISOString() };
+  assert.throws(() => applyAuditResponse(replay, ok({ ...reply, received_from: new Date(now - 1000).toISOString() }), recoveryCfg, now + 120000), /RESUME_ACK_INVALID/);
+  const restored = applyAuditResponse(replay, ok(reply), recoveryCfg, now + 120000);
+  assert.equal(restored.resumeRequest, undefined); assert.equal(restored.runToken, reply.run_token); assert.deepEqual(restored.pendingEvents[0], page);
+  const pending = nextAuditOperation(restored, recoveryCfg, now + 120000);
+  assert.equal(pending.action, 'intake_event'); assert.equal(pending.payload.run_token, reply.run_token); assert.deepEqual(pending.payload.event, page);
+});
+
+test('a begin whose original ACK was lost obtains a resume fence before any provider read', () => {
+  const recoveryCfg = { ...cfg, resumeFence: true }, fresh = loadAuditState([], recoveryCfg, 'begin-replay', now);
+  const state = applyAuditResponse(nextAuditOperation(fresh, recoveryCfg, now), ok({ ...run, replayed: true }), recoveryCfg, now);
+  assert.equal(nextAuditOperation(state, recoveryCfg, now).action, 'intake_resume');
+});
+
+test('lost finish ACK retries finish idempotently instead of attempting to resume a sweep that may already be closed', () => {
+  const recoveryCfg = { ...cfg, resumeFence: true };
+  const state = { ...loadAuditState([], recoveryCfg, 'finish-one', now), phase: 'finish', sweepId: run.sweep_id, runToken: run.run_token, halt: true };
+  const saved = persisted({ ...state, releaseLease: true }, recoveryCfg), restored = loadAuditState([saved.row], recoveryCfg, 'finish-two', now + 1000);
+  assert.equal(restored.resumeRequest, undefined); assert.equal(nextAuditOperation(restored, recoveryCfg, now + 1000).action, 'intake_finish');
+});
+
+test('failure identity survives three lease/token rotations for the same event and then closes the attempt explicitly', () => {
+  const config = { ...continuousCfg, resumeFence: true };
+  let state = loadAuditState([], config, 'event-one', now);
+  state = applyAuditResponse(nextAuditOperation(state, config, now), ok(run), config, now);
+  state = applyAuditResponse(nextAuditOperation(state, config, now), ok({ messages: [{ id: 'abcdef01' }], nextPageToken: 'next' }), config, now);
+  const counts = [];
+  for (let index = 0; index < 3; index++) {
+    const row = persisted({ ...state, releaseLease: true }, config).row;
+    state = loadAuditState([row], config, 'event-' + index, now + index * 1000);
+    const resume = nextAuditOperation(state, config, now + index * 1000);
+    assert.equal(resume.action, 'intake_resume');
+    state = applyAuditResponse(resume, ok({ ...run, run_token: ['33333333-3333-4333-a333-333333333333','44444444-4444-4444-a444-444444444444','55555555-5555-4555-a555-555555555555'][index],
+      resumed: true, replayed: false, expires_at: new Date(now + 3600000).toISOString(), collector_id: cfg.collectorId, scope_key: resume.payload.scope_key,
+      request_id: state.requestId, received_from: state.receivedFrom, received_through: state.receivedThrough }), config, now + index * 1000);
+    const event = nextAuditOperation(state, config, now + index * 1000); assert.equal(event.action, 'intake_event');
+    state = applyAuditFailure(event, 'AUDIT_EVENT_REJECTED', now + index * 1000); counts.push(state.failureStreak.count);
+  }
+  assert.deepEqual(counts, [1, 2, 3]);
+  const row = persisted({ ...state, releaseLease: true }, config).row, next = loadAuditState([row], config, 'close-failed-attempt', now + 5000);
+  assert.equal(next.phase, 'finish'); assert.equal(next.abortIncomplete, true); assert.equal(nextAuditOperation(next, config, now + 5000).action, 'intake_finish');
 });

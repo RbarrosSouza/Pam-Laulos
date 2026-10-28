@@ -27,20 +27,39 @@ function fields(depth = 8) {
   return 'id,threadId,internalDate,payload(' + part(depth) + ')';
 }
 
-export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPilot = false } = {}) {
+export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPilot = false, scheduledCandidate = false, resumeFence = false, prospectiveCutoff = null, bridgeWorkflowId = null, canary = false, canaryMessageId = null, canaryCollectorId = null, canaryRecheckOnly = false, scheduleDisabled = false, captureAttachmentDetails = false } = {}) {
   if (!['gmail', 'chatwoot'].includes(provider)) throw new Error('Unsupported audit provider');
+  if (scheduledCandidate && (provider !== 'gmail' || manualPilot)) throw new Error('A separate Gmail-only scheduled candidate is required');
+  if (prospectiveCutoff !== null && (!scheduledCandidate || typeof prospectiveCutoff !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(prospectiveCutoff)
+    || !Number.isFinite(Date.parse(prospectiveCutoff)) || new Date(prospectiveCutoff).toISOString() !== prospectiveCutoff))
+    throw new Error('A prospective candidate requires an explicit canonical UTC activation cutoff');
+  if (bridgeWorkflowId !== null && (!prospectiveCutoff || typeof bridgeWorkflowId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(bridgeWorkflowId)))
+    throw new Error('A prospective candidate requires an explicit child workflow ID');
+  if (canary && (!prospectiveCutoff || !bridgeWorkflowId || !scheduledCandidate || typeof canaryMessageId!=='string' || !/^[a-f\d]{8,64}$/i.test(canaryMessageId))) throw new Error('Canary requires a prospective bridge and exact fixture message');
+  if (canaryCollectorId !== null && (!canary || typeof canaryCollectorId!=='string' || !/^gmail_canary_recheck_[a-z\d_]{8,48}$/.test(canaryCollectorId)))
+    throw new Error('A separate recheck collector is allowed only for a manual canary');
+  if (canaryRecheckOnly && (!canary || !canaryCollectorId)) throw new Error('Recheck-only requires a separate manual canary');
+  if(typeof scheduleDisabled!=='boolean')throw new Error('Schedule guard must be boolean');
+  if(typeof captureAttachmentDetails!=='boolean'||captureAttachmentDetails&&!prospectiveCutoff)throw new Error('Attachment metadata requires prospective collection');
+  const addBridge=Boolean(bridgeWorkflowId)&&!canaryRecheckOnly;
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(dataTableId)) throw new Error('Verified private Data Table ID required');
   const previous = exportConfiguration(source);
-  const cfg = { enabled: manualPilot === true, allowScheduled: false, monitoring: false, auditLookbackSeconds: 86400, provider, dataTableId, serviceUrl: previous.serviceUrl,
-    mailbox: previous.mailbox, intakeCutoff: previous.intakeCutoff, includeSpamTrash: true,
+  const cfg = { enabled: manualPilot === true || scheduledCandidate === true, allowScheduled: scheduledCandidate === true && !canary, monitoring: false, auditLookbackSeconds: 86400, provider, dataTableId, serviceUrl: previous.serviceUrl,
+    mailbox: previous.mailbox, intakeCutoff: prospectiveCutoff ?? previous.intakeCutoff, includeSpamTrash: true,
     accountId: previous.accountId, inboxId: previous.inboxId, chatwootBaseUrl: previous.chatwootBaseUrl,
-    collectorId: provider === 'gmail' ? 'gmail_audit_v2' : 'chatwoot_audit_v2', maxActions: 100, maxMillis: 180000, leaseMillis: 900000,
-    gmailMetadataFields: fields(), gmailNoticeFields: fields().replaceAll('body(attachmentId,size)', 'body(attachmentId,size,data)') };
+    collectorId: canaryCollectorId ?? (prospectiveCutoff ? 'gmail_prospective_' + crypto.createHash('sha256').update(prospectiveCutoff).digest('hex').slice(0,16)
+      : provider === 'gmail' ? 'gmail_audit_v2' : 'chatwoot_audit_v2'), maxActions: 100, maxMillis: 180000, leaseMillis: 900000,
+    gmailMetadataFields: fields(), gmailNoticeFields: fields().replaceAll('body(attachmentId,size)', 'body(attachmentId,size,data)'), notificationMode: 'home_only',
+    ...(resumeFence || scheduledCandidate ? { resumeFence: true } : {}),
+    ...(scheduledCandidate ? { continuous: true, overlapSeconds: 300, maxRepeatedFailures: 3, notificationMode: 'home_only', recheckPending: true } : {}),
+    ...(prospectiveCutoff ? { prospective: true } : {}), ...(bridgeWorkflowId ? {bridgeEnabled:true,bridgeWorkflowId} : {}), ...(canary ? {canary:true,canaryMessageId} : {}),
+    ...(canaryRecheckOnly ? {canaryRecheckOnly:true} : {}), ...(captureAttachmentDetails ? {captureAttachmentDetails:true} : {}) };
   const workerReference = credential(source, 'Reservar origem', 'httpHeaderAuth');
   const providerReference = provider === 'gmail'
     ? credential(source, 'Gmail - IDs paginados', 'oAuth2Api')
     : credential(source, 'Chatwoot - listar conversas da caixa', 'chatwootApi');
-  const workflow = { name: 'INTAKE AUDIT — ' + (provider === 'gmail' ? 'Gmail' : 'WhatsApp') + (manualPilot ? ' — PILOTO MANUAL 1 DIA (INATIVO)' : ' — registros duráveis (INATIVO)'), active: false,
+  const workflow = { name: 'INTAKE AUDIT — ' + (provider === 'gmail' ? 'Gmail' : 'WhatsApp') + (scheduledCandidate ? ' — PERIÓDICO CANDIDATO (INATIVO)' : manualPilot ? ' — PILOTO MANUAL 1 DIA (INATIVO)' : ' — registros duráveis (INATIVO)'), active: false,
     nodes: [], connections: {}, pinData: {}, settings: { executionOrder: 'v1', saveDataSuccessExecution: 'none', saveDataErrorExecution: 'none',
       saveManualExecutions: false, saveExecutionProgress: false, executionTimeout: 240, timezone: 'America/Sao_Paulo' } };
   const add = (name, type, version, parameters, position, extra = {}) => {
@@ -59,9 +78,10 @@ export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPil
     options: { timeout: 30000, redirect: { redirect: { followRedirects: false } },
       response: { response: { responseFormat: 'json', fullResponse: true, neverError: true } } } });
   const providerCredentials = provider === 'gmail' ? { oAuth2Api: providerReference } : { chatwootApi: providerReference };
-  add('Leia antes de habilitar', 'stickyNote', 1, { content: 'AUDITORIA DE RECEBIMENTOS — INATIVA E MANUAL POR PADRÃO. Credenciais existentes nos HTTP Request, nenhum segredo em Code. Só GET nos provedores e POST intake_begin/event/lookup/finish no backend. IDs persistidos por página antes dos metadados; estado e cursores na Data Table privada, nunca staticData. Lease exclusiva de 15min adquirida por UPDATE condicional de revisão; runtime240s. Quem encontra outra execução ativa para antes do ledger. Consulta de origem comprovada exige SQL26 e action intake_lookup_source publicados. Não baixa PDFs, não grava documentos/Drive, não envia mensagens. Schedule bloqueado até allowScheduled=true, além de enabled=true.' }, [-700, -400]);
+  const scheduleName = scheduledCandidate ? 'Agenda 5 minutos — candidato INATIVO' : 'Agenda futura — bloqueada por configuração';
+  add('Leia antes de habilitar', 'stickyNote', 1, { content: 'AUDITORIA DE RECEBIMENTOS — WORKFLOW INATIVO. Credenciais existentes nos HTTP Request, nenhum segredo em Code. Só GET nos provedores e POST de recibos/reconferência no backend. IDs persistidos por página antes dos metadados; estado e cursores na Data Table privada, nunca staticData. Lease de 15min por CAS; orçamento 100 ações/180s; timeout 240s do engine é soft, precisa prova real. Lookup exige SQL26; retomada exige SQL28; reconferência exige SQL30/Edge correspondente. Não lê PDF, não cria documentos/Drive/grupo e não envia WhatsApp. Recebimento sem documento é pendência genérica; não é exame comprovado. ' + (prospectiveCutoff ? 'PROSPECTIVO: novo coletor isolado; somente a partir do corte explícito. Revisar a integração de processamento e o horário do corte antes da ativação.' : scheduledCandidate ? 'CANDIDATO PERIÓDICO: revisar antes de ativar. Mantém o mesmo coletor, sobreposição de 5min e prova de enumeração independente de preservação.' : 'MANUAL: agenda bloqueada pela configuração e desabilitada no piloto.') }, [-700, -400]);
   add('Conferir manualmente', 'manualTrigger', 1, {}, [-700, 0]);
-  add('Agenda futura — bloqueada por configuração', 'scheduleTrigger', 1.2, { rule: { interval: [{ field: 'minutes', minutesInterval: 5 }] } }, [-700, 200], { disabled: manualPilot === true });
+  add(scheduleName, 'scheduleTrigger', 1.2, { rule: { interval: [{ field: 'minutes', minutesInterval: 5 }] } }, [-700, 200], { disabled: manualPilot === true || canary || scheduleDisabled });
   code('Configuração de auditoria', 'const cfg=' + JSON.stringify(cfg, null, 2) + ";validateAuditConfig(cfg,$execution.mode);return [{json:cfg}];", [-460, 0]);
   const identityUrl = provider === 'gmail' ? 'https://gmail.googleapis.com/gmail/v1/users/me/profile?fields=emailAddress'
     : previous.chatwootBaseUrl + '/api/v1/accounts/' + previous.accountId + '/inboxes/' + previous.inboxId;
@@ -93,9 +113,15 @@ export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPil
   { credentials: { httpHeaderAuth: workerReference }, retryOnFail: false, onError: 'continueErrorOutput' });
   add('Provedor — somente leitura', 'httpRequest', 4.2, providerHttp('={{ $json.url }}'), [2180, 160],
     { credentials: providerCredentials, retryOnFail: false, onError: 'continueErrorOutput' });
+  if (addBridge) {
+    add('Encaminhar ao subprocessador', 'if', 2.2, condition('={{ $json.target === "bridge" }}'), [1940, 160]);
+    add('Processar mensagem prospectiva', 'executeWorkflow', 1.2, { source: 'database', workflowId: { __rl:true,value:bridgeWorkflowId,mode:'id' },
+      mode:'once', options:{waitForSubWorkflow:true} }, [2180, 340], { onError:'continueRegularOutput', alwaysOutputData:true });
+    code('Reconsultar depois do subprocessador', "const cfg=$('Configuração de auditoria').first().json;const context=$('Dirigir próxima operação').item.json;const issues=Array.isArray($json.issues)?$json.issues.slice(0,200).map(i=>({message_id:i?.message_id,attachment_id:i?.attachment_id,reason:i?.reason})):[];return [{json:applyAuditResponse(context,{statusCode:200,body:{completed:!$json.error&&$json.scanFinished===true,issues}},cfg,Date.now())}];", [2420,340]);
+  }
   code('Aplicar resposta sem perder cursor', "const cfg=$('Configuração de auditoria').first().json;const context=$('Dirigir próxima operação').item.json;let state;try{state=applyAuditResponse(context,$json,cfg,Date.now());}catch(error){state=applyAuditFailure(context,error.message,Date.now());}return [{json:state}];", [2420, 0]);
   connect('Conferir manualmente', [['Configuração de auditoria']]);
-  connect('Agenda futura — bloqueada por configuração', [['Configuração de auditoria']]);
+  connect(scheduleName, [['Configuração de auditoria']]);
   connect('Configuração de auditoria', [['Conferir conta autorizada']]);
   connect('Conferir conta autorizada', [['Validar conta antes do ledger']]);
   connect('Validar conta antes do ledger', [['Carregar continuação privada']]);
@@ -112,20 +138,25 @@ export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPil
   connect('Operação encerrada', [['Lease final já foi liberada'], ['Operação do ledger']]);
   connect('Lease final já foi liberada', [['Resumo auditável'], ['Liberar lease antes de encerrar']]);
   connect('Liberar lease antes de encerrar', [['Preparar persistência privada']]);
-  connect('Operação do ledger', [['Ledger — evento durável'], ['Provedor — somente leitura']]);
+  connect('Operação do ledger', [['Ledger — evento durável'], [addBridge ? 'Encaminhar ao subprocessador' : 'Provedor — somente leitura']]);
+  if (addBridge) {
+    connect('Encaminhar ao subprocessador', [['Processar mensagem prospectiva'], ['Provedor — somente leitura']]);
+    connect('Processar mensagem prospectiva', [['Reconsultar depois do subprocessador']]);
+    connect('Reconsultar depois do subprocessador', [['Preparar persistência privada']]);
+  }
   connect('Ledger — evento durável', [['Aplicar resposta sem perder cursor'], ['Aplicar resposta sem perder cursor']]);
   connect('Provedor — somente leitura', [['Aplicar resposta sem perder cursor'], ['Aplicar resposta sem perder cursor']]);
   connect('Aplicar resposta sem perder cursor', [['Preparar persistência privada']]);
   return workflow;
 }
 
-export async function writeAuditWorkflows({ gmailExport, whatsappExport, dataTableId, out, manualPilot = false }) {
+export async function writeAuditWorkflows({ gmailExport, whatsappExport, dataTableId, out, manualPilot = false, scheduledCandidate = false, resumeFence = false }) {
   const inputs = await Promise.all([gmailExport, whatsappExport].map(filename => fs.readFile(filename, 'utf8').then(JSON.parse)));
   await fs.mkdir(out, { recursive: true, mode: 0o700 });
   const result = [];
-  for (const [index, provider] of ['gmail', 'chatwoot'].entries()) {
-    const workflow = buildN8nAuditWorkflow(provider, inputs[index], dataTableId, { manualPilot });
-    const filename = path.join(out, 'INTAKE-AUDIT-' + provider.toUpperCase() + (manualPilot ? '-MANUAL-PILOT' : '-INACTIVE') + '.private.json');
+  for (const [index, provider] of (scheduledCandidate ? ['gmail'] : ['gmail', 'chatwoot']).entries()) {
+    const workflow = buildN8nAuditWorkflow(provider, inputs[index], dataTableId, { manualPilot, scheduledCandidate, resumeFence });
+    const filename = path.join(out, 'INTAKE-AUDIT-' + provider.toUpperCase() + (scheduledCandidate ? '-SCHEDULED-CANDIDATE' : manualPilot ? '-MANUAL-PILOT' : '-INACTIVE') + '.private.json');
     const text = JSON.stringify(workflow, null, 2) + '\n';
     await fs.writeFile(filename, text, { mode: 0o600 });
     result.push({ path: filename, nodes: workflow.nodes.length, active: false, sha256: crypto.createHash('sha256').update(text).digest('hex') });
@@ -137,5 +168,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const args = process.argv.slice(2), get = key => { const index = args.indexOf(key); return index < 0 ? null : args[index + 1]; };
   const gmailExport = get('--gmail-export'), whatsappExport = get('--whatsapp-export'), dataTableId = get('--table-id'), out = get('--out');
   if (!gmailExport || !whatsappExport || !dataTableId || !out) throw new Error('Use private --gmail-export --whatsapp-export --table-id --out');
-  console.log(JSON.stringify(await writeAuditWorkflows({ gmailExport, whatsappExport, dataTableId, out, manualPilot: args.includes('--manual-pilot') })));
+  console.log(JSON.stringify(await writeAuditWorkflows({ gmailExport, whatsappExport, dataTableId, out, manualPilot: args.includes('--manual-pilot'), scheduledCandidate: args.includes('--scheduled-candidate'), resumeFence: args.includes('--resume-fence') })));
 }
