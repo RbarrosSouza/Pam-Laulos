@@ -27,4 +27,4 @@ Foram executados PostgreSQL local e compatibilidade com as migrações concorren
 
 Publicar de forma coordenada a migração `20261028000040_exam_document_deletion.sql`, a Edge Function `exam-document-service`, os workflows gerados OPERACIONAL-01 e OPERACIONAL-05 e o bundle atualizado da auditoria de descoberta. Os wrappers existentes de ingestão são preservados. Não publicar somente a interface. Revalidar no ambiente de destino a sequência de migrações (a migração 39 pertence a outro trabalho) antes de aplicar 40. A mudança não exige apagar nenhum arquivo no Drive.
 
-Estado: implementação e verificações locais concluídas; publicação em produção não realizada nesta etapa.
+Estado: implementação e verificações locais concluídas para o fluxo desta branch; publicação em produção não realizada. A nota vigente do Segundo Cérebro informa coletores prospectivos de outro trabalho em produção: revisar especialmente o validador de lookup do Outlook, que ainda aceita apenas saved/pending/not_found, antes de aplicar o novo retorno excluded. Não instalar SQL40 isoladamente nesse ambiente.
