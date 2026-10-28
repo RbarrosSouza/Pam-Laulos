@@ -507,7 +507,7 @@ export function applyAuditResponse(context, response, cfg, now) {
             return issue?[{kind:'attachment_retry_failed',partition_key:job.partitionKey,message_id:job.messageId,attachment_id:origin.attachment_id,code:issue.code}]:[];
           });
           const incomplete=cfg.canary===true && job.origins.some((origin,index)=>['attachment','download_link'].includes(origin.artifact_kind)
-            && !job.unsupportedIds.includes(origin.attachment_id) && job.lookupItems[index]?.status!=='saved');
+            && !job.unsupportedIds.includes(origin.attachment_id) && !['saved','excluded'].includes(job.lookupItems[index]?.status));
           if(incomplete){state.canaryPaused=true;state.lastError={stage:'bridge',code:'audit_bridge_saved_unproven',at:new Date(now).toISOString()};}
           return auditEvents(state, events, 'lookup', incomplete);
         }

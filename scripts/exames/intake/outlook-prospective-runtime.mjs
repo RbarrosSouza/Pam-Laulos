@@ -120,9 +120,13 @@ export function applyOutlookResponse(context,response,c,now){const s=copy(contex
    const e=s.pendingEvents.shift();if(e.kind==='origin_outcome'){delete s.outcomeChecked;delete s.outcomeLookup;}if(e.kind==='origin_outcome'&&e.disposition==='pending'){const j=s.jobs.find(x=>x.event.attachment_id===e.attachment_id);if(!j||!uuid(response.receipt_id))throw Error('OUTLOOK_RECEIPT_ACK_INVALID');j.ack=response;}
   }else if(context.action==='intake_lookup_source'){
    if(s.phase==='events'&&s.outcomeLookup){const e=s.outcomeLookup,item=response?.items?.[0];
-    if(response?.contract!=='exam_intake_source_lookup_v1'||!item||!['saved','pending','not_found'].includes(item.status)||item.message_id!==e.message_id||item.attachment_id!==e.attachment_id)throw Error('OUTLOOK_LOOKUP_ACK_INVALID');
+    if(response?.contract!=='exam_intake_source_lookup_v1'||!item||(!['saved','pending','not_found','excluded'].includes(item.status)||item.status==='excluded'&&item.reason!=='user_deleted')||item.message_id!==e.message_id||item.attachment_id!==e.attachment_id)throw Error('OUTLOOK_LOOKUP_ACK_INVALID');
     if(item.status==='saved'&&item.match_kind==='exact_origin'&&item.canonical_file_preserved===true&&uuid(item.source_id)&&uuid(item.document_id)&&item.source_document_id===item.document_id&&/^[a-f0-9]{64}$/.test(item.sha256||'')&&Number.isSafeInteger(item.size_bytes)&&item.size_bytes>0){
      s.pendingEvents[0]={kind:'origin_outcome',partition_key:e.partition_key,message_id:e.message_id,attachment_id:e.attachment_id,disposition:'saved',source_id:item.source_id,document_id:item.document_id};const j=s.jobs.find(x=>x.event.attachment_id===e.attachment_id);if(j)j.kind='saved';}
+    else if(item.status==='excluded'&&item.reason==='user_deleted'){
+     s.pendingEvents[0]={kind:'origin_outcome',partition_key:e.partition_key,message_id:e.message_id,attachment_id:e.attachment_id,disposition:'excluded',code:'user_deleted'};
+     const j=s.jobs.find(x=>x.event.attachment_id===e.attachment_id);if(j)j.kind='review';
+    }
     else if(item.status==='saved')throw Error('OUTLOOK_SAVED_PROOF_INVALID');
     else if(item.status==='pending'&&item.match_kind!=='exact_origin'){const j=s.jobs.find(x=>x.event.attachment_id===e.attachment_id);if(j)j.kind='review';}
     s.outcomeChecked=e.attachment_id;delete s.outcomeLookup;return s;}
@@ -131,6 +135,11 @@ export function applyOutlookResponse(context,response,c,now){const s=copy(contex
     delete s.childReason;delete s.noRetry;
     if(s.retrying){s.retryResolution={receipt_id:s.retryQueue[0].ack.receipt_id,source_id:item.source_id,document_id:item.document_id};s.phase='retry_resolve';return s;}
     return enqueue(s,[{...s.lookupEvent,disposition:'saved',source_id:item.source_id,document_id:item.document_id}],'advance_job');
+   }
+   if(item.status==='excluded'&&item.reason==='user_deleted'){
+    delete s.childReason;delete s.noRetry;
+    if(s.retrying){s.retryQueue.shift();s.retryRemaining--;s.retrying=false;s.phase='retry_jobs';return s;}
+    return enqueue(s,[{kind:'origin_outcome',partition_key:s.lookupEvent.partition_key,message_id:s.lookupEvent.message_id,attachment_id:s.lookupEvent.attachment_id,disposition:'excluded',code:'user_deleted'}],'advance_job');
    }
    const reason=s.childReason||'outlook_child_unconfirmed',identity=s.lookupEvent;
    if(s.retrying){if(s.noRetry)s.retryQueue.shift();else s.retryQueue.push(s.retryQueue.shift());s.retryRemaining--;s.retrying=false;s.phase='retry_jobs';}

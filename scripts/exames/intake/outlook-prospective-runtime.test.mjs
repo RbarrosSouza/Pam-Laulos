@@ -78,3 +78,15 @@ test('repeated message cursor fails closed and records the folder failure',()=>{
  const op=nextOutlookOperation(s,c,now);assert.throws(()=>applyOutlookResponse(op,{successful:true,data:{value:[],next_page_token:'previous'}},c,now),/PAGINATION_CYCLE/);
  const failed=applyOutlookFailure(op,c);assert.equal(failed.mailIndex,1);assert(failed.pendingEvents.some(e=>e.kind==='failure'&&e.code==='outlook_message_listing_failed'));
 });
+
+test('deleted source exits current lookup and retry queues without reprocessing',()=>{
+ const c=config(),now=Date.now(),event={kind:'origin_outcome',partition_key:'inbox',message_id:'deleted-mail',attachment_id:'outlook-attachment:deleted',disposition:'pending',stage:'storage',code:'pending'};
+ const ack={contract:'exam_intake_source_lookup_v1',items:[{message_id:event.message_id,attachment_id:event.attachment_id,status:'excluded',reason:'user_deleted'}]};
+ let state=loadOutlookState([],c,'deletion',now);Object.assign(state,{phase:'events',outcomeLookup:event,pendingEvents:[event],jobs:[{event,kind:'attachment'}]});
+ state=applyOutlookResponse({target:'backend',action:'intake_lookup_source',state},ack,c,now);
+ assert.equal(state.pendingEvents[0].disposition,'excluded');assert.equal(state.jobs[0].kind,'review');
+ assert.throws(()=>applyOutlookResponse({target:'backend',action:'intake_lookup_source',state:{...state,outcomeLookup:event}}, {...ack,items:[{...ack.items[0],reason:'unknown'}]},c,now),/LOOKUP_ACK_INVALID/);
+ Object.assign(state,{phase:'lookup',lookupEvent:event,retrying:true,retryRemaining:1,retryQueue:[{event}],pendingEvents:[]});
+ state=applyOutlookResponse({target:'backend',action:'intake_lookup_source',state},ack,c,now);
+ assert.equal(state.phase,'retry_jobs');assert.equal(state.retryQueue.length,0);assert.equal(state.retryRemaining,0);
+});
