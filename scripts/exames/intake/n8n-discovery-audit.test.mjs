@@ -211,6 +211,15 @@ test('exact read-only lookup proof produces saved receipts without any reservati
   assert(result.order.indexOf('page_discovered') < result.order.indexOf('intake_lookup_source'));
 });
 
+test('a deliberately deleted origin is excluded instead of generating a new pending incident', async () => {
+  const deleted = identities => ({contract:'exam_intake_source_lookup_v1',items:identities.map(identity=>({...identity,status:'excluded',reason:'user_deleted'}))});
+  const result = await simulate(cfg, async operation => operation.state.phase === 'gmail_list'
+    ? ok({ messages: [{ id: 'abcdef01' }] }) : ok(gmailMetadata('abcdef01', 2)), null, 'deleted-proof', deleted);
+  const outcomes=result.events.filter(event=>event.kind==='origin_outcome');
+  assert.equal(outcomes.length,2);assert(outcomes.every(event=>event.disposition==='excluded' && event.code==='user_deleted'));
+  assert.equal(result.state.originsPending,0);assert.equal(result.state.originsExcluded,2);
+});
+
 test('lookup chunks every origin by at most 100 identities before declaring the complete message', async () => {
   const result = await simulate({ ...cfg, maxActions: 200 }, async operation => operation.state.phase === 'gmail_list'
     ? ok({ messages: [{ id: 'abcdef01' }] }) : ok(gmailMetadata('abcdef01', 125)), null, 'chunks', savedLookup);
