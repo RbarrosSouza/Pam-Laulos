@@ -472,4 +472,14 @@ await check('storage failure leaves deletion resumable and never reports success
   assert.equal(calls.some(x=>x.name==='finish_exam_document_deletion'),false);
   deleteStorageFails=false;assert.equal((await request('delete',payload,'fixture-user-token')).status,200);
 });
+await check('deletion status is member-only and never invokes deletion or storage',async()=>{
+ const payload={document_id:documentId};
+ assert.equal((await request('delete_status',payload)).status,403);
+ assert.equal((await request('delete_status',payload,'fixture-outsider-token')).status,403);
+ for(const state of ['deleting','deleted',null]){
+  docs[0].deletion_state=state;const res=await request('delete_status',payload,'fixture-user-token');assert.equal(res.status,200);assert.deepEqual(await res.json(),{state:state||'active'});
+ }
+ assert.equal((await request('delete_status',{document_id:'invalid'},'fixture-user-token')).status,400);
+ assert.equal(calls.length,0);assert.equal(recorded.length,0);
+});
 console.log(`PASS: ${count} Edge handler scenarios with isolated adapters; live Supabase/Drive/WhatsApp still require homologation.`);

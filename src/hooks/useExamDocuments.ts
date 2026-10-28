@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useExamAuth } from '@/contexts/exam-auth'
 import { DocumentActionError, normalizeDocumentActionError } from '@/lib/document-action-error'
+import { requestDocumentDeletion } from '@/lib/document-service-request'
 import type { DocumentCandidate, DocumentEvent, ExamDocument } from '@/types/exam-document'
 
 export const DOCUMENT_PAGE_SIZE = 25
@@ -178,6 +179,13 @@ export function useDocumentCandidates(query: string) {
 }
 
 export async function callDocumentService(action: string, payload: Record<string, unknown> = {}, file?: File) {
+  if (action === 'delete' || action === 'delete_status') {
+    return requestDocumentDeletion(action, payload, {
+      getSession: () => supabase.auth.getSession(), fetch: (...args) => fetch(...args),
+      url: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/exam-document-service`,
+      apiKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+    })
+  }
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) throw new Error('Entre novamente para continuar.')
   const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/exam-document-service`

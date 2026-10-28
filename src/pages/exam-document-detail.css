@@ -103,8 +103,8 @@
 .exam-detail-delete input { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: white; color: var(--ink); }
 .exam-detail-delete input:focus { outline: 2px solid var(--olive); outline-offset: 2px; }
 .exam-detail-delete-confirm { display: flex; justify-content: center; align-items: center; gap: 8px; border-radius: 12px; padding: 12px; background: #a32929; color: white; font-weight: 600; }
-.exam-detail-delete-confirm:disabled, .exam-detail-delete-cancel:disabled { opacity: .5; }
-.exam-detail-delete-cancel { color: var(--ink); font-weight: 600; }
+.exam-detail-delete-confirm:disabled, .exam-detail-delete-cancel:disabled, .exam-detail-delete-check:disabled { opacity: .5; }
+.exam-detail-delete-cancel, .exam-detail-delete-check { color: var(--ink); font-weight: 600; }
 .exam-detail-delete-error { color: #a32929; }
 .exam-detail-reference { font-size: 12px; color: var(--muted); margin-top: 20px; }
 .exam-detail-empty, .exam-detail-success { text-align: center; padding: 10px 0; }
