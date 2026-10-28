@@ -1,3 +1,5 @@
+import { intakeActions, runIntakeAction } from "./intake-service-routes.ts";
+import { authenticateExamIntakeMonitor, authorizeExamIntakeMonitorAction, filterExamIntakeMonitorResult } from "./intake-monitor-auth.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.99.3";
 import { composioReaderConfig, readComposioDriveOriginal, oauthDriveReaderConfig, readOAuthDriveOriginal } from "./composio-original-reader.ts";
 import { selectExamSupabasePrivilegedKey } from "./supabase-privileged-key.ts";
@@ -6,7 +8,7 @@ import { selectExamSupabasePrivilegedKey } from "./supabase-privileged-key.ts";
 // User-facing file/upload actions additionally require a verified Supabase user and active membership.
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info, x-exam-intake-monitor",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Expose-Headers": "Content-Disposition, X-Exam-Document-Id",
 };
@@ -80,9 +82,12 @@ Deno.serve(async (req: Request) => {
     const rawWorkerToken = /^[a-f0-9]{64}$/i.test(authorization) ? authorization : undefined;
     const isWorker = Boolean(workerKey && ((bearer && safeEqual(bearer, workerKey))
       || (rawWorkerToken && safeEqual(rawWorkerToken, workerKey))));
-    if (!bearer && !isWorker) error("Autenticação obrigatória", 401);
+    const isMonitor = authenticateExamIntakeMonitor(authorization, (name) => Deno.env.get(name), safeEqual);
+    // Explicit monitor intent never falls back to broader worker or member access.
+    if (req.headers.has("X-Exam-Intake-Monitor") && (req.headers.get("X-Exam-Intake-Monitor") !== "1" || !isMonitor)) error("Autenticação do monitor inválida", 401);
+    if (!bearer && !isWorker && !isMonitor) error("Autenticação obrigatória", 401);
     let userId: string | undefined;
-    if (!isWorker) {
+    if (!isWorker && !isMonitor) {
       const { data: auth, error: authError } = await service.auth.getUser(bearer!);
       if (authError || !auth.user) error("Sessão inválida", 401);
       const { data: member, error: memberError } = await service.from("exam_document_member")
@@ -91,6 +96,7 @@ Deno.serve(async (req: Request) => {
       userId = auth.user.id;
     }
     const isMultipart = req.headers.get("Content-Type")?.startsWith("multipart/form-data");
+    if (isMonitor && isMultipart) authorizeExamIntakeMonitorAction(true, '', true);
     let action: string;
     let payload: Json;
     let form: FormData | undefined;
@@ -105,7 +111,8 @@ Deno.serve(async (req: Request) => {
       try { json = plain(await req.json()); } catch { error("JSON inválido"); }
       action = String(json.action || ""); payload = plain(json.payload);
     }
-    if (!isWorker && !['upload', 'file', 'file_url'].includes(action)) error("Ação restrita ao worker", 403);
+    authorizeExamIntakeMonitorAction(isMonitor, action, Boolean(isMultipart));
+    if (!isWorker && !isMonitor && !['upload', 'file', 'file_url'].includes(action)) error("Ação restrita ao worker", 403);
     async function rpc(name: string, args: Json) {
       const { data, error: rpcError } = await service.rpc(name, args);
       if (rpcError) {
@@ -126,7 +133,26 @@ Deno.serve(async (req: Request) => {
       }
       return data;
     }
+    if (intakeActions.has(action)) {
+      const result = await runIntakeAction(action, payload, rpc, { uuid, hash: sha256 });
+      return response(filterExamIntakeMonitorResult(action, result, isMonitor));
+    }
     switch (action) {
+      case "reaction_preview": return response(await rpc("preview_exam_contact_reactions", {}));
+      case "reaction_reserve_tasks": return response(await rpc("reserve_exam_contact_reactions", {
+        p_worker: String(payload.worker || ""), p_limit: Number(payload.limit ?? 1),
+      }));
+      case "reaction_begin": {
+        if (typeof payload.actor_id !== "number" || !Number.isSafeInteger(payload.actor_id) || payload.actor_id < 1) error("REACTION_ACTOR_INVALID");
+        return response(await rpc("begin_exam_contact_reaction", {
+          p_reaction_id: uuid(payload.reaction_id), p_lease_token: uuid(payload.lease_token),
+          p_destination_key: String(payload.destination_key || ""), p_external_message_id: String(payload.external_message_id || ""),
+          p_emoji: String(payload.emoji || ""), p_actor_id: payload.actor_id,
+        }));
+      }
+      case "reaction_result": return response(await rpc("record_exam_contact_reaction_result", {
+        p_reaction_id: uuid(payload.reaction_id), p_lease_token: uuid(payload.lease_token), p_outcome: plain(payload.outcome),
+      }));
       case "pending_summary_preview": return response(await rpc("preview_exam_pending_summary", {}));
       case "pending_summary_reserve": return response(await rpc("reserve_exam_pending_summary", {
         // Day, time window and destination are owned by the server, not payload overrides.
@@ -161,7 +187,7 @@ Deno.serve(async (req: Request) => {
       case "collection_commit": return response(await rpc("commit_exam_collection_sweep", {
         p_sweep_id: uuid(payload.sweep_id), p_expected_revision: payload.expected_revision ?? null,
       }));
-      case "reserve_source": return response(await rpc("reserve_exam_document_source", { p_source: plain(payload.source) }));
+      case "reserve_source": return response(await rpc("reserve_exam_intake_source", { p_source: plain(payload.source) }));
       case "begin_staging": {
         const scope = Deno.env.get("COMPOSIO_STAGING_SCOPE");
         if (!scope || !/^[A-Za-z0-9_.:-]{1,96}$/.test(scope)) error("Staging compartilhado Composio não configurado", 503);
@@ -178,7 +204,7 @@ Deno.serve(async (req: Request) => {
         const file = plain(payload.file);
         // Only the verified manual upload action may stage browser bytes while Drive is paused.
         delete file.staging_bucket; delete file.staging_path;
-        return response(await rpc("stage_exam_document_file", { p_document_id: uuid(payload.document_id), p_file: file, p_worker: String(payload.worker || "ingestion") }));
+        return response(await rpc("stage_exam_intake_file", { p_document_id: uuid(payload.document_id), p_file: file, p_worker: String(payload.worker || "ingestion") }));
       }
       case "confirm_file": return response(await rpc("confirm_exam_document_file", { p_document_id: uuid(payload.document_id), p_file: plain(payload.file), p_lease_token: uuid(payload.lease_token) }));
       case "extraction": {

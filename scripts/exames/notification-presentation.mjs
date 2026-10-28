@@ -24,8 +24,11 @@ export function examPresentation(document, baseUrl) {
   if (document.received_at && Number.isFinite(Date.parse(document.received_at))) {
     received = new Intl.DateTimeFormat('pt-BR', {timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).format(new Date(document.received_at)).replace(', ', ' às ');
   }
+  const previous = document.previous_document_id;
+  const isUpdate = typeof previous === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(previous)
+    && previous.toLowerCase() !== String(document.id).toLowerCase();
   const content = [
-    '🧪 *Novo exame*',
+    isUpdate ? '🧪 *Atualização do exame*' : '🧪 *Novo exame*',
     '',
     present('client_name') ? '*Tutor:* ' + text(fields.client_name) : null,
     present('pet_name') ? '*Pet:* ' + text(fields.pet_name) : null,

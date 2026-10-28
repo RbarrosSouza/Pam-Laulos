@@ -29,6 +29,7 @@ const node = (name, selected = workflow) => {
   const value = selected.nodes.find(item => item.name === name);
   assert(value, 'missing node ' + name); return value;
 };
+const auditState = {};
 function message() {
   return { event: 'message_created', id: 910, account: { id: 41 }, inbox: { id: 73 }, private: false, message_type: 'incoming',
     created_at: '2026-10-18T12:30:00Z', sender: { id: 200, type: 'contact', phone_number: '+5511987654321' },
@@ -45,12 +46,15 @@ function expression(value, json, outputs = {}) {
 }
 async function code(name, input, outputs = {}, helpers = {}, selected = workflow, execution = {}) {
   const lookup = { Configuração: [{ json: cfg }], ...outputs };
+  const inputs = Array.isArray(input) ? input : [input];
+  input = inputs[0];
   // The real n8n Code sandbox has Buffer/Date but may omit the URL global.
   const sandbox = { Buffer, Date, require: name => {
     if (name === 'crypto') return crypto;
     assert.fail('Module is disallowed in Code node: ' + name);
   },
-    $json: input.json, $input: { first: () => input, all: () => [input] }, $execution: { id: 'synthetic-execution', mode: 'production', ...execution },
+    $json: input.json, $input: { first: () => input, all: () => inputs }, $execution: { id: 'synthetic-execution', mode: 'production', ...execution },
+    $getWorkflowStaticData: () => auditState,
     $: name => ({ first: () => lookup[name]?.[0], item: lookup[name]?.at(-1), all: () => lookup[name] || [] }),
     helpers: { getBinaryDataBuffer: async () => input.binary?.data?.bytes ?? bytes,
       prepareBinaryData: async (value, fileName, mimeType) => ({ bytes: Buffer.from(value), fileName, mimeType }), ...helpers } };
@@ -70,7 +74,8 @@ test('neutral webhook template has a valid graph, parses every Code/expression a
   assert.equal(template.active, false); assert.deepEqual(template.pinData, {});
   assert.equal(template.nodes.filter(item => item.type.endsWith('webhook')).length, 1);
   assert.equal(template.nodes.filter(item => item.type.endsWith('manualTrigger')).length, 1);
-  assert.equal(template.nodes.filter(item => item.type.endsWith('scheduleTrigger')).length, 0);
+  assert.equal(template.nodes.filter(item => item.type.endsWith('scheduleTrigger')).length, 1);
+  assert.equal(node('Conferir WhatsApp a cada 5 minutos').parameters.rule.interval[0].minutesInterval, 5);
   assert.equal(template.settings.saveDataSuccessExecution, 'none'); assert.equal(template.settings.saveDataErrorExecution, 'none');
   assert.equal(template.settings.saveManualExecutions, false); assert.equal(template.settings.saveExecutionProgress, false);
   const names = new Set(template.nodes.map(item => item.name)); assert.equal(names.size, template.nodes.length);
@@ -100,7 +105,7 @@ test('all API credentials are existing references, with no Gmail call, no group 
   assert(!httpNodes.some(item => /gmail\.googleapis|googleapis\.com\/gmail|Gmail -/.test(item.parameters.url + item.name)));
   assert(!workflow.nodes.some(item => item.type.endsWith('executeWorkflow')));
   const chatwoot = httpNodes.filter(item => item.name.startsWith('Chatwoot -'));
-  assert.equal(chatwoot.length, 2);
+  assert.equal(chatwoot.length, 5);
   for (const item of chatwoot) {
     assert.equal(item.parameters.method, 'GET'); assert.equal(item.credentials.chatwootApi.id, settings.credentials.chatwoot.id);
     assert.equal(item.parameters.options.redirect.redirect.followRedirects, false);
@@ -117,18 +122,18 @@ test('all API credentials are existing references, with no Gmail call, no group 
   const folder = node('Drive - conferir pasta privada');
   assert.equal(folder.retryOnFail, true); assert.equal(folder.maxTries, 3); assert.equal(folder.waitBetweenTries, 1000);
   assert.equal(folder.parameters.options.response.response.neverError, false);
-  assert.equal(httpNodes.filter(item => item.retryOnFail).length, 3);
+  assert.equal(httpNodes.filter(item => item.retryOnFail).length, 6);
 });
 
 test('authenticated canonical API reads occur before every source reservation and before all media bytes', () => {
   const graph = workflow.connections;
   const canonical = 'Conferir remetente e todos os PDFs', reserve = 'Reservar origem', download = 'Chatwoot - baixar PDF reservado';
-  function reaches(from, target, blocked, visited = new Set()) {
-    if (from === blocked || visited.has(from)) return false; if (from === target) return true; visited.add(from);
+  function reaches(from, target, blocked = [], visited = new Set()) {
+    if ([blocked].flat().includes(from) || visited.has(from)) return false; if (from === target) return true; visited.add(from);
     return (graph[from]?.main || []).flat().some(edge => reaches(edge.node, target, blocked, new Set(visited)));
   }
-  for (const trigger of ['Entrada WhatsApp da equipe', 'Testar mensagem selecionada']) {
-    assert(reaches(trigger, reserve)); assert(!reaches(trigger, reserve, canonical));
+  for (const trigger of ['Entrada WhatsApp da equipe', 'Testar mensagem selecionada', 'Conferir WhatsApp a cada 5 minutos']) {
+    assert(reaches(trigger, reserve)); assert(!reaches(trigger, reserve, [canonical, 'Origens recuperadas para conferir']));
     assert(!reaches(trigger, download, reserve));
   }
   assert.equal(graph['Chatwoot - conferir conversa de origem'].main[0][0].node, 'Chatwoot - reler mensagem de origem');
@@ -136,6 +141,41 @@ test('authenticated canonical API reads occur before every source reservation an
   assert.equal(graph[download].main[1][0].node, 'Registrar falha de origem');
   assert.equal(graph['Registrar falha de origem'].main[0][0].node, 'Manter janela para recuperação');
   assert.equal(graph['Manter janela para recuperação'].main[0][0].node, 'Próximo anexo');
+});
+
+test('scheduled sweep has no manual selection and uses authenticated inbox/message pagination before intake', async () => {
+  const configured = await code('Configuração', { json: { whatsappSweep: true } });
+  assert.equal(configured[0].json.polling, true);
+  assert.equal(configured[0].json.request, undefined);
+  assert.match(configured[0].json.worker, /whatsapp-sweep:synthetic-execution$/);
+  const selected = await buildWhatsappWorkflow({ ...settings, config: { ...settings.config, manualMessageId: '910', manualConversationId: '300' } });
+  await assert.rejects(code('Configuração', { json: { whatsappSweep: true } }, {}, {}, selected), /Limpe a seleção manual/);
+  const outputs = { Configuração: configured[0] };
+  assert.equal(expression(node('Chatwoot - listar conversas da caixa').parameters.url, { conversationPage: 2 }, outputs), cfg.chatwootBaseUrl + '/api/v1/accounts/41/conversations?status=all&assignee_type=all&inbox_id=73&page=2');
+  assert.equal(expression(node('Chatwoot - listar mensagens para conferência').parameters.url, { conversation: { id: 300 }, beforeMessageId: '900' }, outputs), cfg.chatwootBaseUrl + '/api/v1/accounts/41/conversations/300/messages?before=900');
+  const graph = workflow.connections;
+  assert.equal(graph['Todas as conversas enumeradas'].main[1][0].node, 'Página de conversas para conferir');
+  assert.equal(graph['Todas as mensagens conferidas'].main[1][0].node, 'Página de mensagens para conferir');
+  assert.equal(graph['Conferência integral terminada'].main[1][0].node, 'Conversa para conferir');
+  assert.equal(graph['Origens recuperadas para conferir'].main[0][0].node, 'PDF autorizado disponível');
+  await assert.rejects(code('Origens recuperadas para conferir', { json: { sweepComplete: false, origins: [] } }), /incomplete/);
+});
+
+test('scheduled intake persists aggregate evidence and detects the absent fourth attachment receipt', async () => {
+  const configured = await code('Configuração', { json: { whatsappSweep: true } });
+  const origin = inspectChatwootMessage(message(), cfg).origins[0];
+  const origins = Array.from({ length: 4 }, (_, index) => ({ ...plain(origin), source: { ...origin.source, attachment_id: 'chatwoot-attachment:' + (811 + index) } }));
+  const receipts = origins.slice(0, 3).map(value => ({ json: { intakeReceipt: true, kind: 'attachment', message_id: value.source.message_id,
+    attachment_id: value.source.attachment_id, disposition: 'saved' } }));
+  const result = await code('Recebimento encerrado', receipts, { Configuração: configured,
+    'Origens recuperadas para conferir': origins.map(json => ({ json })) });
+  assert.equal(result[0].json.scanFinished, false);
+  assert.equal(result[0].json.counts.failed, 1);
+  assert.equal(auditState.lastWhatsappSweep.counts.attachments, 4);
+  assert.equal(auditState.lastWhatsappSweep.executionId, 'synthetic-execution');
+  assert.equal(auditState.intakeAuditHistory.length, 1);
+  assert(!JSON.stringify(auditState).includes(origin.source.attachment_id));
+  assert(!JSON.stringify(auditState).includes('original.pdf'));
 });
 
 test('Config coarse gate and API URLs expose IDs only; canonical reread overrides forged webhook attachments/sender', async () => {
@@ -258,7 +298,7 @@ test('source reservation, cross-channel canonical receipt and persisted Drive ID
   assert.equal(verified[0].json.stage.drive_file_id, 'persisted-drive-id');
   await assert.rejects(code('Conferir integridade do original', { json: {}, binary: { data: { bytes: Buffer.concat([bytes, Buffer.from('changed')]) } } }, outputs), /Conflito de integridade/);
   assert.equal(workflow.connections['Objeto já tem bytes'].main[0][0].node, 'Drive - conferir bytes salvos');
-  const returned = await code('Próximo anexo', { json: { resetAttachments: true } });
+  const returned = await code('Próximo anexo', { json: { resetAttachments: true } }, { 'Um anexo por vez': [{ json: origin }] });
   assert.equal(returned[0].json.resetAttachments, undefined);
 });
 

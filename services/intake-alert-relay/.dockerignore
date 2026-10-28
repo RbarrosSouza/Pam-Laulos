@@ -1,0 +1,6 @@
+.env*
+secrets/
+*.sqlite*
+*.test.mjs
+README.md
+compose.yaml

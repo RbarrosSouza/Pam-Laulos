@@ -155,7 +155,7 @@ export function canonicalChatwootEvent(request, conversationResponse, messagesRe
     || safeProviderId(conversation.inbox_id, 'whatsapp_canonical_inbox_invalid') !== cfg.inboxId) fail('whatsapp_canonical_conversation_mismatch');
   if (conversation.account_id != null && safeProviderId(conversation.account_id, 'whatsapp_canonical_account_invalid') !== cfg.accountId) fail('whatsapp_canonical_account_mismatch');
   const messages = unwrapChatwootResponse(messagesResponse, 'whatsapp_messages_response_unproven');
-  if (!Array.isArray(messages.payload) || messages.payload.length > 20) fail('whatsapp_messages_payload_invalid');
+  if (!Array.isArray(messages.payload) || messages.payload.length > 100) fail('whatsapp_messages_payload_invalid');
   const matches = messages.payload.filter(item => object(item) && safeProviderId(item.id, 'whatsapp_canonical_message_invalid') === messageId);
   if (matches.length !== 1) fail('whatsapp_canonical_message_not_unique');
   const message = matches[0];
@@ -278,7 +278,138 @@ export function inspectChatwootMessage(payload, config) {
       attachment: { id: key, chatwootAttachmentId: attachmentId, name, contentType: 'application/pdf', size, downloadUrl: reason ? null : downloadUrl },
       source, missing: reason !== null, needsReview: false, pendingReason: reason });
   }
+  for (const origin of origins) origin.messageAttachmentCount = origins.length;
   return origins.length ? { excluded: false, origins } : { excluded: true, reason: 'no_pdf', origins: [] };
+}
+
+function authorizedConversation(conversation, cfg) {
+  if (!object(conversation)) fail('whatsapp_sweep_conversation_invalid');
+  safeProviderId(conversation.id, 'whatsapp_sweep_conversation_invalid');
+  if (safeProviderId(conversation.inbox_id, 'whatsapp_sweep_inbox_invalid') !== cfg.inboxId) fail('whatsapp_sweep_inbox_mismatch');
+  if (conversation.account_id != null && safeProviderId(conversation.account_id, 'whatsapp_sweep_account_invalid') !== cfg.accountId) fail('whatsapp_sweep_account_mismatch');
+  if (isGroup({ conversation }) || isMirror({ conversation })) return false;
+  const contact = conversation.meta?.sender;
+  if (!object(contact) || (contact.type != null && contact.type !== 'contact')) return false;
+  const phone = normalizeBrazilPhone(contact.phone_number);
+  const sender = cfg.senders.find(value => phoneAliases(value, cfg.legacy).includes(phone));
+  if (!sender) return false;
+  safeProviderId(contact.id, 'whatsapp_sweep_contact_invalid');
+  if (conversation.contact_inbox != null && !phoneAliases(sender, cfg.legacy).includes(providerPhone(conversation.contact_inbox.source_id))) return false;
+  return true;
+}
+
+export function startChatwootSweep(config) {
+  const cfg = configValues(config);
+  if (cfg.cutoff === null) fail('whatsapp_sweep_cutoff_required');
+  return { conversationPage: 1, conversationPagesComplete: false, conversations: [], seenConversationIds: [],
+    conversationIndex: 0, conversationsChecked: 0, messagesChecked: 0, origins: [], sweepComplete: false };
+}
+
+export function advanceChatwootConversationPage(state, response, config) {
+  const cfg = configValues(config);
+  if (!object(state) || !Number.isSafeInteger(state.conversationPage) || state.conversationPage < 1 || state.conversationPage > 100
+    || state.conversationPagesComplete || !Array.isArray(state.conversations) || !Array.isArray(state.seenConversationIds)) fail('whatsapp_sweep_state_invalid');
+  const body = unwrapChatwootResponse(response, 'whatsapp_sweep_conversations_unproven');
+  const rows = body.data?.payload;
+  if (!Array.isArray(rows) || rows.length > 100) fail('whatsapp_sweep_conversations_payload_invalid');
+  const next = cloneJson(state), seen = new Set(state.seenConversationIds);
+  for (const conversation of rows) {
+    const conversationId = safeProviderId(conversation?.id, 'whatsapp_sweep_conversation_invalid');
+    if (seen.has(conversationId)) fail('whatsapp_sweep_conversation_pagination_cycle');
+    seen.add(conversationId);
+    if (authorizedConversation(conversation, cfg)) next.conversations.push(conversationId);
+  }
+  next.seenConversationIds = [...seen];
+  next.conversationPagesComplete = rows.length === 0;
+  if (!next.conversationPagesComplete && state.conversationPage === 100) fail('whatsapp_sweep_conversation_page_limit');
+  next.conversationPage++;
+  next.sweepComplete = next.conversationPagesComplete && next.conversations.length === 0;
+  return next;
+}
+
+export function startChatwootMessagePages(state, response, config) {
+  const cfg = configValues(config);
+  if (!object(state) || state.conversationPagesComplete !== true || state.sweepComplete || !Array.isArray(state.conversations)
+    || !Number.isSafeInteger(state.conversationIndex) || state.conversationIndex < 0 || state.conversationIndex >= state.conversations.length) fail('whatsapp_sweep_state_invalid');
+  const conversation = unwrapChatwootResponse(response, 'whatsapp_sweep_conversation_unproven');
+  if (safeProviderId(conversation.id, 'whatsapp_sweep_conversation_invalid') !== state.conversations[state.conversationIndex]
+    || !authorizedConversation(conversation, cfg)) fail('whatsapp_sweep_conversation_changed');
+  return { ...cloneJson(state), conversation: cloneJson(conversation), beforeMessageId: null, oldestMessageTime: null,
+    messagePage: 1, seenMessageIds: [], messagePagesComplete: false };
+}
+
+export function advanceChatwootMessagePage(state, response, config) {
+  const cfg = configValues(config);
+  if (!object(state) || !object(state.conversation) || state.messagePagesComplete || !Array.isArray(state.origins)
+    || !Array.isArray(state.seenMessageIds) || !Number.isSafeInteger(state.messagePage) || state.messagePage < 1 || state.messagePage > 100) fail('whatsapp_sweep_state_invalid');
+  const body = unwrapChatwootResponse(response, 'whatsapp_sweep_messages_unproven');
+  if (!Array.isArray(body.payload) || body.payload.length > 100) fail('whatsapp_sweep_messages_payload_invalid');
+  const next = cloneJson(state), seen = new Set(state.seenMessageIds);
+  let before = state.beforeMessageId === null ? Number.MAX_SAFE_INTEGER : Number(safeProviderId(state.beforeMessageId, 'whatsapp_sweep_cursor_invalid'));
+  const ordered = body.payload.map(message => ({ id: Number(safeProviderId(message?.id, 'whatsapp_sweep_message_invalid')),
+    time: Date.parse(receivedTime(message.created_at)) })).sort((first, second) => first.id - second.id);
+  for (let index = 0; index < ordered.length; index++) {
+    if ((index > 0 && ordered[index].time < ordered[index - 1].time)
+      || (state.oldestMessageTime !== null && ordered[index].time > state.oldestMessageTime)) fail('whatsapp_sweep_message_time_order_unproven');
+  }
+  for (const message of body.payload) {
+    const messageId = safeProviderId(message?.id, 'whatsapp_sweep_message_invalid');
+    if (seen.has(messageId) || Number(messageId) >= before) fail('whatsapp_sweep_message_pagination_cycle');
+    seen.add(messageId);
+    for (const [field, expected] of [['conversation_id', String(state.conversation.id)], ['account_id', cfg.accountId], ['inbox_id', cfg.inboxId]]) {
+      if (message[field] != null && safeProviderId(message[field], 'whatsapp_sweep_message_scope_invalid') !== expected) fail('whatsapp_sweep_message_scope_mismatch');
+    }
+    next.messagesChecked++;
+    if (![0, 'incoming'].includes(message.message_type) || message.private !== false) continue;
+    const receivedAt = Date.parse(receivedTime(message.created_at));
+    if (receivedAt < cfg.cutoff || !Array.isArray(message.attachments) || !message.attachments.length) continue;
+    const request = { accountId: cfg.accountId, inboxId: cfg.inboxId, conversationId: String(state.conversation.id),
+      messageId, beforeMessageId: String(Number(messageId) + 1) };
+    const canonical = canonicalChatwootEvent(request, state.conversation, { payload: [message] }, config);
+    const inspected = inspectChatwootMessage(canonical, config);
+    next.origins.push(...inspected.origins);
+    if (next.origins.length > 1000) fail('whatsapp_sweep_origin_limit');
+  }
+  next.seenMessageIds = [...seen];
+  next.messagePagesComplete = body.payload.length === 0 || ordered.every(message => message.time < cfg.cutoff);
+  if (!next.messagePagesComplete && state.messagePage === 100) fail('whatsapp_sweep_message_page_limit');
+  next.messagePage++;
+  if (body.payload.length) {
+    next.beforeMessageId = String(ordered[0].id);
+    next.oldestMessageTime = ordered[0].time;
+  }
+  if (next.messagePagesComplete) {
+    next.conversationIndex++;
+    next.conversationsChecked++;
+    next.sweepComplete = next.conversationIndex === next.conversations.length;
+  }
+  return next;
+}
+
+export function summarizeChatwootIntake(receipts, origins) {
+  if (!Array.isArray(receipts) || !Array.isArray(origins)) fail('whatsapp_intake_summary_invalid');
+  const expected = new Map(), observed = new Set(), issues = [];
+  const counts = { attachments: 0, checked: 0, saved: 0, already_saved: 0, pending: 0, failed: 0, excluded: 0, unproven: 0 };
+  for (const origin of origins) {
+    if (!object(origin?.source) || typeof origin.source.message_id !== 'string' || typeof origin.source.attachment_id !== 'string') fail('whatsapp_intake_summary_origin_invalid');
+    const key = JSON.stringify([origin.source.message_id, origin.source.attachment_id]);
+    if (expected.has(key)) fail('whatsapp_intake_summary_duplicate_origin');
+    expected.set(key, origin.source);
+  }
+  counts.attachments = expected.size;
+  for (const receipt of receipts) {
+    const key = JSON.stringify([receipt?.message_id, receipt?.attachment_id]);
+    if (receipt?.intakeReceipt !== true || receipt.kind !== 'attachment' || !expected.has(key) || observed.has(key)
+      || !['saved', 'already_saved', 'pending', 'failed', 'excluded'].includes(receipt.disposition)) { counts.unproven++; continue; }
+    observed.add(key); counts.checked++; counts[receipt.disposition]++;
+    if (['pending', 'failed'].includes(receipt.disposition)) issues.push(receipt);
+  }
+  for (const [key, source] of expected) if (!observed.has(key)) {
+    counts.failed++;
+    issues.push({ message_id: source.message_id, attachment_id: source.attachment_id, disposition: 'failed', reason: 'attachment_receipt_missing' });
+  }
+  return { scanFinished: counts.pending + counts.failed + counts.unproven === 0, counts, issues,
+    recovery: 'fixed_cutoff_idempotent_rescan', checkpointAdvanced: false };
 }
 
 /** Verify already-downloaded original bytes, only after the durable origin reservation. */

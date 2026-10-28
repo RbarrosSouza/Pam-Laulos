@@ -55,12 +55,20 @@ const client = {
 const keyExports={};
 const keySource=await readFile(new URL('../functions/exam-document-service/supabase-privileged-key.ts',import.meta.url),'utf8');
 vm.runInNewContext(ts.transpileModule(keySource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:keyExports});
+const intakeExports={};
+const intakeSource=await readFile(new URL('../functions/exam-document-service/intake-service-routes.ts',import.meta.url),'utf8');
+vm.runInNewContext(ts.transpileModule(intakeSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:intakeExports,TextEncoder});
+const monitorAuthExports={};
+const monitorAuthSource=await readFile(new URL('../functions/exam-document-service/intake-monitor-auth.ts',import.meta.url),'utf8');
+vm.runInNewContext(ts.transpileModule(monitorAuthSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:monitorAuthExports});
 let handler;
 const source = await readFile(new URL('../functions/exam-document-service/index.ts', import.meta.url), 'utf8');
 const script = ts.transpileModule(source.replace(/^import .*;\s*$/gm, ''), {
   compilerOptions: {target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None},
 }).outputText;
 vm.runInNewContext(script, {
+  ...monitorAuthExports,
+  intakeActions:intakeExports.intakeActions,runIntakeAction:intakeExports.runIntakeAction,
   selectExamSupabasePrivilegedKey:keyExports.selectExamSupabasePrivilegedKey,
   createClient(url, key, options) {
     clientCalls.push({url, key, options});
@@ -101,6 +109,14 @@ async function expectRpc(action, payload, name, args) {
 }
 
 const actions = ['collection_checkpoint', 'collection_begin', 'collection_event', 'collection_commit'];
+
+test('existing n8n origin and metadata actions reach the guarded intake wrappers', async () => {
+  reset();
+  const source={channel:'email',account_id:'gmail:fixture@example.invalid',message_id:'1111222233334444',attachment_id:'hopelab-link:'+scopeKey,metadata:{hopelab_notice_protocol:'gmail_notice_link_v2',gmail_message_id:'1111222233334444',link_sha256:scopeKey}};
+  await expectRpc('reserve_source',{source},'reserve_exam_intake_source',{p_source:source});
+  reset();
+  await expectRpc('stage_file',{document_id:sweepId,file:{sha256:scopeKey,size_bytes:123,staging_bucket:'blocked',staging_path:'blocked'},worker:'n8n-fixture'},'stage_exam_intake_file',{p_document_id:sweepId,p_file:{sha256:scopeKey,size_bytes:123},p_worker:'n8n-fixture'});
+});
 
 test('all collection routes refuse missing or invalid authentication before an RPC', async () => {
   for (const auth of [null, 'synthetic-expired-token']) for (const action of actions) {

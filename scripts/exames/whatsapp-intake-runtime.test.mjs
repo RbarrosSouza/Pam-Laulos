@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
-import { normalizeBrazilPhone, inspectChatwootWebhook, canonicalChatwootEvent, inspectChatwootMessage, decodeChatwootOriginal, resolveChatwootRedirect } from './whatsapp-intake-runtime.mjs';
+import { normalizeBrazilPhone, inspectChatwootWebhook, canonicalChatwootEvent, inspectChatwootMessage, decodeChatwootOriginal, resolveChatwootRedirect,
+  startChatwootSweep, advanceChatwootConversationPage, startChatwootMessagePages, advanceChatwootMessagePage, summarizeChatwootIntake } from './whatsapp-intake-runtime.mjs';
 import { decideReservation } from './operacional-runtime.mjs';
 
 const bytes = Buffer.from('%PDF-1.4\nDocumento inteiramente fictício.\n%%EOF');
@@ -266,4 +267,108 @@ test('original PDF bytes require reservation, bound URL, 200, allowed MIME, sign
   const wrongBytes = Buffer.from('html'.padEnd(bytes.length, ' ')); assert.throws(() => decodeChatwootOriginal(wrongBytes, response, reserved(), cfg), /signature/);
   assert.throws(() => decodeChatwootOriginal(Buffer.concat([bytes, Buffer.from('x')]), response, reserved(), cfg), /size_mismatch/);
   assert.throws(() => decodeChatwootOriginal(bytes, response, reserved(), { ...cfg, maxBytes: bytes.length - 1 }), /size_invalid/);
+});
+
+function sweepForConversation(conversation = message().conversation) {
+  let state = advanceChatwootConversationPage(startChatwootSweep(cfg), { data: { payload: [conversation] } }, cfg);
+  state = advanceChatwootConversationPage(state, { data: { payload: [] } }, cfg);
+  return startChatwootMessagePages(state, conversation, cfg);
+}
+
+test('scheduled sweep recovers four unnamed PDFs across message pages with the same identities as webhooks', () => {
+  const fixture = canonicalInputs(), second = structuredClone(fixture.target);
+  fixture.target.attachments = [811, 812].map(attachmentId => ({ ...fixture.target.attachments[0], id: attachmentId, file_name: 'Sem nome.pdf' }));
+  second.id = 900; second.attachments = [813, 814].map(attachmentId => ({ ...fixture.target.attachments[0], id: attachmentId, message_id: 900, file_name: 'Sem nome.pdf' }));
+  let state = sweepForConversation();
+  state = advanceChatwootMessagePage(state, { payload: [fixture.target] }, cfg);
+  assert.equal(state.beforeMessageId, '910'); assert.equal(state.sweepComplete, false);
+  state = advanceChatwootMessagePage(state, { payload: [second] }, cfg);
+  assert.equal(state.beforeMessageId, '900');
+  state = advanceChatwootMessagePage(state, { payload: [] }, cfg);
+  assert.equal(state.sweepComplete, true); assert.equal(state.conversationsChecked, 1); assert.equal(state.messagesChecked, 2);
+  assert.equal(state.origins.length, 4);
+  assert.equal(new Set(state.origins.map(origin => origin.source.attachment_id)).size, 4);
+  const webhook = canonicalChatwootEvent(fixture.request, fixture.conversation, { payload: [fixture.target] }, cfg);
+  assert.deepEqual(state.origins.slice(0, 2), inspectChatwootMessage(webhook, cfg).origins);
+  const repeated = advanceChatwootMessagePage(sweepForConversation(), { payload: [fixture.target] }, cfg);
+  assert.deepEqual(repeated.origins, state.origins.slice(0, 2));
+});
+
+test('sweep excludes groups, unauthorized contacts, notes, outgoing messages and PDFs before the configured cutoff', () => {
+  const unauthorized = structuredClone(message().conversation); unauthorized.id = 301; unauthorized.meta.sender.phone_number = '+5511987654322';
+  const group = structuredClone(message().conversation); group.id = 302; group.contact_inbox.source_id = '123@g.us';
+  let state = advanceChatwootConversationPage(startChatwootSweep(cfg), { data: { payload: [unauthorized, group, message().conversation] } }, cfg);
+  assert.deepEqual(state.conversations, ['300']);
+  state = advanceChatwootConversationPage(state, { data: { payload: [] } }, cfg);
+  state = startChatwootMessagePages(state, message().conversation, cfg);
+  const original = canonicalInputs().target;
+  const variants = [{ ...original, id: 909, private: true }, { ...original, id: 908, message_type: 1 },
+    { ...original, id: 907, created_at: '2026-10-17T23:59:59Z' }];
+  state = advanceChatwootMessagePage(state, { payload: variants }, cfg);
+  assert.equal(state.origins.length, 0); assert.equal(state.messagesChecked, 3);
+  assert.throws(() => startChatwootSweep({ ...cfg, intakeCutoff: undefined }), /cutoff_required/);
+});
+
+test('sweep rejects incomplete, repeated, oversized and cross-inbox pages instead of claiming success', () => {
+  const first = startChatwootSweep(cfg), conversation = message().conversation;
+  const page = advanceChatwootConversationPage(first, { data: { payload: [conversation] } }, cfg);
+  assert.equal(page.conversationPagesComplete, false);
+  assert.throws(() => advanceChatwootConversationPage(page, { data: { payload: [conversation] } }, cfg), /pagination_cycle/);
+  assert.throws(() => advanceChatwootConversationPage(first, { payload: [] }, cfg), /payload_invalid/);
+  assert.throws(() => advanceChatwootConversationPage(first, { data: { payload: [{ ...conversation, inbox_id: 74 }] } }, cfg), /inbox_mismatch/);
+  assert.throws(() => advanceChatwootConversationPage({ ...first, conversationPage: 100 }, { data: { payload: [conversation] } }, cfg), /page_limit/);
+  const started = sweepForConversation(); const target = canonicalInputs().target;
+  const next = advanceChatwootMessagePage(started, { payload: [target] }, cfg);
+  assert.throws(() => advanceChatwootMessagePage(next, { payload: [target] }, cfg), /pagination_cycle/);
+  assert.throws(() => advanceChatwootMessagePage(started, { payload: [{ ...target, conversation_id: 301 }] }, cfg), /scope_mismatch/);
+  assert.throws(() => advanceChatwootMessagePage(started, { payload: Array(101).fill(target) }, cfg), /payload_invalid/);
+  assert.throws(() => advanceChatwootMessagePage({ ...started, messagePage: 100 }, { payload: [target] }, cfg), /page_limit/);
+  assert.throws(() => startChatwootMessagePages({ ...page, conversationPagesComplete: true }, { ...conversation, meta: { sender: { ...conversation.meta.sender, phone_number: '+5511987654322' } } }, cfg), /conversation_changed/);
+});
+
+test('a fully enumerated empty inbox completes without producing an origin', () => {
+  const state = advanceChatwootConversationPage(startChatwootSweep(cfg), { data: { payload: [] } }, cfg);
+  assert.equal(state.sweepComplete, true); assert.deepEqual(state.origins, []);
+});
+
+test('provider pages with 21 messages preserve every PDF and continue by the oldest ID without truncation', () => {
+  const fixture = canonicalInputs();
+  const messages = Array.from({ length: 21 }, (_, index) => ({ ...structuredClone(fixture.target), id: 910 - index,
+    attachments: [{ ...fixture.target.attachments[0], id: 811 + index, message_id: 910 - index }] }));
+  const state = advanceChatwootMessagePage(sweepForConversation(), { payload: messages }, cfg);
+  assert.equal(state.origins.length, 21);
+  assert.equal(state.messagesChecked, 21);
+  assert.equal(state.beforeMessageId, '890');
+  assert.equal(state.sweepComplete, false);
+  assert.equal(new Set(state.origins.map(origin => origin.source.attachment_id)).size, 21);
+  assert.equal(advanceChatwootMessagePage(state, { payload: [] }, cfg).sweepComplete, true);
+  assert.equal(canonicalChatwootEvent(fixture.request, fixture.conversation, { payload: messages }, cfg).id, '910');
+  assert.throws(() => canonicalChatwootEvent(fixture.request, fixture.conversation, { payload: Array(101).fill(fixture.target) }, cfg), /payload_invalid/);
+});
+
+test('a conversation with thousands of older messages stops at its proven temporal cutoff', () => {
+  const target = canonicalInputs().target;
+  let state = advanceChatwootMessagePage(sweepForConversation(), { payload: [target] }, cfg);
+  const older = Array.from({ length: 20 }, (_, index) => ({ ...target, id: 800 + index, created_at: '2026-10-17T12:00:00Z' }));
+  state = advanceChatwootMessagePage(state, { payload: older }, cfg);
+  assert.equal(state.sweepComplete, true); assert.equal(state.conversationsChecked, 1);
+  assert.equal(state.messagesChecked, 21); assert.equal(state.origins.length, 1);
+  const reversedDates = [{ ...target, id: 800, created_at: '2026-10-18T12:00:00Z' }, { ...target, id: 801, created_at: '2026-10-17T12:00:00Z' }];
+  assert.throws(() => advanceChatwootMessagePage(sweepForConversation(), { payload: reversedDates }, cfg), /time_order_unproven/);
+  assert.throws(() => advanceChatwootMessagePage(advanceChatwootMessagePage(sweepForConversation(), { payload: [target] }, cfg),
+    { payload: [{ ...target, id: 800, created_at: '2026-10-19T00:00:00Z' }] }, cfg), /time_order_unproven/);
+});
+
+test('receipt summary checks every expected attachment and never closes a four-PDF sweep with only three receipts', () => {
+  const origins = inspect().origins;
+  const fourOrigins = Array.from({ length: 4 }, (_, index) => ({ ...structuredClone(origins[0]),
+    source: { ...origins[0].source, attachment_id: 'chatwoot-attachment:' + (811 + index) } }));
+  const receipts = fourOrigins.map(origin => ({ intakeReceipt: true, kind: 'attachment', message_id: origin.source.message_id,
+    attachment_id: origin.source.attachment_id, disposition: 'saved' }));
+  const partial = summarizeChatwootIntake(receipts.slice(0, 3), fourOrigins);
+  assert.equal(partial.scanFinished, false); assert.equal(partial.counts.failed, 1); assert.equal(partial.counts.checked, 3);
+  assert.equal(partial.issues[0].reason, 'attachment_receipt_missing');
+  assert.equal(summarizeChatwootIntake(receipts, fourOrigins).scanFinished, true);
+  assert.equal(summarizeChatwootIntake([...receipts, receipts[0]], fourOrigins).scanFinished, false);
+  assert.equal(summarizeChatwootIntake([{ ...receipts[0], disposition: 'pending' }, ...receipts.slice(1)], fourOrigins).scanFinished, false);
 });

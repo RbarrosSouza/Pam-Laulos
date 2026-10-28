@@ -9,6 +9,7 @@ import { useVets, type Vet } from '@/hooks/useVets'
 import { DocumentCorrection, DocumentGroupConfirmation, DocumentProvenance } from '@/components/documents/DocumentControls'
 import { DocumentForm, DocumentHistory, DocumentPreview, DocumentSteps } from '@/components/documents/ExamDocumentPanels'
 import { ExamDetailSheet } from '@/components/documents/ExamDetailSheet'
+import { DocumentVersionReview } from '@/components/documents/DocumentVersionReview'
 import { documentDisplayId, documentLabel } from '@/lib/document-status'
 import { getExamDetailProgress } from '@/lib/exam-detail-progress'
 import { triggerFireworksAt } from '@/lib/fireworks'
@@ -155,6 +156,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
             <button onClick={() => setPanel('pdf')}><FileText size={25} aria-hidden="true" />Abrir PDF</button>
           </div>
         </section>
+        <DocumentVersionReview key={doc.id} documentId={doc.id} refresh={refresh}/>
         <button className="exam-detail-responsible" onClick={() => setPanel('responsible')} aria-haspopup="dialog">
           <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Responsável</span><strong>{responsible}</strong></span>
           <span className="exam-detail-responsible-icon" aria-hidden="true">{responsibleAvatar ? <img className="exam-detail-responsible-photo" src={responsibleAvatar} alt="" /> : <UserRound size={29} />}<ChevronDown size={15} /></span>

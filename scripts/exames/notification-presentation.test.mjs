@@ -15,7 +15,9 @@ const node=(kind,name)=>workflows[kind].nodes.find(n=>n.name===name);
 test('extractor prompt requests complete printed names, a literal exam type and documentary date fallback',()=>{
  const prompt=node('processing','Extrair dados estruturados').parameters.jsonBody;
  assert(prompt.includes('incluindo todos os sobrenomes e nomes compostos'));
- assert(prompt.includes('Acompanhante do Exame'));assert(prompt.includes('expressão literal presente no PDF'));
+ assert(prompt.includes('Acompanhante do Exame'));
+ assert(prompt.includes('títulos documentais comprovados'));assert(prompt.includes('Nos demais casos, mantenha o título literal'));
+ assert(prompt.includes('incluindo somente os títulos efetivamente presentes e evidência própria para cada um'));
  assert(prompt.includes('Priorize a data de realização ou coleta'));
  assert(prompt.includes('na ausência dela, use a Data do Laudo'));
  assert(!prompt.includes('não comprovam realização/coleta'));
@@ -31,6 +33,21 @@ test('filename starts with pet then tutor, exam, documented date; received time 
  assert(!result.content.includes('[EXAM:'));assert(!result.content.includes(id));
  assert.equal(result.shortUrl,base+'/e/ERERERERQRGhEREREREREQ');
  assert(!result.content.includes('\\n'));
+});
+
+test('a preserved valid previous document relation labels only the new caption as an exam update',()=>{
+ const linked={...doc,previous_document_id:'22222222-2222-4222-a222-222222222222'};
+ const original=examPresentation(doc,base),updated=examPresentation(linked,base);
+ assert(updated.content.startsWith('🧪 *Atualização do exame*\n'));
+ assert(original.content.startsWith('🧪 *Novo exame*\n'));
+ assert.equal(updated.fileName,original.fileName);assert.equal(updated.shortUrl,original.shortUrl);
+ assert.equal(updated.content.replace('🧪 *Atualização do exame*','🧪 *Novo exame*'),original.content);
+ assert.equal(linked.previous_document_id,'22222222-2222-4222-a222-222222222222');
+});
+
+test('absent, malformed, self or raw extracted previous links do not announce an update',()=>{
+ for(const previous_document_id of [undefined,null,'','not-a-uuid','00000000-0000-0000-0000-000000000000',id,id.toUpperCase(),['22222222-2222-4222-a222-222222222222']])assert(examPresentation({...doc,previous_document_id},base).content.startsWith('🧪 *Novo exame*\n'));
+ assert(examPresentation({...doc,extracted_data:{...fields,previous_document_id:'22222222-2222-4222-a222-222222222222'}},base).content.startsWith('🧪 *Novo exame*\n'));
 });
 
 test('missing or impossible exam date is never replaced by email receipt date',()=>{

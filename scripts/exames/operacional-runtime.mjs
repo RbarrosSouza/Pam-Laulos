@@ -118,18 +118,27 @@ function inspectMessage(response, expectedId, config) {
   const normalizedMessage = {id: message.id, internalDate: message.internalDate, receivedDateTime: receivedAt,
     sender, subject, internetMessageId, unknownSender: !trusted};
   const create = part => {
+    const filename = part.name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    const filenameWords = filename.replace(/\.pdf$/,'').replace(/[^a-z0-9]+/g,' ').trim();
+    const filenameModality = /^(hemograma|ultrassom)(?: |$)/.exec(filenameWords)?.[1];
+    const configuredModality = filenameModality && Array.isArray(config.examSubjectHints) && config.examSubjectHints.some(value=>typeof value==='string'&&value.trim().toLowerCase()===filenameModality);
+    const filenameHint = /\.pdf$/.test(filename) && !!configuredModality
+      && !/(?:^| )(?:boleto|fatura|nota fiscal|orcamento|comprovante|recibo|cobranca)(?: |$)/.test(filenameWords);
+    const examCandidate = hint || filenameHint;
+    const attachmentNeedsReview = !trusted && !examCandidate;
     const inline = !part.attachmentId;
     const key = 'gmail-part:' + JSON.stringify([part.partId, part.attachmentId]);
-    const reason = inline ? 'bytes_inline_nao_suportados' : part.size > (config.maxBytes ?? MAX_BYTES) ? 'pdf_exceeds_limit' : needsReview ? 'pdf_sem_indicio_exame' : null;
+    const reason = inline ? 'bytes_inline_nao_suportados' : part.size > (config.maxBytes ?? MAX_BYTES) ? 'pdf_exceeds_limit' : attachmentNeedsReview ? 'pdf_sem_indicio_exame' : null;
     const source = {channel: 'email', account_id: 'gmail:' + config.mailbox, message_id: message.id,
       attachment_id: key, original_name: part.name, mime_type: part.mimeType, received_at: receivedAt,
-      metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: hint, gmail_part_id: part.partId,
+      metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: examCandidate,
+        exam_candidate_basis:hint ? 'subject' : filenameHint ? 'attachment_filename' : null,gmail_part_id: part.partId,
         gmail_attachment_id: part.attachmentId, internet_message_id: internetMessageId, unknown_sender: !trusted && config.dedicatedMailbox !== true, sender_address: sender, sender_allowlisted: trusted,
         missing_attachment: inline, unsupported_attachment: inline || part.size > (config.maxBytes ?? MAX_BYTES),
-        pending_reason: reason, review_reason: needsReview ? 'PDF sem indício clínico: conferência humana antes dos bytes' : null, subject}};
-    return {message: normalizedMessage, attachment: {id: key, partId: part.partId, gmailAttachmentId: part.attachmentId,
+        pending_reason: reason, review_reason: attachmentNeedsReview ? 'PDF sem indício clínico: conferência humana antes dos bytes' : null, subject}};
+    return {messageAttachmentCount:parts.length,message: normalizedMessage, attachment: {id: key, partId: part.partId, gmailAttachmentId: part.attachmentId,
       name: part.name, contentType: part.mimeType, size: part.size}, source,
-      missing: inline || part.size > (config.maxBytes ?? MAX_BYTES), needsReview, pendingReason: reason};
+      missing: inline || part.size > (config.maxBytes ?? MAX_BYTES), needsReview:attachmentNeedsReview, pendingReason: reason};
   };
   if (parts.length) return {excluded: false, origins: parts.map(create)};
   if (needsReview) return {excluded: true, reason: 'no_pdf_or_exam_hint', origins: []};
@@ -137,7 +146,7 @@ function inspectMessage(response, expectedId, config) {
     original_name: 'PDF ausente', mime_type: null, received_at: receivedAt,
     metadata: {provider: 'gmail', mailbox: config.mailbox, gmail_message_id: message.id, exam_candidate: hint, internet_message_id: internetMessageId,
       unknown_sender: !trusted && config.dedicatedMailbox !== true, sender_address: sender, sender_allowlisted: trusted, missing_attachment: true, pending_reason: 'notice_without_pdf', subject}};
-  return {excluded: false, origins: [{message: normalizedMessage, attachment: {id: 'missing-pdf', name: 'PDF ausente', contentType: null},
+  return {excluded: false, origins: [{messageAttachmentCount:1,message: normalizedMessage, attachment: {id: 'missing-pdf', name: 'PDF ausente', contentType: null},
     source, missing: true, pendingReason: 'notice_without_pdf'}]};
 }
 function inspectHopelabNotice(response, expectedId, config) {
@@ -192,7 +201,7 @@ function parseHopelabNotice(response, notice, config) {
     // Hopelab regenerates PDF bytes; the same result URL across emails is one origin.
     const source = {channel:'email',account_id:'gmail:' + config.mailbox,message_id:digest ? 'hopelab-result:' + digest : message.id,attachment_id:key,original_name:'Laudo Hopelab.pdf',mime_type:url ? 'application/pdf' : null,received_at:receivedAt,
       metadata:{provider:'hopelab_link',mailbox:config.mailbox,gmail_message_id:message.id,source_kind:'download_link',link_sha256:digest,exam_candidate:true,sender_address:notice.sender,subject:notice.subject,internet_message_id:notice.internetMessageId,unknown_sender:!Array.isArray(config.allowedSenders) || !config.allowedSenders.includes(notice.sender),missing_attachment:!url,pending_reason:url ? null : 'hopelab_link_missing_or_untrusted'}};
-    return {message:{id:message.id,internalDate:message.internalDate,receivedDateTime:receivedAt,sender:notice.sender,subject:notice.subject},attachment:{id:key,name:'Laudo Hopelab.pdf',contentType:source.mime_type,downloadUrl:url},source,missing:!url,needsReview:false,pendingReason:source.metadata.pending_reason};
+    return {messageAttachmentCount:Math.max(urls.size,1),message:{id:message.id,internalDate:message.internalDate,receivedDateTime:receivedAt,sender:notice.sender,subject:notice.subject},attachment:{id:key,name:'Laudo Hopelab.pdf',contentType:source.mime_type,downloadUrl:url},source,missing:!url,needsReview:false,pendingReason:source.metadata.pending_reason};
   };
   return [...urls].map(create).concat(urls.size ? [] : [create(null)]);
 }
@@ -260,4 +269,50 @@ function verifySaved(receipt, stage, decoded) {
   if(!object(receipt)||receipt.document_id!==stage.document_id||receipt.document?.id!==stage.document_id||receipt.document.file_status!=='saved'||receipt.document.sha256!==decoded.sha256||Number(receipt.document.size_bytes)!==decoded.sizeBytes||receipt.document.drive_file_id!==stage.drive_file_id||receipt.document.drive_folder_id!==stage.document.drive_folder_id)fail('drive_confirmation_unproven');
   return {document_id:receipt.document_id,status:'saved'};
 }
-export {EXPECTED_MAILBOX,MAX_BYTES,MAX_MIME_DEPTH,fail,object,stableId,unwrap,verifyProfile,validateWindow,listQuery,metadataFields,listIds,header,senderAddress,inspectMessage,inspectHopelabNotice,hopelabBodyFields,canonicalHopelabUrl,parseHopelabNotice,decodeHopelabOriginal,decideReservation,decodeOriginal,validateFolder,validateStage,inspectDriveObject,verifySaved};
+function attachmentIntakeReceipt(result, origin) {
+  const source = origin?.source;
+  if (!object(result) || !object(source) || typeof source.message_id !== 'string' || typeof source.attachment_id !== 'string') fail('intake_receipt_origin_unproven');
+  let disposition = 'failed', reason = 'intake_receipt_unproven';
+  if (result.intakeFailure === true) reason = 'source_reservation_unproven';
+  else if (result.status === 'saved') { disposition = 'saved'; reason = null; }
+  else if (result.pending === false || result.reservation?.document?.file_status === 'saved') { disposition = 'already_saved'; reason = null; }
+  else if (result.reservation?.document?.identification_status === 'not_exam') { disposition = 'excluded'; reason = 'previously_not_exam'; }
+  else if (result.pending === true || result.missing === true) { disposition = 'pending'; reason = origin.missing === true ? origin.pendingReason || 'original_metadata_pending' : 'original_storage_pending'; }
+  return {intakeReceipt:true,kind:'attachment',message_id:origin.message?.id || source.message_id,attachment_id:source.attachment_id,
+    expected_attachment_count:origin.messageAttachmentCount,
+    document_id:result.document_id || result.documentId || result.reservation?.document_id || null,disposition,reason};
+}
+function summarizeIntakeReceipts(receipts, expectedMessages) {
+  if (!Array.isArray(receipts) || !Array.isArray(expectedMessages)) fail('intake_summary_invalid');
+  const expected = new Set(expectedMessages), observed = new Set(), attachments = new Set(), expectedAttachments = new Map(), observedAttachments = new Map(), issues = [];
+  const counts = {messages:expected.size,messages_checked:0,messages_failed:0,messages_excluded:0,attachments:0,attachments_missing:0,saved:0,already_saved:0,pending:0,failed:0,excluded:0,unproven:0};
+  for (const receipt of receipts) {
+    if (receipt?.emptySweep === true && expected.size === 0) continue;
+    if (!object(receipt) || receipt.intakeReceipt !== true || !expected.has(receipt.message_id)) { counts.unproven++; continue; }
+    observed.add(receipt.message_id);
+    if (receipt.kind === 'message') {
+      if (receipt.disposition === 'failed') { counts.messages_failed++; issues.push(receipt); }
+      else if (receipt.disposition === 'excluded') counts.messages_excluded++;
+      else counts.unproven++;
+    } else if (receipt.kind === 'attachment' && typeof receipt.attachment_id === 'string') {
+      const attachmentCount = receipt.expected_attachment_count;
+      if (!Number.isSafeInteger(attachmentCount) || attachmentCount < 1 || (expectedAttachments.has(receipt.message_id) && expectedAttachments.get(receipt.message_id) !== attachmentCount)) counts.unproven++;
+      else expectedAttachments.set(receipt.message_id,attachmentCount);
+      const key = JSON.stringify([receipt.message_id,receipt.attachment_id]);
+      if (attachments.has(key) || !['saved','already_saved','pending','failed','excluded'].includes(receipt.disposition)) { counts.unproven++; continue; }
+      attachments.add(key); counts.attachments++; counts[receipt.disposition]++;
+      observedAttachments.set(receipt.message_id,(observedAttachments.get(receipt.message_id) || 0)+1);
+      if (['pending','failed'].includes(receipt.disposition)) issues.push(receipt);
+    } else counts.unproven++;
+  }
+  counts.messages_checked = observed.size;
+  for (const messageId of expected) if (!observed.has(messageId)) {
+    counts.messages_failed++; issues.push({intakeReceipt:true,kind:'message',message_id:messageId,disposition:'failed',reason:'message_receipt_missing'});
+  }
+  for (const [messageId,attachmentCount] of expectedAttachments) if (observedAttachments.get(messageId) !== attachmentCount) {
+    counts.attachments_missing += Math.max(0,attachmentCount-(observedAttachments.get(messageId) || 0)); counts.unproven++;
+    issues.push({intakeReceipt:true,kind:'message',message_id:messageId,disposition:'failed',reason:'attachment_receipt_count_mismatch',expected_attachment_count:attachmentCount,observed_attachment_count:observedAttachments.get(messageId) || 0});
+  }
+  return {scanFinished:counts.messages_failed+counts.pending+counts.failed+counts.unproven===0,counts,issues,recovery:'fixed_cutoff_idempotent_rescan',checkpointAdvanced:false};
+}
+export {EXPECTED_MAILBOX,MAX_BYTES,MAX_MIME_DEPTH,fail,object,stableId,unwrap,verifyProfile,validateWindow,listQuery,metadataFields,listIds,header,senderAddress,inspectMessage,inspectHopelabNotice,hopelabBodyFields,canonicalHopelabUrl,parseHopelabNotice,decodeHopelabOriginal,decideReservation,decodeOriginal,validateFolder,validateStage,inspectDriveObject,verifySaved,attachmentIntakeReceipt,summarizeIntakeReceipts};
