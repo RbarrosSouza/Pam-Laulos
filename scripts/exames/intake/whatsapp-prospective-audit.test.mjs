@@ -142,3 +142,13 @@ test('recheck bridges each missing attachment independently, then looks up all a
  state=applyAuditResponse(ctx,{statusCode:200,body:lookup([missing(44,'chatwoot-attachment:600'),saved(44,'chatwoot-attachment:601')])},cfg,now);
  const d=drain(state);assert.equal(d.events.length,1);assert.equal(d.events[0].kind,'attachment_retry_failed');assert.equal(d.events[0].attachment_id,'chatwoot-attachment:600');assert.equal(d.events[0].code,'child_response_uncertain');
 });
+
+test('a user-deleted WhatsApp file is excluded while a missing sibling still reaches its exact bridge',()=>{
+ let state=start();state=apply(state,{data:{payload:[conversation]}});state=drain(state).state;state=apply(state,{data:{payload:[]}});state=drain(state).state;
+ state=apply(state,{payload:[{id:44,conversation_id:3,message_type:'incoming',private:false,created_at:'2026-10-28T11:00:00.000Z',attachments:[{id:600},{id:601}]}]});let d=drain(state);
+ const deleted={message_id:'44',attachment_id:'chatwoot-attachment:600',status:'excluded',reason:'user_deleted'};
+ assert.throws(()=>applyAuditResponse(d.ctx,{statusCode:200,body:lookup([{...deleted,reason:'unknown'},missing(44,'chatwoot-attachment:601')])},cfg,now),/LOOKUP_IDENTITY_INVALID/);
+ state=applyAuditResponse(d.ctx,{statusCode:200,body:lookup([deleted,missing(44,'chatwoot-attachment:601')])},cfg,now);d=drain(state);
+ assert.equal(d.ctx.target,'bridge');assert.deepEqual(d.ctx.payload.attachment_ids,['chatwoot-attachment:601']);
+ const exclusion=d.events.find(e=>e.attachment_id===deleted.attachment_id&&e.kind==='origin_outcome');assert.equal(exclusion.disposition,'excluded');assert.equal(exclusion.code,'user_deleted');assert.equal(state.originsExcluded,1);
+});

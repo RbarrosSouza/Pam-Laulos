@@ -84,7 +84,7 @@ export function loadAuditState(rows, cfg, executionId, now) {
       receivedFrom: new Date(from).toISOString(), receivedThrough: new Date(through).toISOString(),windowKind:retry?'retry':'live',
       discoveryThrough:new Date(discovery).toISOString(),retryWindows,phase: 'begin', pageCount: 0, messageCount: 0,
       messageKeys: [], conversationIds: [], conversationIndex: 0, cursor: cfg.provider === 'gmail' ? null : 1,
-      pendingEvents: [], messageQueue: [], messageIndex: 0, messagesAudited: 0, originsPending: 0, originsSaved: 0, lookupJobs: [], enumerationDone: false,
+      pendingEvents: [], messageQueue: [], messageIndex: 0, messagesAudited: 0, originsPending: 0, originsSaved: 0, originsExcluded: 0, lookupJobs: [], enumerationDone: false,
       authorizedConversationIds:previous?.authorizedConversationIds||[],conversationPolicies:{},
       ...(cfg.continuous === true ? { coverageProof:null,notificationMode: 'home_only' } : {}),
       ...(cfg.canary === true ? { canary: true } : {}),
@@ -240,10 +240,10 @@ function auditMessageEvents(state, { partitionKey, messageId, receivedAt, origin
     const item = lookupItems[index];
     const unsupported = unsupportedIds.includes(origin.attachment_id), saved = item?.status === 'saved' && !unsupported;
     events.push({ kind: 'origin_outcome', partition_key: partitionKey, message_id: messageId,
-      attachment_id: origin.attachment_id, disposition: saved ? 'saved' : 'pending',
+      attachment_id: origin.attachment_id, disposition: item?.status==='excluded' ? 'excluded' : saved ? 'saved' : 'pending',
       ...(saved ? { source_id: item.source_id, document_id: item.document_id }
-        : { stage: 'review', code: reviewCode || (unsupported ? 'unsupported_attachment_requires_review' : origin.artifact_kind === 'notice' ? 'audit_notice_requires_review' : item?.reason || 'audit_preservation_not_verified') }) });
-    if (saved) state.originsSaved++; else state.originsPending++;
+        : { stage: 'review', code: item?.status==='excluded'?'user_deleted':reviewCode || (unsupported ? 'unsupported_attachment_requires_review' : origin.artifact_kind === 'notice' ? 'audit_notice_requires_review' : item?.reason || 'audit_preservation_not_verified') }) });
+    if(item?.status==='excluded')state.originsExcluded=(state.originsExcluded||0)+1;else if (saved) state.originsSaved++; else state.originsPending++;
   }
   state.messagesAudited++;
   return events;
@@ -260,7 +260,7 @@ function validateAuditLookup(body, requested) {
   if (body.contract !== 'exam_intake_source_lookup_v1' || !Array.isArray(body.items) || body.items.length !== requested.length) throw new Error('INTAKE_AUDIT_LOOKUP_ACK_INVALID');
   for (const [index, item] of body.items.entries()) {
     if (!auditObject(item) || item.message_id !== requested[index].message_id || item.attachment_id !== requested[index].attachment_id
-      || !['saved', 'pending', 'not_found'].includes(item.status) || !/^[a-z0-9_]{1,95}$/.test(item.reason || '')) throw new Error('INTAKE_AUDIT_LOOKUP_IDENTITY_INVALID');
+      || !['saved', 'pending', 'not_found','excluded'].includes(item.status) || !/^[a-z0-9_]{1,95}$/.test(item.reason || '') || item.status==='excluded'&&item.reason!=='user_deleted') throw new Error('INTAKE_AUDIT_LOOKUP_IDENTITY_INVALID');
     if (item.status === 'saved' && (item.match_kind !== 'exact_origin' || item.canonical_file_preserved !== true
       || !auditUuid(item.source_id) || !auditUuid(item.document_id) || item.source_document_id !== item.document_id || !/^[a-f0-9]{64}$/.test(item.sha256 || '')
       || !Number.isSafeInteger(item.size_bytes) || item.size_bytes <= 0 || item.file_status !== 'saved')) throw new Error('INTAKE_AUDIT_LOOKUP_SAVED_UNPROVEN');
@@ -434,7 +434,7 @@ export function applyAuditResponse(context, response, cfg, now) {
           const m=/^conversation:([1-9][0-9]*)$/.exec(receipt.partition_key);
           if(!m||!auditNumericId(m[1])||!auditNumericId(receipt.message_id))throw new Error('INTAKE_AUDIT_RECHECK_CONVERSATION_INVALID');
           if(cfg.canary===true&&(receipt.message_id!==cfg.canaryMessageId||m[1]!==cfg.canaryConversationId))continue;
-          if(items[index].status==='saved'||receipt.artifact_kind!=='attachment'||!state.authorizedConversationIds?.includes(m[1]))continue;
+          if(['saved','excluded'].includes(items[index].status)||receipt.artifact_kind!=='attachment'||!state.authorizedConversationIds?.includes(m[1]))continue;
           if(!/^chatwoot-attachment:[1-9]\d*$/.test(receipt.attachment_id))continue;
           const key=JSON.stringify([m[1],receipt.message_id,receipt.attachment_id]);if(seen.has(key))continue;seen.add(key);
           queue.push({conversationId:m[1],messageId:receipt.message_id,attachmentIds:[receipt.attachment_id]});
@@ -447,7 +447,7 @@ export function applyAuditResponse(context, response, cfg, now) {
       state.phase = 'recheck_resolve';
       const retryEvents=(state.recheckChildIssues||[]).filter(issue=>{
         const index=state.recheckItems.findIndex(item=>item.partition_key===issue.partition_key&&item.message_id===issue.message_id&&item.attachment_id===issue.attachment_id);
-        return index>=0&&items[index].status!=='saved';
+        return index>=0&&!['saved','excluded'].includes(items[index].status);
       }).map(issue=>({kind:'attachment_retry_failed',...issue}));
       delete state.recheckChildIssues;
       if(retryEvents.length)return auditEvents(state,retryEvents,'recheck_resolve');
@@ -464,16 +464,16 @@ export function applyAuditResponse(context, response, cfg, now) {
             : job.childIssues?.[origin.attachment_id] ? [{kind:'origin_outcome',partition_key:job.partitionKey,message_id:job.messageId,attachment_id:origin.attachment_id,
               disposition:'pending',stage:'storage',code:job.childIssues[origin.attachment_id]}] : []);
           const incomplete=cfg.canary===true && job.origins.some((origin,index)=>['attachment','download_link'].includes(origin.artifact_kind)
-            && !job.unsupportedIds.includes(origin.attachment_id) && job.lookupItems[index]?.status!=='saved');
+            && !job.unsupportedIds.includes(origin.attachment_id) && !['saved','excluded'].includes(job.lookupItems[index]?.status));
           if(incomplete){state.canaryPaused=true;state.lastError={stage:'bridge',code:'audit_bridge_saved_unproven',at:new Date(now).toISOString()};}
           return auditEvents(state, events, 'lookup', incomplete);
         }
         const conversation=/^conversation:([1-9][0-9]*)$/.exec(job.partitionKey);
         if(!conversation||!auditNumericId(conversation[1])||!auditNumericId(job.messageId)||!Number.isFinite(Date.parse(job.receivedAt))||Date.parse(job.receivedAt)<Date.parse(cfg.intakeCutoff))throw new Error('INTAKE_AUDIT_BRIDGE_CONVERSATION_INVALID');
-        const bridgeable=cfg.bridgeEnabled===true && job.bridgeEligible===true && (cfg.canary!==true || job.messageId===cfg.canaryMessageId&&conversation[1]===cfg.canaryConversationId) && job.origins.some((origin,index)=>job.lookupItems[index]?.status!=='saved'
+        const bridgeable=cfg.bridgeEnabled===true && job.bridgeEligible===true && (cfg.canary!==true || job.messageId===cfg.canaryMessageId&&conversation[1]===cfg.canaryConversationId) && job.origins.some((origin,index)=>!['saved','excluded'].includes(job.lookupItems[index]?.status)
           && ['attachment','download_link'].includes(origin.artifact_kind) && !job.unsupportedIds.includes(origin.attachment_id));
         if (bridgeable) { state.bridgeJob=job;state.bridgeMessageId=job.messageId;state.bridgeConversationId=conversation[1];state.bridgeMode='new';
-          state.newBridgeQueue=job.origins.filter((origin,index)=>origin.artifact_kind==='attachment'&&job.lookupItems[index]?.status!=='saved'&&!job.unsupportedIds.includes(origin.attachment_id)).map(origin=>origin.attachment_id);
+          state.newBridgeQueue=job.origins.filter((origin,index)=>origin.artifact_kind==='attachment'&&!['saved','excluded'].includes(job.lookupItems[index]?.status)&&!job.unsupportedIds.includes(origin.attachment_id)).map(origin=>origin.attachment_id);
           state.bridgeAttachmentIds=[state.newBridgeQueue[0]];
           return auditEvents(state,auditMessageEvents(state,job),'bridge'); }
         return auditEvents(state, auditMessageEvents(state, job), 'lookup');
