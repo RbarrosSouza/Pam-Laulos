@@ -1,5 +1,7 @@
 # Coverage panel — incremental migration25
 
+Current operation is panel-only, per the user's decision on 28/10/2026. Errors and pending receipts remain visible in the entry/receipts page; no operational WhatsApp alert dispatcher is included. Applied outbox structures remain for compatibility and history. See [current scope](Panel-only-operation.md).
+
 Requires migrations23 and24. Replaces only `get_exam_intake_panel(integer)`; its member guard, owner and ACL remain. No collector, checkpoint, source, document, hold or alert is mutated. Limit must be1–200, including rejection of null. The old panel fields remain for compatibility.
 
 `contract: exam_intake_panel_v2`. `collectors[]` retains health fields and adds `checkpoint:{received_through,revision}` and `latest_sweep:{id,mode,status,received_from,received_through,started_at,finished_at,coverageComplete,allPreserved,scanFinished,counts}`. Proof booleans remain null before finish; a complete audit does not advance the operational checkpoint.

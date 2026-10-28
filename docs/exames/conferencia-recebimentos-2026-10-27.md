@@ -2,6 +2,8 @@
 
 Registro técnico das correções de coleta verificadas nessa data. Esta versão pública contém somente comportamento do sistema, contagens agregadas e limites da validação. As evidências operacionais integrais foram preservadas em armazenamento privado; não fazem parte deste repositório.
 
+Atualização de escopo em 28/10/2026: o usuário optou por acompanhar erros e pendências na página de entrada, sem avisos operacionais por WhatsApp. O supervisor externo e o relay foram preparados como fonte, mas seu plano de implantação foi cancelado antes da ativação. O projeto Google de preparação permaneceu desativado e sem gatilho; não houve instalação do relay ou criação de acesso Chatwoot para ele. Os dados e contratos do backend já aplicados foram preservados. O [escopo vigente é painel apenas](intake/Panel-only-operation.md).
+
 No recorte investigado, houve relatos de entradas sem registro e de um lote cujo número de originais aparentava divergir do recebido. A conferência identificou quatro originais com hashes distintos e quatro entregas únicas. Uma dessas entregas ocorreu após um novo encaminhamento, portanto o resultado posterior não comprova sucesso do primeiro recebimento nem atraso natural do processamento. Preservação do original, identificação clínica, entrega e vínculo no cadastro são etapas distintas.
 
 ## Causas e correções

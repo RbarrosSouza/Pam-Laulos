@@ -2,6 +2,10 @@
 
 Sistema de monitoramento de exames laboratoriais veterinários para a clínica PamVet. Centraliza o acompanhamento de exames desde o pedido até a entrega do resultado ao tutor.
 
+### Conferência de recebimentos — painel apenas
+
+Erros e pendências de entrada ficam registrados no sistema para consulta e tratamento. Em 28/10/2026, o usuário dispensou avisos operacionais por WhatsApp; o plano de implantação do supervisor/relay foi cancelado antes da ativação. Os fluxos existentes de recebimento e entrega dos próprios exames continuam com seus contratos. Consulte o [escopo vigente](docs/exames/intake/Panel-only-operation.md).
+
 ## Stack
 
 - **Frontend**: React 18 + TypeScript + Vite
