@@ -35,12 +35,43 @@ export function ExamFailuresView({data,loading=false,error=false,paused=false,re
   const unavailable=error||paused&&!data||!loading&&!data
   const stale=!!data&&intakeSnapshotStatus(data.as_of,now,paused)!=='current'
   const rows=compact?data?.rows.slice(0,3):data?.rows
-  return <section aria-labelledby={compact?'home-exam-failures-title':'exam-failures-title'} className="rounded-2xl border bg-[hsl(var(--card))] p-4 sm:p-5">
-    <header className="flex flex-wrap items-start justify-between gap-3"><div><h2 id={compact?'home-exam-failures-title':'exam-failures-title'} className="text-lg font-semibold">Exames que precisam de atenção</h2><p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Exames com processamento ou envio ao grupo em atraso, com falha ou sem confirmação.</p></div>{compact?<a className="text-sm underline" href="/recebimentos">Abrir lista</a>:onRefresh&&<button type="button" className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50" disabled={refreshing} onClick={onRefresh}>{refreshing?'Atualizando…':'Atualizar'}</button>}</header>
-    {loading&&!data&&!error&&!paused?<p role="status" className="mt-4 text-sm">Consultando exames…</p>:unavailable?<div role="alert" className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Não foi possível consultar os exames que precisam de atenção. Tente atualizar a página.</div>:data&&rows?<>
-      {stale&&<p role="status" className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Consulta antiga ou pausada: os dados abaixo são de {formatDate(data.as_of)}.</p>}
-      {data.coverage_status!=='proven'&&<div role="status" className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-950"><p>{data.coverage_status==='not_configured'?'A conferência ainda não foi iniciada.':'Não foi possível confirmar a conferência de todos os recebimentos.'}</p><p className="mt-1 text-xs">{data.channels.map(channel=>`${channelName(channel.provider)}: ${channelActivity(channel)}`).join(' · ')}</p></div>}
-      {data.coverage_status==='not_configured'?null:data.total===0?<p className="mt-4 text-sm">Nenhum exame identificado precisa de atenção nesta consulta.</p>:<><ul className="mt-3 divide-y">{rows.map(row=><li key={row.row_id||row.document_id} className="flex flex-wrap items-start justify-between gap-3 py-3"><div className="min-w-0"><p className="text-sm font-semibold">{row.pet_name||row.original_name||(row.row_kind==='receipt'&&row.position?`Arquivo sem nome · anexo ${row.position}`:'Arquivo sem nome')}{row.client_name?` · ${row.client_name}`:row.sender?` · ${row.sender}`:''}</p><p className="mt-1 text-sm">{issue(row)}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{row.row_kind==='receipt'?'Arquivo recebido':row.exam_type||'Tipo a conferir'} · {row.channel==='both'?'E-mail e WhatsApp':row.channel==='whatsapp'?'WhatsApp':'E-mail'} · {formatDate(row.received_at)}</p></div>{row.document_id&&<a className="text-sm font-medium underline" href={intakeDocumentHref(row.document_id)!}>{['unreadable_file','review_file'].includes(row.reason||'')?'Abrir registro':'Abrir exame'}</a>}</li>)}</ul>{compact&&data.total>rows.length&&<a href="/recebimentos" className="mt-3 inline-block text-sm underline">Abrir lista de exames</a>}</>}{data.coverage_status!=='not_configured'&&!compact&&(onPrevious||onNext)&&(data.total>0||pageNumber>1)&&<nav aria-label="Páginas de exames" className="mt-4 flex items-center gap-4 border-t pt-3 text-sm"><button type="button" className="underline disabled:opacity-40" disabled={pageNumber===1||refreshing} onClick={onPrevious}>Anterior</button><span>{rows.length?`Página ${pageNumber} · ${rows.length} nesta consulta`:'Nenhum exame nesta página'}</span><button type="button" className="underline disabled:opacity-40" disabled={!data.has_more||refreshing} onClick={onNext}>Próxima</button></nav>}
+  const titleId=compact?'home-exam-failures-title':'exam-failures-title'
+  return <section aria-labelledby={titleId} className="exam-conference">
+    <header className="exam-conference-header">
+      <div>
+        <h2 id={titleId}>Exames que precisam de atenção</h2>
+        <p>Exames com processamento ou envio ao grupo em atraso, com falha ou sem confirmação.</p>
+      </div>
+      {compact?<a className="exam-conference-link" href="/recebimentos">Abrir lista</a>:onRefresh&&<button type="button" className="exam-conference-button" disabled={refreshing} onClick={onRefresh}>{refreshing?'Atualizando…':'Atualizar'}</button>}
+    </header>
+    {loading&&!data&&!error&&!paused?<p role="status" className="exam-conference-message">Consultando exames…</p>:unavailable?<div role="alert" className="exam-conference-notice">Não foi possível consultar os exames que precisam de atenção. Tente atualizar a página.</div>:data&&rows?<>
+      {stale&&<p role="status" className="exam-conference-notice">Consulta antiga ou pausada: os dados abaixo são de {formatDate(data.as_of)}.</p>}
+      {data.coverage_status!=='proven'&&<details className="exam-conference-coverage">
+        <summary>{data.coverage_status==='not_configured'?'A conferência ainda não foi iniciada.':'Não foi possível confirmar a conferência de todos os recebimentos.'}</summary>
+        <ul aria-label="Conferência por canal">{data.channels.map(channel=><li key={channel.provider}>{channelName(channel.provider)}: {channelActivity(channel)}</li>)}</ul>
+      </details>}
+      {data.coverage_status==='not_configured'?null:data.total===0?<p className="exam-conference-message">Nenhum exame identificado precisa de atenção nesta consulta.</p>:<>
+        <ul className="exam-conference-list">
+          {rows.map(row=><li key={row.row_id||row.document_id} className="exam-conference-row">
+            <div className="exam-conference-identity">
+              <p className="exam-conference-name">{row.pet_name||row.original_name||(row.row_kind==='receipt'&&row.position?`Arquivo sem nome · anexo ${row.position}`:'Arquivo sem nome')}{row.client_name?` · ${row.client_name}`:row.sender?` · ${row.sender}`:''}</p>
+              {row.pet_name&&row.original_name&&<p className="exam-conference-file">{row.original_name}</p>}
+              <p className="exam-conference-meta">{row.row_kind==='receipt'?'Arquivo recebido':row.exam_type||'Tipo a conferir'} · {row.channel==='both'?'E-mail e WhatsApp':row.channel==='whatsapp'?'WhatsApp':'E-mail'} · {formatDate(row.received_at)}</p>
+            </div>
+            <div className="exam-conference-issue">
+              <span className="exam-conference-stage">{row.issue_kind==='group'?'Envio ao grupo':'Processamento'}</span>
+              <p>{issue(row)}</p>
+            </div>
+            {row.document_id&&<a className="exam-conference-link exam-conference-open" href={intakeDocumentHref(row.document_id)!}>{['unreadable_file','review_file'].includes(row.reason||'')?'Abrir registro':'Abrir exame'}</a>}
+          </li>)}
+        </ul>
+        {compact&&data.total>rows.length&&<a href="/recebimentos" className="exam-conference-link">Abrir lista de exames</a>}
+      </>}
+      {data.coverage_status!=='not_configured'&&!compact&&(onPrevious||onNext)&&(data.total>0||pageNumber>1)&&<nav aria-label="Páginas de exames" className="exam-conference-pagination">
+        <button type="button" className="exam-conference-button" disabled={pageNumber===1||refreshing} onClick={onPrevious}>Anterior</button>
+        <span>{rows.length?`Página ${pageNumber} · ${rows.length} nesta consulta`:'Nenhum exame nesta página'}</span>
+        <button type="button" className="exam-conference-button" disabled={!data.has_more||refreshing} onClick={onNext}>Próxima</button>
+      </nav>}
     </>:null}
   </section>
 }
