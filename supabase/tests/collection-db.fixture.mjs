@@ -6,8 +6,8 @@ const root = new URL('../../', import.meta.url);
 
 // Same minimal legacy schema boundary used by exam-documents.test.mjs. All
 // pipeline/staging/collection functions below are actual migration SQL.
-export async function collectionFixtureDB({dataDir, initialize = true} = {}) {
-  const db = new PGlite(dataDir);
+export async function collectionFixtureDB({dataDir, initialize = true, database} = {}) {
+  const db = database || new PGlite(dataDir);
   if (initialize) {
   await db.exec(`
     CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;

@@ -88,6 +88,15 @@ test('saved source skips download; forwarded hash dedupe uses canonical document
  const bad={...stage,document:{...stage.document,sha256:'0'.repeat(64)}};assert.throws(()=>a.validateStage(bad,decoded),/receipt/);
 });
 
+test('deleted origin and a repeated fingerprint stop without upload or a pending receipt',async()=>{
+ const origin=a.inspectMessage(message,message.id,cfg).origins[0];
+ const existing=a.decideReservation(origin,{document_id:docId,document:{id:docId,identification_status:'not_exam',deletion_state:'deleted'}});
+ assert.equal(existing.skip,true);assert.equal(a.attachmentIntakeReceipt(existing,origin).reason,'user_deleted');
+ const result=await asyncCode(workflows.intake,'Adiar sweep quando upload pendente',{json:{document_id:canonical,excluded:true,claimed:false,upload_required:false}});
+ assert.equal(result[0].json.pending,false);assert.equal(result[0].json.excluded,true);
+ assert.equal(a.attachmentIntakeReceipt(result[0].json,origin).disposition,'excluded');
+});
+
 test('lost upload ACK resumes same ID through metadata/readback, never PATCHes existing bytes or overwrites a conflict',async()=>{
  const stage=staged(),decoded={sha256:digest,sizeBytes:bytes.length};
  const outputs={'Reservar ID e upload Drive':[{json:stage}],'Validar bytes e SHA-256':[{json:decoded}]};

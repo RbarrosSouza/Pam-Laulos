@@ -20,11 +20,13 @@ const objects=new Map();
 const calls=[];
 const clientKeys=[];
 const authCalls=[];
-let docs, tasks, stageClaimed=true, uploadFails=false, recorded=[], composioCalls=[], composioFails=false, driveFetchEnabled=false, intakeClaim=null, v2SourceReserved=false;
+let docs, tasks, stageClaimed=true, uploadFails=false, recorded=[], composioCalls=[], composioFails=false, driveFetchEnabled=false, intakeClaim=null, v2SourceReserved=false, deleteStorageFails=false, stagedExcluded=false;
 function reset() {
   objects.clear(); calls.length=0; clientKeys.length=0; authCalls.length=0; recorded=[];
   env.set("EXAM_INGESTION_API_KEY","fixture-worker-secret"); stageClaimed=true; uploadFails=false;
   env.delete('EXAM_INTAKE_MONITOR_API_KEY'); intakeClaim=null; v2SourceReserved=false;
+  deleteStorageFails=false;
+  stagedExcluded=false;
   env.delete("EXAM_SUPABASE_SECRET_KEY_NAME"); env.delete("SUPABASE_SECRET_KEYS");
   composioCalls=[]; composioFails=false; driveFetchEnabled=false;
   docs=[{id:documentId,sha256:hash,size_bytes:fixtureBytes.byteLength,mime_type:'application/pdf',original_name:'fixture.pdf',
@@ -68,8 +70,11 @@ const client={
       if(objects.has(`${bucket}:${path}`)) return {error:{statusCode:'409'}};
       objects.set(`${bucket}:${path}`,new Uint8Array(bytes));return {error:null};},
     async createSignedUrl(path,ttl){calls.push({op:'signed',bucket,path,ttl});return {data:{signedUrl:'https://fixture.invalid/signed-private-url'},error:null}},
+    async remove(paths){calls.push({op:'remove',bucket,paths});if(deleteStorageFails)return {error:{statusCode:'503'}};for(const path of paths)objects.delete(`${bucket}:${path}`);return {error:null}},
   }}},
   async rpc(name,args){calls.push({op:'rpc',name,args});
+    if(name==='begin_exam_document_deletion') return {data:{state:'deleting',storage_bucket:null,storage_path:null,staging_bucket:'exam_documents_staging',staging_path:`${documentId}/original.pdf`},error:null};
+    if(name==='finish_exam_document_deletion') return {data:{state:'deleted'},error:null};
     if(name==='reserve_exam_intake_alert') return {data:intakeClaim || {claimed:false},error:null};
     if(name==='reserve_exam_document_source') return {data:{document_id:sourceId},error:null};
     if(name==='reserve_exam_intake_source') {
@@ -78,7 +83,7 @@ const client={
       return {data:v2SourceReserved ? {document_id:documentId,hopelab_notice_v2:{contract:'hopelab_notice_v2_hold_v1',source_id:sourceId,notice_id:source.message_id,url_sha256:source.metadata.link_sha256,group_hold_enforced:true}} : {document_id:sourceId},error:null};
     }
     if(name==='stage_exam_intake_file') return {data:{document_id:documentId,document:{...docs[0]},claimed:stageClaimed,delivery_id:taskId,lease_token:token,...(v2SourceReserved?{notice_snapshots_recorded:1,group_hold:true}:{})},error:null};
-    if(name==='stage_exam_document_file') return {data:{document_id:documentId,document:{...docs[0]},claimed:stageClaimed,delivery_id:taskId,lease_token:token},error:null};
+    if(name==='stage_exam_document_file') return {data:stagedExcluded?{document_id:documentId,excluded:true,claimed:false,upload_required:false}:{document_id:documentId,document:{...docs[0]},claimed:stageClaimed,delivery_id:taskId,lease_token:token},error:null};
     if(name==='complete_exam_document_delivery') return {data:{task:{status:'completed'},exame_id:'fixture-exam'},error:null};
     return {data:{name,args},error:null};
   },
@@ -260,6 +265,10 @@ await check('manual retry repairs the canonical staged object, not the duplicate
 });
 await check('manual retry with active lease cannot report upload success when bytes are missing',async()=>{
   stageClaimed=false;const res=await manual();assert.equal(res.status,503);assert.equal(recorded.length,0);
+});
+await check('manual upload of a deleted fingerprint returns conflict and uploads no bytes',async()=>{
+  stagedExcluded=true;const res=await manual();assert.equal(res.status,409);assert.match((await res.json()).error,/ficha excluída/);
+  assert.equal(calls.some(c=>c.op==='upload'),false);assert.equal(recorded.length,0);
 });
 await check('failed manual storage releases lease for a recoverable retry',async()=>{
   uploadFails=true;assert.equal((await manual()).status,503);assert.equal(tasks[0].status,'failed');assert.equal(tasks[0].lease_until,null);
@@ -443,5 +452,24 @@ await check('audit resume refuses malformed identity, missing fence, and coercib
   const payload={collector_id:'gmail_audit_v2',scope_key:hash,request_id:sourceId,sweep_id:documentId,run_token:token,resume_request_id:taskId};
   for(const bad of [{...payload,collector_id:''},{...payload,scope_key:'bad'},{...payload,request_id:'bad'},{...payload,sweep_id:null},{...payload,run_token:undefined},{...payload,resume_request_id:undefined},{...payload,ttl_seconds:59},{...payload,ttl_seconds:3601},{...payload,ttl_seconds:900.5},{...payload,ttl_seconds:'900'},{...payload,mode:'operational'}])assert.equal((await request('intake_resume',bad)).status,400);
   assert.equal(calls.length,0);
+});
+await check('deletion requires a real member, exact confirmation and version; storage succeeds before finish',async()=>{
+  const payload={document_id:documentId,expected_version:1,confirmation:'DELETAR'};
+  assert.equal((await request('delete',payload)).status,403);
+  assert.equal((await request('delete',{...payload,confirmation:'deletar'},'fixture-user-token')).status,400);
+  assert.equal((await request('delete',{...payload,expected_version:0},'fixture-user-token')).status,400);
+  assert.equal((await request('delete',payload,'fixture-outsider-token')).status,403);
+  assert.equal(calls.length,0);
+  objects.set(`exam_documents_staging:${documentId}/original.pdf`,fixtureBytes);
+  const response=await request('delete',payload,'fixture-user-token');assert.equal(response.status,200);assert.deepEqual(await response.json(),{state:'deleted'});
+  assert.deepEqual(calls.map(x=>x.op==='rpc'?x.name:x.op),['begin_exam_document_deletion','remove','finish_exam_document_deletion']);
+  assert.equal(objects.size,0);
+});
+await check('storage failure leaves deletion resumable and never reports success',async()=>{
+  deleteStorageFails=true;
+  const payload={document_id:documentId,expected_version:1,confirmation:'DELETAR'};
+  assert.equal((await request('delete',payload,'fixture-user-token')).status,503);
+  assert.equal(calls.some(x=>x.name==='finish_exam_document_deletion'),false);
+  deleteStorageFails=false;assert.equal((await request('delete',payload,'fixture-user-token')).status,200);
 });
 console.log(`PASS: ${count} Edge handler scenarios with isolated adapters; live Supabase/Drive/WhatsApp still require homologation.`);

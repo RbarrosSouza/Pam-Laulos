@@ -224,7 +224,7 @@ function decideReservation(origin, response) {
   if (!object(reservation) || typeof reservation.document_id !== 'string' || !/^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(reservation.document_id)) fail('gmail_source_reservation_unproven');
   if (reservation.document && reservation.document.id !== reservation.document_id) fail('gmail_source_reservation_identity_mismatch');
   return {...origin, reservation, documentId: reservation.document_id,
-    skip: origin.missing || reservation.document?.file_status === 'saved' || reservation.document?.identification_status === 'not_exam'};
+    skip: origin.missing || !!reservation.document?.deletion_state || reservation.document?.file_status === 'saved' || reservation.document?.identification_status === 'not_exam'};
 }
 function decodeOriginal(response, source, config) {
   const body = unwrap(response), maxBytes = config.maxBytes ?? MAX_BYTES;
@@ -274,6 +274,7 @@ function attachmentIntakeReceipt(result, origin) {
   if (!object(result) || !object(source) || typeof source.message_id !== 'string' || typeof source.attachment_id !== 'string') fail('intake_receipt_origin_unproven');
   let disposition = 'failed', reason = 'intake_receipt_unproven';
   if (result.intakeFailure === true) reason = 'source_reservation_unproven';
+  else if (result.excluded === true || ['deleting','deleted'].includes(result.reservation?.document?.deletion_state)) { disposition = 'excluded'; reason = 'user_deleted'; }
   else if (result.status === 'saved') { disposition = 'saved'; reason = null; }
   else if (result.pending === false || result.reservation?.document?.file_status === 'saved') { disposition = 'already_saved'; reason = null; }
   else if (result.reservation?.document?.identification_status === 'not_exam') { disposition = 'excluded'; reason = 'previously_not_exam'; }

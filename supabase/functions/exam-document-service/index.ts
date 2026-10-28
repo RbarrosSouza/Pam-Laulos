@@ -112,7 +112,7 @@ Deno.serve(async (req: Request) => {
       action = String(json.action || ""); payload = plain(json.payload);
     }
     authorizeExamIntakeMonitorAction(isMonitor, action, Boolean(isMultipart));
-    if (!isWorker && !isMonitor && !['upload', 'file', 'file_url'].includes(action)) error("Ação restrita ao worker", 403);
+    if (!isWorker && !isMonitor && !['upload', 'file', 'file_url', 'delete'].includes(action)) error("Ação restrita ao worker", 403);
     async function rpc(name: string, args: Json) {
       const { data, error: rpcError } = await service.rpc(name, args);
       if (rpcError) {
@@ -126,9 +126,11 @@ Deno.serve(async (req: Request) => {
       const { data, error: docError } = await service.from("exam_document").select("*").eq("id", uuid(id)).maybeSingle();
       if (docError) error("Banco de exames indisponível", 503);
       if (!data) error("Documento não encontrado", 404);
+      if (data.deletion_state) error("Ficha em exclusão ou excluída", 409);
       if (data.canonical_document_id) {
         const { data: canonical, error: canonicalError } = await service.from("exam_document").select("*").eq("id", data.canonical_document_id).single();
         if (canonicalError) error("Documento canônico indisponível", 503);
+        if (canonical.deletion_state) error("Ficha em exclusão ou excluída", 409);
         return canonical;
       }
       return data;
@@ -138,6 +140,27 @@ Deno.serve(async (req: Request) => {
       return response(filterExamIntakeMonitorResult(action, result, isMonitor));
     }
     switch (action) {
+      case "delete": {
+        // Destructive action is never available to worker or monitor credentials.
+        if (!userId || isWorker || isMonitor) error("Exclusão exige sessão da equipe", 403);
+        const id = uuid(payload.document_id);
+        if (payload.confirmation !== 'DELETAR') error("Digite DELETAR para confirmar", 400);
+        if (!Number.isSafeInteger(payload.expected_version) || Number(payload.expected_version) < 1) error("Versão da ficha inválida", 400);
+        const operation = await rpc('begin_exam_document_deletion', {
+          p_id: id, p_version: payload.expected_version, p_actor: userId, p_confirmation: payload.confirmation,
+        });
+        if (operation.state === 'deleted') return response({ state: 'deleted' });
+        if (operation.state !== 'deleting') error("Não foi possível iniciar a exclusão", 409);
+        for (const [bucket, path] of [[operation.storage_bucket, operation.storage_path], [operation.staging_bucket, operation.staging_path]]) {
+          if (!bucket && !path) continue;
+          if (!['exam_documents_private', 'exam_documents_staging'].includes(bucket) || typeof path !== 'string' || !path) error("Local do arquivo inválido; exclusão pendente", 409);
+          const { error: removeError } = await service.storage.from(bucket).remove([path]);
+          if (removeError) error("Não foi possível remover o arquivo; tente excluir novamente", 503);
+        }
+        const result = await rpc('finish_exam_document_deletion', { p_id: id, p_actor: userId, p_confirmation: payload.confirmation });
+        if (result.state !== 'deleted') error("Exclusão pendente; tente novamente", 409);
+        return response({ state: 'deleted' });
+      }
       case "reaction_preview": return response(await rpc("preview_exam_contact_reactions", {}));
       case "reaction_reserve_tasks": return response(await rpc("reserve_exam_contact_reactions", {
         p_worker: String(payload.worker || ""), p_limit: Number(payload.limit ?? 1),
@@ -258,6 +281,7 @@ Deno.serve(async (req: Request) => {
         const stagePath = `${source.document_id}/original.pdf`;
         const staged = await rpc("stage_exam_document_file", { p_document_id: source.document_id, p_worker: `manual:${userId}`,
           p_file: { sha256: hash, size_bytes: file.size, staging_bucket: "exam_documents_staging", staging_path: stagePath } });
+        if (staged.excluded === true) error("Este arquivo corresponde a uma ficha excluída e não foi importado", 409);
         if (staged.document.file_status !== "saved" && staged.claimed) {
           const canonicalStagePath = String(staged.document.staging_path);
           const { error: uploadError } = await service.storage.from("exam_documents_staging").upload(canonicalStagePath, bytes, { contentType: "application/pdf", upsert: false });

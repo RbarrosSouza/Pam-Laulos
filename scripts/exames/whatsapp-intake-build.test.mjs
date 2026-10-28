@@ -302,6 +302,21 @@ test('source reservation, cross-channel canonical receipt and persisted Drive ID
   assert.equal(returned[0].json.resetAttachments, undefined);
 });
 
+test('WhatsApp source being deleted and a duplicate fingerprint are excluded without upload',async()=>{
+  const origin=inspectChatwootMessage(message(),cfg).origins[0];
+  for(const state of ['deleting','deleted']){
+    const decision=await code('Decidir recebimento',{json:{document_id:documentId,document:{id:documentId,deletion_state:state}}},{'Um anexo por vez':[{json:origin}]});
+    assert.equal(decision[0].json.skip,true);
+    const receipt=await code('Próximo anexo',decision[0],{'Um anexo por vez':[{json:origin}]});
+    assert.equal(receipt[0].json.disposition,'excluded');assert.equal(receipt[0].json.reason,'user_deleted');
+  }
+  const staged={document_id:canonicalId,excluded:true,claimed:false,upload_required:false};
+  assert.equal(expression(node('Upload reservado').parameters.conditions.conditions[0].leftValue,staged),false);
+  const delay=await code('Adiar sweep quando upload pendente',{json:staged});
+  const receipt=await code('Próximo anexo',delay[0],{'Um anexo por vez':[{json:origin}]});
+  assert.equal(receipt[0].json.disposition,'excluded');assert.equal(receipt[0].json.reason,'user_deleted');
+});
+
 test('configuration binds only existing id/name references and refuses secrets or public bound output', async () => {
   await assert.rejects(buildWhatsappWorkflow({ config: { apiKey: 'must-not-be-accepted' } }), /Unknown/);
   await assert.rejects(buildWhatsappWorkflow({ credentials: { chatwoot: { id: 'reference', name: 'reference', token: 'must-not-be-accepted' } } }), /never secret/);

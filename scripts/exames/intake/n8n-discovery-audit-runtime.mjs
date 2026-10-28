@@ -93,7 +93,7 @@ export function loadAuditState(rows, cfg, executionId, now) {
     state = { version: 2, identityHash, revision: actual[0]?.revision || 0, requestId: crypto.randomUUID(),
       receivedFrom: new Date(from).toISOString(), receivedThrough: new Date(through).toISOString(), phase: 'begin', pageCount: 0, messageCount: 0,
       messageKeys: [], conversationIds: [], conversationIndex: 0, cursor: cfg.provider === 'gmail' ? null : 1,
-      pendingEvents: [], messageQueue: [], messageIndex: 0, messagesAudited: 0, originsPending: 0, originsSaved: 0, lookupJobs: [], enumerationDone: false,
+      pendingEvents: [], messageQueue: [], messageIndex: 0, messagesAudited: 0, originsPending: 0, originsSaved: 0, originsExcluded: 0, lookupJobs: [], enumerationDone: false,
       ...(cfg.continuous === true ? { coverageProof: proof, notificationMode: 'home_only' } : {}),
       ...(cfg.prospective === true ? {windowKind,coverageGaps:gaps,progressThrough:progressThrough || cfg.intakeCutoff,coverageHadGap:hadGap} : {}),
       ...(cfg.canary === true ? { canary: true } : {}),
@@ -279,11 +279,12 @@ function auditMessageEvents(state, { partitionKey, messageId, receivedAt, origin
   for (const [index, origin] of origins.entries()) {
     const item = lookupItems[index];
     const unsupported = unsupportedIds.includes(origin.attachment_id), saved = item?.status === 'saved' && !unsupported;
+    const excluded = item?.status === 'excluded' && item.reason === 'user_deleted';
     events.push({ kind: 'origin_outcome', partition_key: partitionKey, message_id: messageId,
-      attachment_id: origin.attachment_id, disposition: saved ? 'saved' : 'pending',
+      attachment_id: origin.attachment_id, disposition: excluded ? 'excluded' : saved ? 'saved' : 'pending',
       ...(saved ? { source_id: item.source_id, document_id: item.document_id }
-        : { stage: 'review', code: unsupported ? 'unsupported_attachment_requires_review' : origin.artifact_kind === 'notice' ? 'audit_notice_requires_review' : item?.reason || 'audit_preservation_not_verified' }) });
-    if (saved) state.originsSaved++; else state.originsPending++;
+        : { stage: 'review', code: excluded ? 'user_deleted' : unsupported ? 'unsupported_attachment_requires_review' : origin.artifact_kind === 'notice' ? 'audit_notice_requires_review' : item?.reason || 'audit_preservation_not_verified' }) });
+    if (excluded) state.originsExcluded = (state.originsExcluded || 0) + 1; else if (saved) state.originsSaved++; else state.originsPending++;
   }
   state.messagesAudited++;
   return events;
@@ -300,7 +301,8 @@ function validateAuditLookup(body, requested) {
   if (body.contract !== 'exam_intake_source_lookup_v1' || !Array.isArray(body.items) || body.items.length !== requested.length) throw new Error('INTAKE_AUDIT_LOOKUP_ACK_INVALID');
   for (const [index, item] of body.items.entries()) {
     if (!auditObject(item) || item.message_id !== requested[index].message_id || item.attachment_id !== requested[index].attachment_id
-      || !['saved', 'pending', 'not_found'].includes(item.status) || !/^[a-z0-9_]{1,95}$/.test(item.reason || '')) throw new Error('INTAKE_AUDIT_LOOKUP_IDENTITY_INVALID');
+      || !['saved', 'pending', 'not_found', 'excluded'].includes(item.status) || !/^[a-z0-9_]{1,95}$/.test(item.reason || '')
+      || item.status === 'excluded' && item.reason !== 'user_deleted') throw new Error('INTAKE_AUDIT_LOOKUP_IDENTITY_INVALID');
     if (item.status === 'saved' && (!['exact_origin','gmail_part_origin'].includes(item.match_kind)
       || item.match_kind==='gmail_part_origin' && (!requested[index].account_id.startsWith('gmail:') || !requested[index].attachment_id.startsWith('gmail-part:'))
       || item.canonical_file_preserved !== true
