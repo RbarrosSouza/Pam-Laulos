@@ -56,6 +56,7 @@ const check = async (name, run) => { await run(); console.log(`ok ${++checks} - 
   let response = { data: null, error: null }, thrown;
   const writes = [], invalidations = [];
   const hooks = load('src/hooks/useExamDocuments.ts', {
+    '@/lib/document-service-request': { requestDocumentDeletion: () => { throw Error('Unexpected deletion in unrelated query test') } },
     '@tanstack/react-query': { useMutation: options => options, useQuery: () => {}, useQueryClient: () => ({ invalidateQueries: input => invalidations.push(input) }) },
     '@/lib/supabase': { supabase: { rpc: async (name, args) => { writes.push({ name, args });if (thrown) throw thrown;return response; } } },
     '@/contexts/exam-auth': { useExamAuth: () => ({}) },

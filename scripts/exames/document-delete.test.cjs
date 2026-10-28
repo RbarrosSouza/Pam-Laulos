@@ -13,7 +13,7 @@ const mocks = {
   '@tanstack/react-query': { useQueryClient: () => client },
   'react-router-dom': { useNavigate: () => (...args) => navigation.push(args) },
   sonner: { toast: { success: message => messages.push(message) } },
-  '@/hooks/useExamDocuments': { callDocumentService: (...args) => { calls.push(args); return request() } },
+  '@/hooks/useExamDocuments': { callDocumentService: (...args) => { calls.push(args); return request(...args) } },
 }
 const source = fs.readFileSync(path.join(root, 'src/components/documents/DocumentDelete.tsx'), 'utf8')
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText
@@ -73,5 +73,28 @@ const tick = () => new Promise(resolve => setImmediate(resolve))
   assert.match(tree.find(node => node.props?.role === 'alert').props.children, /ainda não confirmada/)
   assert.deepEqual(navigation, [])
   assert.deepEqual(messages, [])
+  state = []; calls = []; messages = []; navigation = []; pendingChanges = []
+  input(render()).props.onChange({ target: { value: 'DELETAR' } })
+  request = async action => {
+    if (action === 'delete') throw Object.assign(new Error('Resposta não confirmada'), { code: 'DOCUMENT_SERVICE_TIMEOUT' })
+    return { state: 'deleted' }
+  }
+  button(render()).props.onClick(); await tick(); await tick()
+  assert.deepEqual(calls.map(args => args[0]), ['delete', 'delete_status'])
+  assert.equal(messages.length, 1); assert.equal(navigation.length, 1)
+  assert.ok(invalidations.some(([kind, query]) => kind === 'invalidate' && query.queryKey[0] === 'exam-intake-exam-failures-v1'))
+  state = []; calls = []; messages = []; navigation = []; pendingChanges = []
+  input(render()).props.onChange({ target: { value: 'DELETAR' } })
+  request = async action => {
+    if (action === 'delete') throw Object.assign(new Error('Resposta não confirmada'), { code: 'DOCUMENT_SERVICE_TIMEOUT' })
+    return { state: 'deleting' }
+  }
+  button(render()).props.onClick(); await tick(); await tick()
+  tree = render(); assert.match(tree.find(node => node.props?.role === 'alert').props.children, /ainda não terminou/)
+  assert.equal(button(tree).props.disabled, false); assert.equal(navigation.length, 0); assert.equal(messages.length, 0)
+  const checkButton = tree.find(node => node.type === 'button' && node.props.children === 'Conferir situação')
+  checkButton.props.onClick(); await tick()
+  assert.deepEqual(calls.map(args => args[0]), ['delete', 'delete_status', 'delete_status'])
+  assert.equal(messages.length, 0)
   console.log('document-delete confirmation, pending, success and failure checks passed')
 })().catch(error => { console.error(error); process.exitCode = 1 })

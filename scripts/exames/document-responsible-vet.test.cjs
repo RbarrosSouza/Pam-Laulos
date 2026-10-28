@@ -269,6 +269,7 @@ test('the unassigned list excludes both clinical and legacy assignments', async 
   for (const method of ['select', 'order', 'is', 'eq']) query[method] = (...args) => { calls.push([method, ...args]); return query; };
   query.range = async () => ({ data: [], count: 0, error: null });
   const hooks = load('src/hooks/useExamDocuments.ts', {
+    '@/lib/document-service-request': { requestDocumentDeletion: () => { throw Error('Unexpected deletion in unrelated query test') } },
     '@tanstack/react-query': { useQuery: options => options },
     '@/lib/supabase': { supabase: { from: table => { calls.push(['from', table]); return query; } } },
     '@/contexts/exam-auth': { useExamAuth: () => ({ membership: true, session: { user: { id: 'auth-operator' } } }) },

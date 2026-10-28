@@ -112,7 +112,7 @@ Deno.serve(async (req: Request) => {
       action = String(json.action || ""); payload = plain(json.payload);
     }
     authorizeExamIntakeMonitorAction(isMonitor, action, Boolean(isMultipart));
-    if (!isWorker && !isMonitor && !['upload', 'file', 'file_url', 'delete'].includes(action)) error("Ação restrita ao worker", 403);
+    if (!isWorker && !isMonitor && !['upload', 'file', 'file_url', 'delete', 'delete_status'].includes(action)) error("Ação restrita ao worker", 403);
     async function rpc(name: string, args: Json) {
       const { data, error: rpcError } = await service.rpc(name, args);
       if (rpcError) {
@@ -140,6 +140,13 @@ Deno.serve(async (req: Request) => {
       return response(filterExamIntakeMonitorResult(action, result, isMonitor));
     }
     switch (action) {
+      case "delete_status": {
+        if (!userId || isWorker || isMonitor) error("Consulta de exclusão exige sessão da equipe", 403);
+        const { data, error: statusError } = await service.from('exam_document')
+          .select('id,deletion_state').eq('id', uuid(payload.document_id)).maybeSingle();
+        if (statusError) error("Não foi possível conferir a exclusão", 503);
+        return response({ state: data ? data.deletion_state || 'active' : 'not_found' });
+      }
       case "delete": {
         // Destructive action is never available to worker or monitor credentials.
         if (!userId || isWorker || isMonitor) error("Exclusão exige sessão da equipe", 403);
