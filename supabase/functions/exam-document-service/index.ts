@@ -59,6 +59,8 @@ async function readDocumentBytes(client: SupabaseClient, doc: Json): Promise<Arr
       bytes = await readOAuthDriveOriginal({ fileId: doc.drive_file_id, folderId: doc.drive_folder_id, sha256: doc.sha256, sizeBytes: doc.size_bytes },
         oauthDriveReaderConfig((name) => Deno.env.get(name)));
     } else error("Modo de leitura Drive inválido no servidor", 503);
+    // Both original readers already check length, PDF signature and SHA-256.
+    return bytes;
   } else error("Documento ainda não tem arquivo preservado", 409);
   if (bytes.byteLength > 52428800 || bytes.byteLength !== Number(doc.size_bytes)) error("Tamanho do original diverge do registro", 409);
   if (await sha256(bytes) !== doc.sha256) error("Integridade do original divergente; revisão necessária", 409);
@@ -322,7 +324,8 @@ Deno.serve(async (req: Request) => {
         const doc = await document(task.document_id);
         if (doc.identification_status !== "confirmed" || !doc.pet_id || !plain(doc.confirmed_data).exam_date) error("Paciente e data clínica devem ser confirmados antes de anexar", 409);
         attachmentStage = "read_original";
-        const bytes = await readDocumentBytes(service, doc);
+        let bytes: ArrayBuffer | null = await readDocumentBytes(service, doc);
+        const originalSize = bytes.byteLength;
         attachmentStage = "reconcile_private_copy";
         const path = `${doc.pet_id}/${doc.id}/original.pdf`;
         const { data: existing, error: existingError } = await service.storage.from("exam_documents_private").download(path);
@@ -334,11 +337,13 @@ Deno.serve(async (req: Request) => {
           const { error: uploadError } = await service.storage.from("exam_documents_private").upload(path, bytes, { contentType: "application/pdf", upsert: false });
           if (uploadError && uploadError.statusCode !== '409') error("Cópia privada não foi salva", 503);
         }
+        // Release the original before downloading the independent verification copy.
+        bytes = null;
         attachmentStage = "verify_private_copy";
         const { data: copy, error: copyError } = await service.storage.from("exam_documents_private").download(path);
         if (copyError || !copy) error("Leitura de confirmação do anexo falhou", 503);
         const copyBytes = await copy.arrayBuffer();
-        if (copyBytes.byteLength !== bytes.byteLength || await sha256(copyBytes) !== doc.sha256) error("Anexo não passou na confirmação de integridade", 409);
+        if (copyBytes.byteLength !== originalSize || await sha256(copyBytes) !== doc.sha256) error("Anexo não passou na confirmação de integridade", 409);
         attachmentStage = "finalize_registration";
         return response(await rpc("complete_exam_document_delivery", { p_delivery_id: deliveryId, p_lease_token: leaseToken,
           p_outcome: { status: "completed", storage_bucket: "exam_documents_private", storage_path: path, sha256: doc.sha256, size_bytes: doc.size_bytes } }));

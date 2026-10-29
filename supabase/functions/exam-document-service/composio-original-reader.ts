@@ -184,7 +184,9 @@ async function downloadPdf(url: URL, expected: ReturnType<typeof validateExpecte
     fail("Tamanho do original diverge do registro", 409);
   }
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  // The persisted size is bounded before allocation. Copy chunks directly instead
+  // of retaining a second complete PDF until the hashing/upload phases finish.
+  const bytes = new Uint8Array(expected.sizeBytes);
   let total = 0;
   let complete = false;
   try {
@@ -194,16 +196,13 @@ async function downloadPdf(url: URL, expected: ReturnType<typeof validateExpecte
       total += next.value.byteLength;
       if (total > maxBytes) fail(`Original acima do limite ${mode} de ${maxBytes / 1024 / 1024} MiB`, 413);
       if (total > expected.sizeBytes) fail("Tamanho do original diverge do registro", 409);
-      chunks.push(next.value);
+      bytes.set(next.value, total - next.value.byteLength);
     }
   } finally {
     if (!complete) void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
   if (total !== expected.sizeBytes) fail("Tamanho do original diverge do registro", 409);
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   if (new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") fail("Original recebido não é PDF", 409);
   const digest = await cancellable(crypto.subtle.digest("SHA-256", bytes), signal);
   const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
