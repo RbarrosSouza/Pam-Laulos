@@ -48,19 +48,20 @@ export function buildExamDocumentsQuery(search: string, filter: DocumentFilter) 
           `display_code.ilike.%${t}%`,
           `original_name.ilike.%${t}%`,
           `extracted_data->>pet_name.ilike.%${t}%`,
+          `extracted_data->>report_number.ilike.%${t}%`,
           `extracted_data->>client_name.ilike.%${t}%`,
           `extracted_data->>client_phone.ilike.%${t}%`,
           `extracted_data->>vet_name.ilike.%${t}%`,
           `extracted_data->>requester_vet.ilike.%${t}%`,
           `extracted_data->>requesting_vet_name.ilike.%${t}%`,
           `confirmed_data->>pet_name.ilike.%${t}%`,
+          `confirmed_data->>report_number.ilike.%${t}%`,
           `confirmed_data->>client_name.ilike.%${t}%`,
           `confirmed_data->>client_phone.ilike.%${t}%`,
           `confirmed_data->>vet_name.ilike.%${t}%`,
           `confirmed_data->>requester_vet.ilike.%${t}%`,
           `confirmed_data->>requesting_vet_name.ilike.%${t}%`,
-          `responsible_vet_name.ilike.%${t}%`,
-          `assigned_name.ilike.%${t}%`
+          `responsible_vet_name.ilike.%${t}%`
         )
       }
       query = query.or(orClauses.join(','))
