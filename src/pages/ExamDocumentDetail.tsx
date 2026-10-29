@@ -160,7 +160,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
             <button onClick={() => setPanel('pdf')}><FileText size={25} aria-hidden="true" />Abrir PDF</button>
           </div>
         </section>
-        <DocumentVersionReview key={doc.id} documentId={doc.id} refresh={refresh}/>
+        <DocumentVersionReview key={doc.id} documentId={doc.id}/>
         <DocumentNexusRetry key={`nexus-retry:${doc.id}`} doc={doc} onReview={() => setPanel('patient')} />
         <button className="exam-detail-responsible" onClick={() => setPanel('responsible')} aria-haspopup="dialog">
           <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Responsável</span><strong>{responsible}</strong></span>
