@@ -40,3 +40,32 @@ test('malformed identities and unrelated current metadata cannot become review d
  const wrongPrevious=versionReviewPreviewFixture();wrongPrevious.hold.previous_document_id='55555555-5555-4555-8555-555555555555';assert(!isVersionReviewData(wrongPrevious));
  const firstOriginal=versionReviewPreviewFixture();firstOriginal.hold={...firstOriginal.hold,state:'released',reason:'first_original'};assert.equal(hasVersionReviewNotice(firstOriginal),false);assert.equal(hasVersionReviewNotice(versionReviewPreviewFixture()),true);
 });
+test('two confirmed sends lead with delivery success and keep clinical classification optional and collapsed',()=>{
+ const data=versionReviewPreviewFixture();data.current.group_status='sent';
+ const markup=renderToStaticMarkup(createElement(DocumentVersionReviewView,{data,role:'vet',onSubmit:()=>{throw new Error('render must not send')}}));
+ assert.match(markup,/Os dois originais foram enviados ao grupo/);
+ assert.match(markup,/Classificar como complemento ou correção \(opcional\)/);
+ assert.match(markup,/<details class=/);assert(!markup.includes('<details open'));
+ assert(!markup.includes('Revisão da versão pendente'));assert(!markup.includes('O conteúdo do resultado mudou'));
+ assert.equal((markup.match(/Enviado ao grupo/g)||[]).length,2);
+ assert(!markup.includes('Complemento clínico confirmado'));
+});
+test('pending, failed, uncertain or absent previous sends never claim both originals were sent',()=>{
+ for(const status of ['pending','failed','uncertain','submitted','reserved','not_queued'])for(const side of ['current','previous']){
+  const data=versionReviewPreviewFixture();data.current.group_status='sent';data[side].group_status=status;
+  const markup=renderToStaticMarkup(createElement(DocumentVersionReviewView,{data,role:'vet',onSubmit:()=>{}}));
+  assert(!markup.includes('Os dois originais foram enviados ao grupo'),`${side}:${status}`);
+  assert.match(markup,/Envio dos originais ao grupo/);
+ }
+ const data=versionReviewPreviewFixture();data.previous=null;data.current.group_status='sent';
+ const markup=renderToStaticMarkup(createElement(DocumentVersionReviewView,{data,role:'vet',onSubmit:()=>{}}));
+ assert(!markup.includes('Os dois originais foram enviados ao grupo'));
+});
+test('recorded clinical decisions stay available and a submission completion remains visible',()=>{
+ const data=versionReviewPreviewFixture();data.hold.state='released';data.decision={reason_code:'clinical_complement_confirmed',reviewed_at:'2026-10-29T18:00:00Z'};
+ const markup=renderToStaticMarkup(createElement(DocumentVersionReviewView,{data,role:'vet',completion:'Relação registrada.',onSubmit:()=>{}}));
+ assert.match(markup,/Complemento clínico confirmado · Ver classificação/);
+ assert.match(markup,/<details open=""/);assert.match(markup,/Relação registrada\./);
+ const failed=renderToStaticMarkup(createElement(DocumentVersionReviewView,{data:versionReviewPreviewFixture(),role:'vet',error:'Falha simulada ao registrar.',onSubmit:()=>{}}));
+ assert.match(failed,/<details open=""/);assert.match(failed,/role="alert"[^>]*>Falha simulada ao registrar\./);
+});
