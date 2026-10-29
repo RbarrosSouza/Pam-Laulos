@@ -29,7 +29,7 @@ test('missing previous evidence blocks clinical propagation but permits an expli
 });
 test('version UI exposes both originals, preserves uncertain deliveries and does not enable a default decision',()=>{
  const markup=renderToStaticMarkup(createElement(DocumentVersionReviewView,{data:versionReviewPreviewFixture(),role:'vet',onSubmit:()=>{throw new Error('SSR must not mutate')}}));
- assert.match(markup,/Original anterior/);assert.match(markup,/Original atual/);assert.match(markup,/Complemento clínico/);assert.match(markup,/Inconclusivo/);assert.match(markup,/não repete o envio/);assert.match(markup,/disabled=""[^>]*>Registrar revisão e liberar versão/);
+ assert.match(markup,/Original anterior/);assert.match(markup,/Original atual/);assert.match(markup,/Complemento clínico/);assert.match(markup,/Inconclusivo/);assert.match(markup,/não repete o envio/);assert.match(markup,/disabled=""[^>]*>Registrar relação entre versões/);
  assert(!markup.includes('checked=""'));assert.match(markup,/\/novos-exames\/44444444-4444-4444-8444-444444444444\?panel=pdf/);
  const denied=renderToStaticMarkup(createElement(DocumentVersionReviewView,{data:versionReviewPreviewFixture(),role:'staff',onSubmit:()=>{}}));assert(!denied.includes('type="radio"'));assert.match(denied,/veterinária ou pela administração/);
  const source=readFileSync(file,'utf8');assert(!/supabase|useExamAuth|fetch\(/.test(source));

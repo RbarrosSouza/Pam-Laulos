@@ -41,6 +41,7 @@ before(async()=>{
  releaseBefore=await one("SELECT proowner,proacl::text acl FROM pg_proc WHERE oid='public.release_exam_intake_hold(uuid,text,text)'::regprocedure");
  markBefore=await one("SELECT md5(pg_get_functiondef('public.mark_exam_document_correction(uuid,uuid,bigint,text)'::regprocedure)) body");
  await db.exec(await readFile(new URL('../migrations/20261027000027_exam_intake_version_review.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../migrations/20261028000043_exam_versions_group_independent.sql',import.meta.url),'utf8'));
  await db.query('INSERT INTO auth.users(id) VALUES($1),($2),($3),($4)',[admin,vet,reception,outsider]);
  await db.query("INSERT INTO exam_document_member(user_id,role) VALUES($1,'admin'),($2,'vet'),($3,'reception')",[admin,vet,reception]);
  await db.query('INSERT INTO pets(id,name) VALUES($1,\'Synthetic A\'),($2,\'Synthetic B\')',[pet,otherPet]);
@@ -101,4 +102,27 @@ test('unconfirmed previous patient, missing previous bytes and an existing curre
 });
 test('ancestry cycles are reported before invoking the existing recursive clinical guard',async()=>{
  const p=await pair();await db.query('UPDATE exam_document SET previous_document_id=$2 WHERE id=$1',[p.previous,p.current]);await member();assert.equal((await review(p)).blocking_reason,'version_lineage_unresolved');await assert.rejects(release(p),/version_lineage_unresolved/);assert.equal((await review(p)).hold.state,'held');
+});
+
+test('first result and changed complement reach group independently before clinical review, without replay',async()=>{
+ const p=await pair();await worker();
+ await db.query("UPDATE exam_document_source SET metadata=metadata||'{\"exam_candidate\":true}'::jsonb WHERE document_id IN ($1,$2)",[p.previous,p.current]);
+ await db.query("UPDATE exam_document SET group_release_at=now() WHERE id IN ($1,$2)",[p.previous,p.current]);
+ await db.query("UPDATE exam_document_delivery SET created_at=now()-interval '10 minutes' WHERE document_id IN ($1,$2) AND destination='group'",[p.previous,p.current]);
+ const tasks=(await rpc('reserve_exam_document_delivery',['group','complement-test',20])).tasks;
+ for(const id of [p.previous,p.current]){
+  const task=tasks.find(t=>t.document_id===id);assert(task,'each PDF has its own group task');
+  await rpc('complete_exam_document_delivery',[task.id,task.lease_token,JSON.stringify({status:'sent',external_id:'proof-'+id,external_status:'delivered'})]);
+ }
+ assert.equal((await one('SELECT state FROM exam_intake_document_hold WHERE document_id=$1',[p.current])).state,'held');
+ await member();assert.equal((await review(p)).current.group_status,'sent');
+ await worker();assert(!(await rpc('reserve_exam_document_delivery',['group','again',20])).tasks.some(t=>[p.previous,p.current].includes(t.document_id)));
+});
+test('awaiting a captured original still blocks a group claim',async()=>{
+ const p=await pair();await worker();
+ await db.query("UPDATE exam_document_source SET metadata=metadata||'{\"exam_candidate\":true}'::jsonb WHERE document_id=$1",[p.current]);
+ await db.query("UPDATE exam_document SET group_release_at=now() WHERE id=$1",[p.current]);
+ await db.query("UPDATE exam_document_delivery SET created_at=now()-interval '10 minutes' WHERE document_id=$1 AND destination='group'",[p.current]);
+ await db.query("UPDATE exam_intake_document_hold SET reason='awaiting_snapshot' WHERE document_id=$1",[p.current]);
+ assert(!(await rpc('reserve_exam_document_delivery',['group','await-capture',20])).tasks.some(t=>t.document_id===p.current));
 });
