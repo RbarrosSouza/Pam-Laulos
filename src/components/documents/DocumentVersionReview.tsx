@@ -23,7 +23,7 @@ export function DocumentVersionReview({documentId,refresh}:{documentId:string;re
     try{
       const result=await action.mutateAsync({name:'release_exam_intake_hold',args})
       if(!result||result.document_id!==documentId||typeof result.hold_released!=='boolean')throw new Error('A decisão não foi confirmada. Atualize a conferência antes de tentar novamente.')
-      setCompletion(result.hold_released?'Revisão registrada. O bloqueio desta versão foi liberado; os recibos anteriores foram preservados.':'Revisão inconclusiva registrada. O bloqueio da versão continua ativo.')
+      setCompletion(result.hold_released?'Relação entre as versões registrada. Cada PDF mantém seu próprio envio ao grupo.':'Relação clínica inconclusiva registrada. O envio do PDF ao grupo segue de forma independente.')
       void Promise.allSettled([review.refetch(),refresh(),client.invalidateQueries({queryKey:['intake-panel-v2']})])
     }catch(err){setError(err instanceof Error?err.message:'Não foi possível registrar a revisão. Atualize a conferência antes de tentar novamente.');void review.refetch()}
     finally{submitting.current=false}
