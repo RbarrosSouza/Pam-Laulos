@@ -99,6 +99,7 @@ function harness(options = {}) {
       } }),
     },
     '@/components/documents/DocumentDelete': { DocumentDelete: 'DocumentDelete' },
+    '@/components/documents/DocumentNexusRetry': { DocumentNexusRetry: 'DocumentNexusRetry' },
     '@/components/documents/DocumentControls': { DocumentCorrection: 'DocumentCorrection', DocumentGroupConfirmation: 'DocumentGroupConfirmation', DocumentProvenance: 'DocumentProvenance' },
     '@/components/documents/ExamDocumentPanels': { DocumentForm: 'DocumentForm', DocumentHistory: 'DocumentHistory', DocumentPreview: 'DocumentPreview', DocumentSteps: 'DocumentSteps' },
     '@/components/documents/ExamDetailSheet': { ExamDetailSheet: 'ExamDetailSheet' },

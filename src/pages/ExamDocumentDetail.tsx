@@ -8,6 +8,7 @@ import { useDocumentAction, useExamDocument } from '@/hooks/useExamDocuments'
 import { useVets, type Vet } from '@/hooks/useVets'
 import { DocumentCorrection, DocumentGroupConfirmation, DocumentProvenance } from '@/components/documents/DocumentControls'
 import { DocumentDelete } from '@/components/documents/DocumentDelete'
+import { DocumentNexusRetry } from '@/components/documents/DocumentNexusRetry'
 import { DocumentForm, DocumentHistory, DocumentPreview, DocumentSteps } from '@/components/documents/ExamDocumentPanels'
 import { ExamDetailSheet } from '@/components/documents/ExamDetailSheet'
 import { DocumentVersionReview } from '@/components/documents/DocumentVersionReview'
@@ -55,6 +56,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
   const [now, setNow] = useState(Date.now)
   const progress = getExamDetailProgress(doc, now)
   const isContactDone = progress.contactCompleted || justCompleted
+  const nexusFailed = !progress.nexusLinked && doc.deliveries.some(delivery => delivery.destination === 'nexus' && delivery.status === 'failed')
 
   useEffect(() => {
     if (doc.group_status !== 'sent' || doc.contact_status === 'completed' || doc.completed) return
@@ -138,7 +140,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
   const stages = [
     { ...origin, done: progress.originReceived, panel: 'history' as const },
     { label: 'Grupo', description: progress.groupSent ? 'Enviado ao grupo de WhatsApp' : 'Envio ao grupo ainda não confirmado', done: progress.groupSent, icon: WhatsappLogo, panel: 'steps' as const },
-    { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : 'Exame ainda não anexado ao cadastro', done: progress.nexusLinked, icon: Link2, panel: 'patient' as const },
+    { label: 'Cadastro', description: progress.nexusLinked ? 'Exame anexado ao cadastro' : nexusFailed ? 'Falha ao anexar ao cadastro. Tentar novamente.' : 'Exame ainda não anexado ao cadastro', done: progress.nexusLinked, icon: Link2, panel: 'patient' as const },
     { label: 'Contato', description: isContactDone ? 'Contato com tutor concluído' : 'Contato com tutor pendente', done: isContactDone, icon: Phone, panel: 'contact' as const },
   ]
   return <div className="exam-detail-page">
@@ -159,6 +161,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
           </div>
         </section>
         <DocumentVersionReview key={doc.id} documentId={doc.id} refresh={refresh}/>
+        <DocumentNexusRetry key={doc.id} doc={doc} onReview={() => setPanel('patient')} />
         <button className="exam-detail-responsible" onClick={() => setPanel('responsible')} aria-haspopup="dialog">
           <span className="exam-detail-row-copy"><span className="exam-detail-field-label">Responsável</span><strong>{responsible}</strong></span>
           <span className="exam-detail-responsible-icon" aria-hidden="true">{responsibleAvatar ? <img className="exam-detail-responsible-photo" src={responsibleAvatar} alt="" /> : <UserRound size={29} />}<ChevronDown size={15} /></span>
@@ -230,7 +233,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
           </div>
         )}
         <section className="exam-detail-progress" aria-label="Progresso do exame">
-          <ul>{stages.map(({ label, description, done, icon: Icon, panel: target }) => <li key={label}><button title={description} aria-label={description} onClick={() => setPanel(target)}><span className={`exam-detail-stage-icon${done ? ' is-done' : ''}${label === 'Contato' ? done ? ' contact-done' : ' contact-pending' : ''}`}><Icon size={23} aria-hidden="true" />{done && <span className="exam-detail-stage-check"><Check size={10} strokeWidth={3} /></span>}</span><span>{label}</span></button></li>)}</ul>
+          <ul>{stages.map(({ label, description, done, icon: Icon, panel: target }) => <li key={label}><button title={description} aria-label={description} onClick={() => setPanel(target)}><span className={`exam-detail-stage-icon${done ? ' is-done' : ''}${label === 'Cadastro' && nexusFailed ? ' is-failed' : ''}${label === 'Contato' ? done ? ' contact-done' : ' contact-pending' : ''}`}><Icon size={23} aria-hidden="true" />{done && <span className="exam-detail-stage-check"><Check size={10} strokeWidth={3} /></span>}</span><span>{label}</span></button></li>)}</ul>
           <p className={`exam-detail-progress-caption${(doc.completed || isContactDone) ? ' is-complete' : ''}`} role="status">{(doc.completed || isContactDone) ? <Check size={15} /> : progress.groupAgeLabel ? <Clock3 size={14} /> : null}{isContactDone && !progress.groupAgeLabel ? '✓ Contato concluído' : (progress.groupAgeLabel || progress.summary)}</p>
         </section>
       </main>

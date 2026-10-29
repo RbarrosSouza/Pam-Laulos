@@ -25,6 +25,7 @@ export interface DocumentDelivery {
   last_error: string | null
   sent_at?: string | null
   external_id?: string | null
+  updated_at?: string
 }
 
 export interface DocumentItem {

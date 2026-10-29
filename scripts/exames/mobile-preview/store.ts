@@ -9,7 +9,8 @@ const received = new Date(now - 18 * 60 * 60 * 1000 - 120000).toISOString()
 const sent = new Date(now - 18 * 60 * 60 * 1000).toISOString()
 const contacted = new Date(now - 600000).toISOString()
 const dateScenario = ['missing-date', 'date-error'].includes(scenario)
-const linked = ['linked', 'complete', 'partial', 'error', 'reception', 'missing-date', 'date-error'].includes(scenario)
+const nexusFailedScenario = ['nexus-failed', 'nexus-retry-error'].includes(scenario)
+const linked = nexusFailedScenario || ['linked', 'complete', 'partial', 'error', 'reception', 'missing-date', 'date-error'].includes(scenario)
 const complete = scenario === 'complete'
 const fields: DocumentFields = {
   pet_name: scenario === 'long' ? 'Luna Maria Estrela da Manhã' : 'Luna',
@@ -41,6 +42,12 @@ let document: ExamDocument = {
   ],
 }
 if (scenario === 'partial') document.items.push({ exam_item_id: 'item-reticulocitos-fixture', exam_type: 'Reticulócitos', contacted_at: null })
+if (nexusFailedScenario) {
+  document.nexus_status = 'failed'
+  document.contact_status = 'completed'
+  document.items = document.items.map(item => ({ ...item, contacted_at: contacted }))
+  document.deliveries = document.deliveries.map(delivery => delivery.destination === 'nexus' ? { ...delivery, status: 'failed', attempts: 5, last_error: 'Falha fictícia de anexação.', updated_at: received } : delivery)
+}
 
 let events: DocumentEvent[] = [
   { id: 3, event_type: 'delivery_completed', created_at: sent },
@@ -62,7 +69,7 @@ export const candidates: DocumentCandidate[] = [
 
 export async function mutateFixture(name: string, args: Record<string, unknown>) {
   await wait(350)
-  if (scenario === 'error' || scenario === 'date-error') throw new Error('Não foi possível salvar. Falha simulada de conexão; nenhuma alteração foi gravada.')
+  if (scenario === 'error' || scenario === 'date-error' || scenario === 'nexus-retry-error') throw new Error('Não foi possível salvar. Falha simulada de conexão; nenhuma alteração foi gravada.')
   const next = structuredClone(document)
   if (args.p_expected_version !== undefined && args.p_expected_version !== next.version) throw new Error('A identificação mudou. Recarregue os dados antes de confirmar.')
   let eventType = name
@@ -107,6 +114,16 @@ export async function mutateFixture(name: string, args: Record<string, unknown>)
     eventType = 'contact_recorded'
   } else if (name === 'retry_exam_document_delivery') {
     next.deliveries = next.deliveries.map(delivery => delivery.id === args.p_delivery_id ? { ...delivery, status: 'pending', last_error: null } : delivery)
+    if (next.deliveries.some(delivery => delivery.id === args.p_delivery_id && delivery.destination === 'nexus')) {
+      next.nexus_status = 'pending'
+      window.setTimeout(() => {
+        const attached = structuredClone(document)
+        attached.nexus_status = 'completed'
+        attached.deliveries = attached.deliveries.map(delivery => delivery.id === args.p_delivery_id ? { ...delivery, status: 'completed', attempts: 1 } : delivery)
+        attached.completed = attached.contact_status === 'completed'
+        publish(attached)
+      }, 1800)
+    }
   } else if (name === 'mark_exam_document_correction') {
     next.previous_document_id = String(args.p_previous_document_id)
     eventType = 'correction_linked'
