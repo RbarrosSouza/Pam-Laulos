@@ -20,9 +20,10 @@ const objects=new Map();
 const calls=[];
 const clientKeys=[];
 const authCalls=[];
+const readWarnings=[];
 let docs, tasks, stageClaimed=true, uploadFails=false, recorded=[], composioCalls=[], composioFails=false, driveFetchEnabled=false, intakeClaim=null, v2SourceReserved=false, deleteStorageFails=false, stagedExcluded=false;
 function reset() {
-  objects.clear(); calls.length=0; clientKeys.length=0; authCalls.length=0; recorded=[];
+  readWarnings.length=0; objects.clear(); calls.length=0; clientKeys.length=0; authCalls.length=0; recorded=[];
   env.set("EXAM_INGESTION_API_KEY","fixture-worker-secret"); stageClaimed=true; uploadFails=false;
   env.delete('EXAM_INTAKE_MONITOR_API_KEY'); intakeClaim=null; v2SourceReserved=false;
   deleteStorageFails=false;
@@ -114,6 +115,8 @@ vm.runInNewContext(ts.transpileModule(monitorAuthSource,{compilerOptions:{target
 const script=ts.transpileModule(source.replace(/^import .*;\s*$/gm,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
 vm.runInNewContext(script,{...monitorAuthExports,intakeActions:intakeExports.intakeActions,runIntakeAction:intakeExports.runIntakeAction,selectExamSupabasePrivilegedKey:keyExports.selectExamSupabasePrivilegedKey,createClient:(_url,key)=>{clientKeys.push(key);return client},Deno:{env:{get:k=>env.get(k)},serve(fn){handler=fn}},Request,Response,File,Blob,FormData,URL,URLSearchParams,
   crypto,TextDecoder,TextEncoder,Uint8Array,ArrayBuffer,Date,
+  ComposioOriginalError:readerExports.ComposioOriginalError,
+  console:{warn:(...args)=>readWarnings.push(args)},
   oauthDriveReaderConfig:readerExports.oauthDriveReaderConfig,
   readOAuthDriveOriginal:readerExports.readOAuthDriveOriginal,
   // The adapter itself, including real SDK JSON/SSE transport, is tested by composio-original-reader.test.ts.
@@ -483,3 +486,10 @@ await check('deletion status is member-only and never invokes deletion or storag
  assert.equal(calls.length,0);assert.equal(recorded.length,0);
 });
 console.log(`PASS: ${count} Edge handler scenarios with isolated adapters; live Supabase/Drive/WhatsApp still require homologation.`);
+
+await check('controlled original-read failures record a safe diagnostic without native credentials',async()=>{
+  driveOriginal();env.set('GOOGLE_DRIVE_ACCESS_TOKEN','fixture-oauth');driveFetchEnabled=false;
+  assert.equal((await request('file',{document_id:documentId},'fixture-user-token')).status,503);
+  assert.equal(readWarnings.length,1);assert.equal(readWarnings[0][0],'EXAM_ORIGINAL_READ_FAILURE');
+  assert.match(readWarnings[0][1],/Leitura OAuth indisponível/);assert.doesNotMatch(JSON.stringify(readWarnings),/fixture-oauth|https:|Authorization/);
+});

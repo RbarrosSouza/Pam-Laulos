@@ -1,7 +1,7 @@
 import { intakeActions, runIntakeAction } from "./intake-service-routes.ts";
 import { authenticateExamIntakeMonitor, authorizeExamIntakeMonitorAction, filterExamIntakeMonitorResult } from "./intake-monitor-auth.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.99.3";
-import { composioReaderConfig, readComposioDriveOriginal, oauthDriveReaderConfig, readOAuthDriveOriginal } from "./composio-original-reader.ts";
+import { ComposioOriginalError, composioReaderConfig, readComposioDriveOriginal, oauthDriveReaderConfig, readOAuthDriveOriginal } from "./composio-original-reader.ts";
 import { selectExamSupabasePrivilegedKey } from "./supabase-privileged-key.ts";
 
 // v1: workers use a dedicated secret, never a browser/service-role credential.
@@ -340,6 +340,8 @@ Deno.serve(async (req: Request) => {
     }
   } catch (caught) {
     const e = caught as Error & { status?: number };
+    // Reader errors contain fixed, owned messages; never log native/provider bodies or tokens.
+    if (caught instanceof ComposioOriginalError) console.warn("EXAM_ORIGINAL_READ_FAILURE", caught.message);
     return response({ error: e.status ? e.message : "Falha no serviço de exames; preservar pendência e reconciliar", code: "EXAM_DOCUMENT_ERROR" }, e.status || 500);
   }
 });
