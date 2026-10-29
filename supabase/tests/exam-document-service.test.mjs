@@ -21,9 +21,10 @@ const calls=[];
 const clientKeys=[];
 const authCalls=[];
 const readWarnings=[];
+let missingObjectCode='404';
 let docs, tasks, stageClaimed=true, uploadFails=false, recorded=[], composioCalls=[], composioFails=false, driveFetchEnabled=false, intakeClaim=null, v2SourceReserved=false, deleteStorageFails=false, stagedExcluded=false;
 function reset() {
-  readWarnings.length=0; objects.clear(); calls.length=0; clientKeys.length=0; authCalls.length=0; recorded=[];
+  missingObjectCode='404'; readWarnings.length=0; objects.clear(); calls.length=0; clientKeys.length=0; authCalls.length=0; recorded=[];
   env.set("EXAM_INGESTION_API_KEY","fixture-worker-secret"); stageClaimed=true; uploadFails=false;
   env.delete('EXAM_INTAKE_MONITOR_API_KEY'); intakeClaim=null; v2SourceReserved=false;
   deleteStorageFails=false;
@@ -65,7 +66,7 @@ const client={
     : access==='fixture-outsider-token' ? {data:{user:{id:sourceId}},error:null} : {data:{user:null},error:{message:'invalid'}}}},
   from:table,
   storage:{from(bucket){return {
-    async download(path){const bytes=objects.get(`${bucket}:${path}`);return bytes ? {data:new Blob([bytes]),error:null} : {data:null,error:{statusCode:'404'}}},
+    async download(path){const bytes=objects.get(`${bucket}:${path}`);return bytes ? {data:new Blob([bytes]),error:null} : {data:null,error:{statusCode:missingObjectCode}}},
     async upload(path,bytes,options){calls.push({op:'upload',bucket,path,options});
       if(uploadFails) return {error:{statusCode:'503'}};
       if(objects.has(`${bucket}:${path}`)) return {error:{statusCode:'409'}};
@@ -492,4 +493,10 @@ await check('controlled original-read failures record a safe diagnostic without 
   assert.equal((await request('file',{document_id:documentId},'fixture-user-token')).status,503);
   assert.equal(readWarnings.length,1);assert.equal(readWarnings[0][0],'EXAM_ORIGINAL_READ_FAILURE');
   assert.match(readWarnings[0][1],/Leitura OAuth indisponível/);assert.doesNotMatch(JSON.stringify(readWarnings),/fixture-oauth|https:|Authorization/);
+});
+
+await check('Nexus accepts named NoSuchKey as an absent target and verifies the uploaded PDF',async()=>{
+  missingObjectCode='NoSuchKey';objects.set(`exam_documents_staging:${documentId}/original.pdf`,fixtureBytes);
+  const res=await request('attach_nexus',{delivery_id:taskId,lease_token:token});assert.equal(res.status,200);
+  assert.ok(objects.has(`exam_documents_private:${petId}/${documentId}/original.pdf`));
 });

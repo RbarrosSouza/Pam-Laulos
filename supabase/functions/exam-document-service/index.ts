@@ -68,6 +68,7 @@ async function readDocumentBytes(client: SupabaseClient, doc: Json): Promise<Arr
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return response({ error: "Use POST" }, 405);
+  let attachmentStage: string | undefined;
   try {
     const url = Deno.env.get("SUPABASE_URL");
     const key = selectExamSupabasePrivilegedKey((name) => Deno.env.get(name));
@@ -312,6 +313,7 @@ Deno.serve(async (req: Request) => {
         return response({ document_id: staged.document_id, duplicate: staged.document_id !== source.document_id, document: await document(staged.document_id), drive_pending: staged.document.file_status !== "saved" }, 201);
       }
       case "attach_nexus": {
+        attachmentStage = "validate_task";
         const deliveryId = uuid(payload.delivery_id);
         const leaseToken = uuid(payload.lease_token);
         const { data: task, error: taskError } = await service.from("exam_document_delivery").select("*").eq("id", deliveryId).single();
@@ -319,20 +321,25 @@ Deno.serve(async (req: Request) => {
         if (task.lease_token !== leaseToken || task.status !== 'reserved' || new Date(task.lease_until).getTime() <= Date.now()) error("Reserva de anexação inválida/expirada", 409);
         const doc = await document(task.document_id);
         if (doc.identification_status !== "confirmed" || !doc.pet_id || !plain(doc.confirmed_data).exam_date) error("Paciente e data clínica devem ser confirmados antes de anexar", 409);
+        attachmentStage = "read_original";
         const bytes = await readDocumentBytes(service, doc);
+        attachmentStage = "reconcile_private_copy";
         const path = `${doc.pet_id}/${doc.id}/original.pdf`;
         const { data: existing, error: existingError } = await service.storage.from("exam_documents_private").download(path);
         if (existing) {
           if (await sha256(await existing.arrayBuffer()) !== doc.sha256) error("Objeto existente contém bytes diferentes; revisão necessária", 409);
         } else {
-          if (existingError && !['404','400'].includes(String(existingError.statusCode))) error("Não foi possível reconciliar o objeto privado", 503);
+          if (existingError && !['404','400','NoSuchKey','not_found'].includes(String(existingError.statusCode)) && existingError.status !== 404) error("Não foi possível reconciliar o objeto privado", 503);
+          attachmentStage = "upload_private_copy";
           const { error: uploadError } = await service.storage.from("exam_documents_private").upload(path, bytes, { contentType: "application/pdf", upsert: false });
           if (uploadError && uploadError.statusCode !== '409') error("Cópia privada não foi salva", 503);
         }
+        attachmentStage = "verify_private_copy";
         const { data: copy, error: copyError } = await service.storage.from("exam_documents_private").download(path);
         if (copyError || !copy) error("Leitura de confirmação do anexo falhou", 503);
         const copyBytes = await copy.arrayBuffer();
         if (copyBytes.byteLength !== bytes.byteLength || await sha256(copyBytes) !== doc.sha256) error("Anexo não passou na confirmação de integridade", 409);
+        attachmentStage = "finalize_registration";
         return response(await rpc("complete_exam_document_delivery", { p_delivery_id: deliveryId, p_lease_token: leaseToken,
           p_outcome: { status: "completed", storage_bucket: "exam_documents_private", storage_path: path, sha256: doc.sha256, size_bytes: doc.size_bytes } }));
       }
@@ -341,6 +348,7 @@ Deno.serve(async (req: Request) => {
   } catch (caught) {
     const e = caught as Error & { status?: number };
     // Reader errors contain fixed, owned messages; never log native/provider bodies or tokens.
+    if (attachmentStage) console.warn("EXAM_NEXUS_ATTACHMENT_FAILURE", attachmentStage);
     if (caught instanceof ComposioOriginalError) console.warn("EXAM_ORIGINAL_READ_FAILURE", caught.message);
     return response({ error: e.status ? e.message : "Falha no serviço de exames; preservar pendência e reconciliar", code: "EXAM_DOCUMENT_ERROR" }, e.status || 500);
   }
