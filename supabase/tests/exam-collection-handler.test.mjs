@@ -68,6 +68,8 @@ const script = ts.transpileModule(source.replace(/^import .*;\s*$/gm, ''), {
 }).outputText;
 vm.runInNewContext(script, {
   ...monitorAuthExports,
+  // Handler imports are stripped above; collection routes never read originals.
+  ComposioOriginalError: class ComposioOriginalError extends Error {},
   intakeActions:intakeExports.intakeActions,runIntakeAction:intakeExports.runIntakeAction,
   selectExamSupabasePrivilegedKey:keyExports.selectExamSupabasePrivilegedKey,
   createClient(url, key, options) {

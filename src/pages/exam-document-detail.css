@@ -57,6 +57,11 @@
 .exam-detail-stage-icon { width: 43px; height: 43px; display: grid; place-items: center; position: relative; border-radius: 50%; background: #f2f3ef; color: #a2a69f; transition: color .18s, background-color .18s; }
 .exam-detail-stage-icon.is-done, .exam-detail-stage-icon.contact-pending { background: var(--green-tint); color: var(--green); }
 .exam-detail-stage-icon.contact-done { background: var(--green); color: white; }
+.exam-detail-stage-icon.is-failed { background: #fff0cf; color: #8a4b09; }
+.exam-detail-nexus-retry { display: grid; gap: 12px; margin: 20px 0; padding: 18px; border: 1px solid #e8c88d; border-radius: 18px; background: #fff8e8; color: #714315; overflow-wrap: anywhere; }
+.exam-detail-nexus-retry strong { font-size: 17px; line-height: 1.4; }
+.exam-detail-nexus-retry p { font-size: 14px; line-height: 1.5; margin: 0; }
+.exam-detail-nexus-retry .exam-detail-primary { min-height: 48px; border-radius: 12px; font-size: 15px; }
 .exam-detail-stage-check { position: absolute; right: -2px; bottom: 0; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; border: 2px solid var(--paper); background: var(--green); color: white; }
 .contact-done .exam-detail-stage-check { background: white; color: var(--green); }
 .exam-detail-progress-caption { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 12px; line-height: 1.5; color: var(--muted); margin: 12px 0 0; min-height: 20px; text-align: center; }

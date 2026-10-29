@@ -15,6 +15,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: [
+      { find: '@/components/documents/DocumentVersionReview', replacement: path.join(root, 'mock-version-review.tsx') },
       { find: '@/contexts/exam-auth', replacement: path.join(root, 'mock-auth.ts') },
       { find: '@/hooks/useExamDocuments', replacement: path.join(root, 'mock-documents.ts') },
       { find: '@/hooks/useVets', replacement: path.join(root, 'mock-vets.ts') },
