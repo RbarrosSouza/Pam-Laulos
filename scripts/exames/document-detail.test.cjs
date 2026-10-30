@@ -232,16 +232,32 @@ const check = (name, run) => { run(); checks++; console.log('ok ' + checks + ' -
     assert.equal(last.args.p_confirmed.exam_date, '2026-10-29');
     assert.equal(last.args.p_pet_id, candidate.pet_id);
   });
-  states = []; currentDocument = doc(); tree = compactRender();
-  tree.find(node => node.type === 'select').props.onChange({ target: { value: 'review' } });
-  tree = compactRender();
-  tree.find(node => node.type === 'textarea').props.onChange({ target: { value: 'Identificação ilegível' } });
-  button(compactRender(), 'Salvar conferência').props.onClick();
-  await new Promise(resolve => setImmediate(resolve));
-  check('non-exam classification follows review rather than linking a patient', () => {
-    assert.equal(mutations.at(-1).name, 'review_exam_document');
-    assert.equal(mutations.at(-1).args.p_classification, 'review');
-  });
+  for (const status of ['review', 'not_exam']) {
+    states = []; currentDocument = { ...doc(), identification_status: status, review_reason: 'Identificação pendente' };
+    const before = mutations.length;
+    const version = currentDocument.version;
+    tree = compactRender();
+    check(`${status} opens without a classification control or automatic write`, () => {
+      assert.equal(tree.some(node => ['select', 'textarea'].includes(node.type)), false);
+      assert.doesNotMatch(text(tree[0]), /Tipo de documento|Motivo da classificação|É um exame/);
+      assert.equal(mutations.length, before);
+      assert.equal(button(tree, 'Confirmar cadastro e anexar').props.disabled, true);
+    });
+    tree.find(node => node.type === 'button' && node.props.className === 'candidate').props.onClick();
+    tree = compactRender();
+    tree.find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } });
+    tree = compactRender();
+    assert.equal(button(tree, 'Confirmar cadastro e anexar').props.disabled, false);
+    button(tree, 'Confirmar cadastro e anexar').props.onClick();
+    await new Promise(resolve => setImmediate(resolve));
+    check(`${status} links directly after patient verification without a classification step`, () => {
+      assert.equal(mutations.length, before + 1);
+      assert.equal(mutations.at(-1).name, 'confirm_exam_document_link');
+      assert.equal(mutations.at(-1).args.p_pet_id, candidate.pet_id);
+      assert.equal(mutations.at(-1).args.p_expected_version, version);
+      assert.equal(mutations.at(-1).args.p_confirmed.exam_type, 'Hemograma');
+    });
+  }
   states = []; currentDocument = { ...contactDoc(), confirmed_data: { pet_name: 'Nina', client_name: 'Maria', exam_date: '2026-10-29' } };
   tree = compactRender();
   check('attached compact form displays a read-only summary without editable controls', () => {

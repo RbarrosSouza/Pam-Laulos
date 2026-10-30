@@ -10,7 +10,7 @@ const previousId = '10000000-0000-4000-8000-000000000002'
 const nexusDone = linked && mode !== 'pending'
 let doc: ExamDocument = {
   id, display_code: 'EX-DEMO', version: 1, original_name: 'Laudo fictício.pdf', received_at: '2026-10-29T17:32:00Z', file_status: 'saved',
-  identification_status: linked ? 'confirmed' : 'unidentified', drive_file_id: null, drive_name: null, extracted_data: fields, confirmed_data: linked ? fields : {}, evidence: {}, review_reason: null,
+  identification_status: linked ? 'confirmed' : mode === 'review' ? 'review' : 'unidentified', drive_file_id: null, drive_name: null, extracted_data: fields, confirmed_data: linked ? fields : {}, evidence: {}, review_reason: mode === 'review' ? 'Identificação pendente' : null,
   pet_id: linked ? 'pet-demo' : null, assigned_to: null, responsible_vet_id: 'vet-demo', responsible_vet_name: 'Dra. Clara Lima', responsible_vet_avatar_url: null, responsible_vet_source: 'manual',
   group_release_at: null, group_exception_reason: null, previous_document_id: null, oldest_group_sent_at: '2026-10-29T17:32:00Z', contact_status: 'pending', group_status: mode === 'partial' ? 'pending' : 'sent', nexus_status: nexusDone ? 'completed' : linked ? 'pending' : 'awaiting_link', process_status: 'completed', completed: false,
   sources: [{ id: 'source-demo', channel: 'whatsapp', received_at: '2026-10-29T17:32:00Z' }],
