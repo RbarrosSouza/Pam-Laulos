@@ -151,10 +151,21 @@ test('generated extraction schema requests explicit requester role and state-qua
  assert(prompt.includes('isso não impede o envio do exame'));
 });
 
-test('approved caption has five compact lines, original URL, and two vet names without title',()=>{
+test('approved caption has six compact lines, original URL, and two vet names without title',()=>{
  for(const [name,expected] of [['Dra. Tatiane Nascimento Silva','Tatiane Nascimento'],['Doutora Pâmela Brenda Decio','Pâmela Brenda'],['Isabela Gutierrez','Isabela Gutierrez'],['Dra. Isabela','Isabela']]){
   const result=examPresentation({...doc,responsible_vet_id:'vet-one',responsible_vet_name:name,responsible_vet_source:'pdf'},base);
-  assert.equal(result.content,['🧪 *Luna (Ana Souza)*','📅 Exame: 14/10/2026','👩‍⚕️ '+expected,'🔗 '+base+'/e/ERERERERQRGhEREREREREQ','_Recebido em 16/10/2026 às 15:29_'].join('\n'));
+  assert.equal(result.content,['🧪 *Luna (Ana Souza)*','🔬 Hemograma','📅 Exame: 14/10/2026','👩‍⚕️ '+expected,'🔗 '+base+'/e/ERERERERQRGhEREREREREQ','_Recebido em 16/10/2026 às 15:29_'].join('\n'));
   assert(!/Novo exame|Atualização do exame|Responsável|Informações incompletas|Cadastro no PAM Nexus|Aguardando/.test(result.content));
+ }
+});
+
+test('exam type is shown when identified and omitted when absent',()=>{
+ for(const exam_type of ['Hemograma','Ultrassom abdominal','Hemograma + Bioquímicos']){
+  const result=examPresentation({...doc,extracted_data:{...fields,exam_type}},base);
+  assert.equal(result.content.split('\n')[1],'🔬 '+exam_type);
+ }
+ for(const exam_type of [null,'','—']){
+  const result=examPresentation({...doc,extracted_data:{...fields,exam_type}},base);
+  assert(!result.content.includes('🔬'));assert(result.missingFields.includes('exam_type'));
  }
 });
