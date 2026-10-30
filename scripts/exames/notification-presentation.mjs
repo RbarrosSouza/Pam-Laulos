@@ -29,6 +29,7 @@ export function examPresentation(document, baseUrl) {
   const tutor = present('client_name') ? ' (' + text(fields.client_name) + ')' : '';
   const content = [
     '🧪 *' + patient + tutor + '*',
+    present('exam_type') ? '🔬 ' + text(fields.exam_type) : null,
     dateLabel ? '📅 Exame: ' + dateLabel : null,
     vetName ? '👩‍⚕️ ' + vetName : null,
     shortUrl ? '🔗 ' + shortUrl : null,
