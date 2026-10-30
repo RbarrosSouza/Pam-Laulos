@@ -14,7 +14,7 @@ import { ExamDetailSheet } from '@/components/documents/ExamDetailSheet'
 import { DocumentVersionReview } from '@/components/documents/DocumentVersionReview'
 import { documentDisplayId, documentLabel } from '@/lib/document-status'
 import { getExamDetailProgress } from '@/lib/exam-detail-progress'
-import { ExamCompletion } from '@/components/documents/ExamCompletion'
+import { ExamCompletion, ExamRegistrationCompletion } from '@/components/documents/ExamCompletion'
 import { groupLabels, type Original } from '@/lib/document-version-review'
 import type { ExamDocument } from '@/types/exam-document'
 import '@fontsource/manrope/latin-800.css'
@@ -59,6 +59,7 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
   const editorHeading = useRef<HTMLHeadingElement>(null)
   const cardAction = useRef<HTMLButtonElement>(null)
   const editorOpener = useRef<HTMLElement | null>(null)
+  const [registration, setRegistration] = useState<{ document: ExamDocument | null } | null>(null)
   const [completionOpen, setCompletionOpen] = useState(false)
   const [completionDocument, setCompletionDocument] = useState<ExamDocument | null>(null)
   const [contactWriteAcknowledged, setContactWriteAcknowledged] = useState(false)
@@ -255,9 +256,14 @@ export function ExamDocumentContent({ doc, refresh }: { doc: ExamDocument; refre
     </div>
     <aside className="workspace-editor" inert={!workspaceOpen} aria-hidden={!workspaceOpen} aria-label="Preenchimento do cadastro" onKeyDown={event => { if (event.key === 'Escape') closeEditor() }}>
       <header className="editor-head"><div><h2 tabIndex={-1} ref={editorHeading}>{editorMode === 'identity' ? 'Dados do exame' : progress.nexusLinked ? 'Exame no cadastro' : doc.pet_id ? 'Cadastro identificado' : 'Adicionar ao cadastro'}</h2><p className="sub">{progress.nexusLinked ? 'Informações salvas no PAM Nexus.' : 'Selecione o paciente e confira o exame.'}</p></div><button className="icon-btn" aria-label="Recolher preenchimento" onClick={closeEditor}><X size={18}/></button></header>
-      {editorMounted && <DocumentForm key={`${doc.id}:${editorMode}`} doc={doc} mode={editorMode} compact onOpenPdf={() => openPdf()}/>}
+      {editorMounted && <DocumentForm key={`${doc.id}:${editorMode}`} doc={doc} mode={editorMode} compact onOpenPdf={() => openPdf()} onIdentitySaveState={state => {
+        if (state === 'error') setRegistration(null)
+        else if (state === 'saving') setRegistration({ document: null })
+        else { setRegistration({ document: state }); void refresh().catch(() => {}) }
+      }}/>}
     </aside>
     </div></div>
+    {registration && <ExamRegistrationCompletion document={registration.document} onClose={() => { setRegistration(null); closeEditor() }}/>}
     {completionOpen && <ExamCompletion document={completionDocument} onClose={() => { completionDismissed.current = true; setCompletionOpen(false) }}/>}
     <ExamDetailSheet open={panel !== null} onOpenChange={open => { if (!open && !deleting) close() }} title={panel ? panelTitles[panel] : ''}>
       {panel === 'responsible' && <div className="exam-detail-team">
