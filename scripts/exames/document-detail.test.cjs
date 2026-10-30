@@ -265,5 +265,28 @@ const check = (name, run) => { run(); checks++; console.log('ok ' + checks + ' -
     assert.equal(tree.some(node => ['input', 'select', 'textarea'].includes(node.type)), false);
     assert.match(text(tree[0]), /correção exige uma nova versão/);
   });
+  states = []; currentDocument = doc();
+  const receipts = [];
+  let resolveIdentityReceipt;
+  const saving = new Promise(resolve => { resolveIdentityReceipt = resolve; });
+  mutateBehavior = () => saving;
+  const receiptRender = () => render({ mode: 'identity', compact: true, onIdentitySaveState: value => receipts.push(value) });
+  const receiptNotices = notices.length;
+  button(receiptRender(), 'Salvar identificação').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  check('identity loader starts before persistence and cannot acknowledge early', () => assert.deepEqual(receipts, ['saving']));
+  resolveIdentityReceipt({ document: { ...currentDocument, version: 2, pet_id: 'pet-1', nexus_status: 'pending' } });
+  await new Promise(resolve => setImmediate(resolve));
+  check('identity receipt replaces the toast only after the saved response', () => {
+    assert.equal(receipts[1].pet_id, 'pet-1');
+    assert.equal(receipts[1].nexus_status, 'pending');
+    assert.equal(notices.length, receiptNotices);
+  });
+  states = []; currentDocument = doc(); receipts.length = 0;
+  mutateBehavior = async () => { throw new Error('Identificação não salva'); };
+  button(receiptRender(), 'Salvar identificação').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  check('identity failure signals error instead of a successful receipt', () => assert.deepEqual(receipts, ['saving', 'error']));
+  mutateBehavior = undefined;
   console.log(checks + ' document detail regression checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

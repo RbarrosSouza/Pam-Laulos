@@ -75,7 +75,7 @@ export function DocumentPreview({ doc }: { doc: Pick<ExamDocument, 'id' | 'drive
   </section>
 }
 
-export function DocumentForm({ doc, mode, onSaved, onContactSaved, compact = false, onOpenPdf }: { doc: ExamDocument; mode: 'identity' | 'patient' | 'contact'; onSaved?: () => void; onContactSaved?: () => Promise<void>; compact?: boolean; onOpenPdf?: () => void }) {
+export function DocumentForm({ doc, mode, onSaved, onContactSaved, compact = false, onOpenPdf, onIdentitySaveState }: { doc: ExamDocument; mode: 'identity' | 'patient' | 'contact'; onSaved?: () => void; onContactSaved?: () => Promise<void>; compact?: boolean; onOpenPdf?: () => void; onIdentitySaveState?: (state: 'saving' | 'error' | ExamDocument) => void }) {
   const auth = useExamAuth()
   const action = useDocumentAction()
   const submitting = useRef(false)
@@ -112,6 +112,8 @@ export function DocumentForm({ doc, mode, onSaved, onContactSaved, compact = fal
     if (submitting.current || isSaving) return
     submitting.current = true
     setSaving(true)
+    const identitySave = name === 'review_exam_document' || name === 'confirm_exam_document_link'
+    if (identitySave) onIdentitySaveState?.('saving')
     try {
       const result = await action.mutateAsync({ name, args })
       const saved = result?.document || result
@@ -124,7 +126,9 @@ export function DocumentForm({ doc, mode, onSaved, onContactSaved, compact = fal
       }
       if (name === 'review_exam_document') setIdentityOpen(false)
       if (name === 'confirm_exam_document_link' && !saved?.confirmed_data?.exam_date) setIdentityOpen(true)
-      if (name === 'record_exam_document_contact' && onContactSaved) {
+      if (identitySave && onIdentitySaveState) {
+        onIdentitySaveState({ ...doc, ...saved })
+      } else if (name === 'record_exam_document_contact' && onContactSaved) {
         await onContactSaved()
       } else {
         toast.success(message)
@@ -132,7 +136,7 @@ export function DocumentForm({ doc, mode, onSaved, onContactSaved, compact = fal
         if (shouldDismiss && !compact) onSaved?.()
       }
     }
-    catch (err) { toast.error(err instanceof Error ? err.message : 'Não foi possível salvar.') }
+    catch (err) { if (identitySave) onIdentitySaveState?.('error'); toast.error(err instanceof Error ? err.message : 'Não foi possível salvar.') }
     finally { submitting.current = false; setSaving(false) }
   }
   const toggle = (values: string[], id: string) => values.includes(id) ? values.filter(value => value !== id) : [...values, id]

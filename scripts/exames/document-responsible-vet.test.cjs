@@ -84,7 +84,7 @@ function harness(options = {}) {
     },
     'react/jsx-runtime': jsx,
     'react-router-dom': { Link: 'Link', useParams: () => ({}), useLocation: () => ({ state: null }), useSearchParams: () => [new URLSearchParams()] },
-    '@/components/documents/ExamCompletion': { ExamCompletion: 'ExamCompletion' },
+    '@/components/documents/ExamCompletion': { ExamCompletion: 'ExamCompletion', ExamRegistrationCompletion: 'ExamRegistrationCompletion' },
     '@/lib/document-version-review': { groupLabels: {} },
     'lucide-react': new Proxy({}, { get: (_, name) => String(name) }),
     '@phosphor-icons/react/dist/csr/WhatsappLogo': { WhatsappLogo: 'WhatsappLogo' },
@@ -330,4 +330,32 @@ test('an inactive clinical vet gets a precise message without implying missing l
   assert.match(error.message, /não está mais ativa/);
   assert.doesNotMatch(error.message, /não tem acesso|login|permissão/);
   assert.equal(error.code, '22023');
+});
+
+test('registration save opens a waiting receipt, acknowledges persisted identity, then returns to the single card', () => {
+  const h = harness();
+  h.render().find(node => node.type === 'button' && text(node) === 'Adicionar exame ao cadastro').props.onClick();
+  let editor = h.render().find(node => node.type === 'DocumentForm');
+  editor.props.onOpenPdf();
+  editor.props.onIdentitySaveState('saving');
+  assert.equal(h.render().find(node => node.type === 'ExamRegistrationCompletion').props.document, null);
+  const saved = fixture({ pet_id: 'pet-fixture', nexus_status: 'pending' });
+  editor.props.onIdentitySaveState(saved);
+  const receipt = h.render().find(node => node.type === 'ExamRegistrationCompletion');
+  assert.equal(receipt.props.document.nexus_status, 'pending');
+  receipt.props.onClose();
+  const tree = h.render();
+  assert.equal(tree.some(node => node.type === 'ExamRegistrationCompletion'), false);
+  assert.equal(tree.some(node => node.type === 'DocumentPreview'), false);
+  assert.equal(tree.find(node => node.type === 'aside' && node.props.className === 'workspace-editor').props.inert, true);
+});
+test('registration write failure dismisses the loader and preserves the open editor and PDF', () => {
+  const h = harness();
+  h.render().find(node => node.type === 'button' && text(node) === 'Adicionar exame ao cadastro').props.onClick();
+  const editor = h.render().find(node => node.type === 'DocumentForm');
+  editor.props.onOpenPdf(); editor.props.onIdentitySaveState('saving'); editor.props.onIdentitySaveState('error');
+  const tree = h.render();
+  assert.equal(tree.some(node => node.type === 'ExamRegistrationCompletion'), false);
+  assert(tree.some(node => node.type === 'DocumentPreview'));
+  assert.equal(tree.find(node => node.type === 'aside' && node.props.className === 'workspace-editor').props.inert, false);
 });

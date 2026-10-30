@@ -41,3 +41,29 @@ export function ExamCompletion({ document: doc, onClose }: { document: ExamDocum
     </Dialog.Content>
   </Dialog.Portal></Dialog.Root>
 }
+
+/** Acknowledges the identity write; attachment continues independently. */
+export function ExamRegistrationCompletion({ document: doc, onClose }: { document: ExamDocument | null; onClose: () => void }) {
+  const [settled, setSettled] = useState(false)
+  const [closing, setClosing] = useState(false)
+  const closeRef = useRef(onClose)
+  useEffect(() => { closeRef.current = onClose }, [onClose])
+  useEffect(() => {
+    if (!doc) return
+    const done = window.setTimeout(() => setSettled(true), 650)
+    const fade = window.setTimeout(() => setClosing(true), 2100)
+    const close = window.setTimeout(() => closeRef.current(), 2420)
+    return () => { window.clearTimeout(done); window.clearTimeout(fade); window.clearTimeout(close) }
+  }, [doc])
+  const attached = !!doc && getExamDetailProgress(doc).nexusLinked
+  return <Dialog.Root open onOpenChange={open => { if (!open && doc) onClose() }}><Dialog.Portal>
+    <Dialog.Overlay className={`finish-overlay${closing ? ' closing' : ''}`}/>
+    <Dialog.Content className={`finish-dialog${closing ? ' closing' : ''}`} onEscapeKeyDown={event => { if (!doc) event.preventDefault() }} onPointerDownOutside={event => event.preventDefault()} onCloseAutoFocus={event => event.preventDefault()}>
+      <div className="finish-content">
+        {doc && <Dialog.Close className="finish-close" aria-label="Fechar animação"><X size={18}/></Dialog.Close>}
+        <div className={`finish-orbit${settled ? ' settled' : ''}`} aria-hidden="true">{settled ? <Check/> : <Link2/>}</div>
+        <div role="status" aria-live="polite" aria-atomic="true"><Dialog.Title>{!doc ? 'Salvando cadastro' : settled ? doc.pet_id ? 'Cadastro conciliado' : 'Identificação salva' : 'Conferindo cadastro'}</Dialog.Title><Dialog.Description className="finish-caption">{!doc ? 'Aguarde a confirmação.' : !doc.pet_id ? 'Dados do exame salvos.' : attached ? 'Exame anexado ao cadastro.' : 'Anexação ao cadastro em andamento.'}</Dialog.Description></div>
+      </div>
+    </Dialog.Content>
+  </Dialog.Portal></Dialog.Root>
+}

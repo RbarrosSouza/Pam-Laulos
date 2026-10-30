@@ -37,3 +37,7 @@ Referência HTML aprovada foi preservada em `/Users/pameladecio/.codex/visualiza
 ## Estado da entrega
 
 A etapa local foi aprovada e a integração à `main` foi autorizada pelo usuário. Este pacote publica somente a interface e seus testes; não contém migrações, reenvios ou alterações de registros clínicos. O resultado da integração e da publicação é registrado no Histórico de alterações do Segundo Cérebro.
+
+## Salvamento do cadastro — 29/10/2026
+
+Salvar identificação ou confirmar o vínculo abre o loader imediatamente. Somente a resposta aceita da gravação libera “Cadastro conciliado” (ou “Identificação salva” se ainda não há paciente). A mensagem informa “Anexação ao cadastro em andamento” quando o Nexus ainda não concluiu; não sinaliza card completo. Após aproximadamente 2,4 s da resposta, fecha modal, PDF e preenchimento e centraliza a ficha. Falha fecha somente o loader, preservando o rascunho e o PDF. A animação de contato segue seu fluxo próprio.
