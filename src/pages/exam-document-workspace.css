@@ -82,3 +82,5 @@
 .finish-dialog h2{font-weight:800}
 .exam-workspace-page{padding:0}
 @media(max-height:850px) and (min-width:901px){.workspace-editor .editor-head{padding-top:19px;padding-bottom:16px}.workspace-editor .block{padding:16px 0}}
+/* The reference uses normal line boxes; inherited app leading made the form taller. */
+.exam-workspace-page{line-height:normal}
