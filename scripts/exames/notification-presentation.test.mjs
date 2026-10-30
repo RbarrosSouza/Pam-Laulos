@@ -27,27 +27,19 @@ test('extractor prompt requests complete printed names, a literal exam type and 
 test('filename starts with pet then tutor, exam, documented date; received time appears only at end of caption',()=>{
  const result=examPresentation(doc,base);
  assert(result.ready);assert.equal(result.fileName,'Luna - Ana Souza - Hemograma - 14-10-2026.pdf');
- assert(result.content.indexOf('*Tutor:*')<result.content.indexOf('*Pet:*'));
- assert(result.content.includes('*Data do exame:* 14/10/2026'));
+ assert(result.content.startsWith('🧪 *Luna (Ana Souza)*\n'));
+ assert(result.content.includes('📅 Exame: 14/10/2026'));
  assert(result.content.endsWith('_Recebido em 16/10/2026 às 15:29_'));
  assert(!result.content.includes('[EXAM:'));assert(!result.content.includes(id));
  assert.equal(result.shortUrl,base+'/e/ERERERERQRGhEREREREREQ');
  assert(!result.content.includes('\\n'));
 });
 
-test('a preserved valid previous document relation labels only the new caption as an exam update',()=>{
+test('compact captions preserve version relations without an extra announcement line',()=>{
  const linked={...doc,previous_document_id:'22222222-2222-4222-a222-222222222222'};
  const original=examPresentation(doc,base),updated=examPresentation(linked,base);
- assert(updated.content.startsWith('🧪 *Atualização do exame*\n'));
- assert(original.content.startsWith('🧪 *Novo exame*\n'));
- assert.equal(updated.fileName,original.fileName);assert.equal(updated.shortUrl,original.shortUrl);
- assert.equal(updated.content.replace('🧪 *Atualização do exame*','🧪 *Novo exame*'),original.content);
+ assert.deepEqual(updated,original);
  assert.equal(linked.previous_document_id,'22222222-2222-4222-a222-222222222222');
-});
-
-test('absent, malformed, self or raw extracted previous links do not announce an update',()=>{
- for(const previous_document_id of [undefined,null,'','not-a-uuid','00000000-0000-0000-0000-000000000000',id,id.toUpperCase(),['22222222-2222-4222-a222-222222222222']])assert(examPresentation({...doc,previous_document_id},base).content.startsWith('🧪 *Novo exame*\n'));
- assert(examPresentation({...doc,extracted_data:{...fields,previous_document_id:'22222222-2222-4222-a222-222222222222'}},base).content.startsWith('🧪 *Novo exame*\n'));
 });
 
 test('missing or impossible exam date is never replaced by email receipt date',()=>{
@@ -55,7 +47,7 @@ test('missing or impossible exam date is never replaced by email receipt date',(
   const result=examPresentation({...doc,extracted_data:{...fields,exam_date:date}},base);
   assert.equal(result.ready,false);assert.deepEqual(result.missingFields,['exam_date']);
   assert.equal(result.fileName,'Luna - Ana Souza - Hemograma.pdf');assert(!result.fileName.includes('16-10-2026'));
-  assert(!result.content.includes('*Data do exame:*'));
+  assert(!result.content.includes('📅 Exame:'));
  }
 });
 
@@ -78,16 +70,16 @@ test('partial and unidentified exams keep only available fields and are ready to
  for(const [available,expected] of [[{pet_name:'Luna'},'Luna.pdf'],[{client_name:'Ana Souza'},'Ana Souza.pdf'],[{exam_type:'Hemograma'},'Hemograma.pdf'],[{},'Exame.pdf']]){
   const result=examPresentation({...doc,extracted_data:available},base);
   assert.equal(result.fileName,expected);
-  assert(result.content.includes('Informações incompletas'));
+  assert(!result.content.includes('Informações incompletas'));
   assert(!result.content.includes(': —'));assert(!result.content.includes('não identificado'));
-  for(const [key,label] of [['client_name','Tutor'],['pet_name','Pet'],['exam_type','Exame']])assert.equal(result.content.includes('*'+label+':*'),Boolean(available[key]));
+  assert(result.content.startsWith('🧪 *' + (available.pet_name || 'Exame') + (available.client_name ? ' (' + available.client_name + ')' : '') + '*\n'));
  }
 });
 
 test('file values and WhatsApp formatting cannot be broken by linebreaks or reserved punctuation',()=>{
  const result=examPresentation({...doc,extracted_data:{...fields,pet_name:'Lu\nna/<x>',client_name:'*Ana*\n_Equipe_'}},base);
  assert(!/[\\/:*?"<>|\x00-\x1f]/.test(result.fileName));
- assert(result.content.includes('*Tutor:* Ana Equipe\n*Pet:* Lu na/<x>'));
+ assert(result.content.includes('🧪 *Lu na/<x> (Ana Equipe)*'));
 });
 
 test('full pet and tutor names over 60 characters remain complete in filename and caption',()=>{
@@ -96,7 +88,7 @@ test('full pet and tutor names over 60 characters remain complete in filename an
  assert(pet.length>60);assert(tutor.length>60);
  const result=examPresentation({...doc,extracted_data:{...fields,pet_name:pet,client_name:tutor}},base);
  assert.equal(result.fileName,pet+' - '+tutor+' - Hemograma - 14-10-2026.pdf');
- assert(result.content.includes('*Tutor:* '+tutor));assert(result.content.includes('*Pet:* '+pet));
+ assert(result.content.includes('🧪 *'+pet+' ('+tutor+')*'));
 });
 
 test('internal attributes recover lost POST response, ignore unrelated messages, keep legacy marker compatibility',()=>{
@@ -137,19 +129,19 @@ test('generated processing and group nodes agree on filename and put correlation
   task.document.extracted_data=available;
   const partial=await run('group','Preparar PDF e correlação',{json:{},binary});
   assert.equal(partial[0].json.verified,true);
-  assert(partial[0].json.content.includes('Informações incompletas'));
+  assert(!partial[0].json.content.includes('Informações incompletas'));
   assert.equal(partial[0].binary.data.fileName,examPresentation(task.document,base).fileName);
  }
 });
 
 test('initial group caption names only the resolved responsible veterinarian, preserving partial delivery',()=>{
  const assigned=examPresentation({...doc,responsible_vet_id:'vet-one',responsible_vet_name:'*Dra. Ana* Souza',responsible_vet_source:'sale'},base);
- assert(assigned.content.includes('🩺 *Responsável:* Dra. Ana Souza'));assert(!assigned.content.includes('Aguardando responsável'));
+ assert(assigned.content.includes('👩‍⚕️ Ana Souza'));assert(!assigned.content.includes('Aguardando responsável'));
  for(const extra of [{assigned_to:'auth-actor'},{extracted_data:{...fields,requesting_vet_name:'Ana Souza'}},{responsible_vet_id:'vet-one',responsible_vet_name:'Ana Souza',responsible_vet_source:'conflict'}]){
-  const out=examPresentation({...doc,...extra},base);assert(out.content.includes('Aguardando responsável'));assert(!out.content.includes('*Responsável:*'));
+  const out=examPresentation({...doc,...extra},base);assert(!out.content.includes('Aguardando responsável'));assert(!out.content.includes('👩‍⚕️'));
  }
  const partial=examPresentation({...doc,extracted_data:{pet_name:'Luna'},responsible_vet_id:'vet-one',responsible_vet_name:'Ana Souza',responsible_vet_source:'pdf'},base);
- assert.equal(partial.fileName,'Luna.pdf');assert(partial.content.includes('*Responsável:* Ana Souza'));
+ assert.equal(partial.fileName,'Luna.pdf');assert(partial.content.includes('👩‍⚕️ Ana Souza'));
 });
 
 test('generated extraction schema requests explicit requester role and state-qualified registration',()=>{
@@ -157,4 +149,12 @@ test('generated extraction schema requests explicit requester role and state-qua
  assert(prompt.includes('requesting_vet_name:null|string'));assert(prompt.includes('requesting_vet_crmv:null|string'));
  assert(prompt.includes('Não use o nome do radiologista'));assert(prompt.includes('um número sem UF é null'));
  assert(prompt.includes('isso não impede o envio do exame'));
+});
+
+test('approved caption has five compact lines, original URL, and two vet names without title',()=>{
+ for(const [name,expected] of [['Dra. Tatiane Nascimento Silva','Tatiane Nascimento'],['Doutora Pâmela Brenda Decio','Pâmela Brenda'],['Isabela Gutierrez','Isabela Gutierrez'],['Dra. Isabela','Isabela']]){
+  const result=examPresentation({...doc,responsible_vet_id:'vet-one',responsible_vet_name:name,responsible_vet_source:'pdf'},base);
+  assert.equal(result.content,['🧪 *Luna (Ana Souza)*','📅 Exame: 14/10/2026','👩‍⚕️ '+expected,'🔗 '+base+'/e/ERERERERQRGhEREREREREQ','_Recebido em 16/10/2026 às 15:29_'].join('\n'));
+  assert(!/Novo exame|Atualização do exame|Responsável|Informações incompletas|Cadastro no PAM Nexus|Aguardando/.test(result.content));
+ }
 });
