@@ -4,10 +4,12 @@ import '@fontsource/dm-sans/400.css'
 import '@fontsource/dm-sans/500.css'
 import '@fontsource/dm-sans/600.css'
 import '../src/index.css'
-import {DocumentVersionReviewView,isVersionReviewData} from '../src/components/documents/DocumentVersionReviewView'
+import {DocumentVersionReviewView} from '../src/components/documents/DocumentVersionReviewView'
+import {isVersionReviewData} from '../src/lib/document-version-review'
+import '../src/pages/exam-document-workspace.css'
 import {versionReviewPreviewFixture} from './version-review-preview.fixture.mjs'
 if(!import.meta.env.DEV)throw new Error('Synthetic preview is DEV only')
-function Preview(){
+export function Preview(){
   const [blocked,setBlocked]=useState(false),[notice,setNotice]=useState<string|null>(null)
   const data=versionReviewPreviewFixture(blocked)
   if(new URLSearchParams(window.location.search).get('sent')==='both')data.current.group_status='sent'
