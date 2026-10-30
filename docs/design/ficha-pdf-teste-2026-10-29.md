@@ -1,6 +1,6 @@
 # Ficha, cadastro e PDF — branch de teste
 
-Implementação local autorizada por Rodrigo em 29/10/2026, após aprovação da prévia 03 e da aceleração da animação. **Sem autorização para produção.** Base: main `7dbb03d7b26a48ca236b6a3ab218faf1741c4d93`; branch `codex/ux-ficha-pdf-teste`.
+Implementação local autorizada por Rodrigo em 29/10/2026, após aprovação da prévia 03 e da aceleração da animação. Após a revisão local, Rodrigo autorizou explicitamente a integração à `main` em 29/10/2026. Base: main `7dbb03d7b26a48ca236b6a3ab218faf1741c4d93`; branch `codex/ux-ficha-pdf-teste`.
 
 ## Comportamento
 
@@ -36,4 +36,4 @@ Referência HTML aprovada foi preservada em `/Users/pameladecio/.codex/visualiza
 
 ## Estado da entrega
 
-Somente worktree/branch local de teste; sem push, PR, merge, deploy, migração ou alteração de dados reais. Produção permanece na base consultada. Próximo passo: revisão visual pelo usuário nesta implementação; eventual publicação depende de autorização específica.
+A etapa local foi aprovada e a integração à `main` foi autorizada pelo usuário. Este pacote publica somente a interface e seus testes; não contém migrações, reenvios ou alterações de registros clínicos. O resultado da integração e da publicação é registrado no Histórico de alterações do Segundo Cérebro.
