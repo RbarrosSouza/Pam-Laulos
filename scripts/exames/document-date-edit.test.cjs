@@ -134,29 +134,27 @@ const tick = () => new Promise(resolve => setImmediate(resolve))
     assert.equal(details(render()).props.open, true)
   })
   let canonicalSaved
-  await check('linked review accepts canonical confirmed response as the new clean baseline', async () => {
-    render().find(node => node.type === 'select').props.onChange({ target: { value: 'review' } })
-    render().find(node => node.type === 'textarea').props.onChange({ target: { value: 'Conferência realizada no PDF fictício.' } })
+  await check('identity save accepts the canonical response as the new clean baseline', async () => {
+    changeDate('2026-10-13')
     behavior = async entry => {
-      canonicalSaved = { ...current, version: current.version + 1, confirmed_data: { ...entry.args.p_fields }, identification_status: 'confirmed', review_reason: entry.args.p_reason }
-      // As in the real SQL, a linked document remains confirmed even when
-      // the submitted classification was review. The query may refetch later.
+      canonicalSaved = { ...current, version: current.version + 1, confirmed_data: { ...entry.args.p_fields }, identification_status: 'confirmed', review_reason: null }
       return { document: canonicalSaved }
     }
-    button(render(), 'Salvar conferência').props.onClick(); await tick()
-    assert.equal(writes.at(-1).args.p_classification, 'review')
+    button(render(), 'Salvar identificação').props.onClick(); await tick()
+    assert.equal(writes.at(-1).args.p_classification, 'exam')
+    assert.equal(writes.at(-1).args.p_reason, null)
     const tree = render()
-    assert.equal(tree.find(node => node.type === 'select').props.value, 'exam')
+    assert.equal(tree.some(node => ['select', 'textarea'].includes(node.type)), false)
     assert.equal(details(tree).props.open, false)
     assert.doesNotMatch(words(tree[0]), /Há alterações não salvas|Alterações não salvas/)
   })
-  await check('canonical refetch stays clean while retained reason remains available for a new review', () => {
+  await check('canonical refetch stays clean and cancelling a new edit restores the saved date', () => {
     current = canonicalSaved
     assert.doesNotMatch(words(render()[0]), /Há alterações não salvas|A identificação foi atualizada/)
     render().find(node => node.type === 'summary').props.onClick({ preventDefault: () => {} })
-    render().find(node => node.type === 'select').props.onChange({ target: { value: 'review' } })
-    assert.equal(render().find(node => node.type === 'textarea').props.value, 'Conferência realizada no PDF fictício.')
+    changeDate('2026-10-12')
     button(render(), 'Cancelar edição').props.onClick()
+    assert.equal(date(render()).props.value, '2026-10-13')
     assert.doesNotMatch(words(render()[0]), /Há alterações não salvas/)
   })
   await check('identity-only entry remains independent of the patient disclosure', () => {
