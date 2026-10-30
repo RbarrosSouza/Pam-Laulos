@@ -24,24 +24,14 @@ export function examPresentation(document, baseUrl) {
   if (document.received_at && Number.isFinite(Date.parse(document.received_at))) {
     received = new Intl.DateTimeFormat('pt-BR', {timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).format(new Date(document.received_at)).replace(', ', ' às ');
   }
-  const previous = document.previous_document_id;
-  const isUpdate = typeof previous === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(previous)
-    && previous.toLowerCase() !== String(document.id).toLowerCase();
+  const vetName = responsible.replace(/^(?:dra?\.?|doutora?)\s+/iu, '').split(/\s+/).slice(0, 2).join(' ');
+  const patient = present('pet_name') ? text(fields.pet_name) : 'Exame';
+  const tutor = present('client_name') ? ' (' + text(fields.client_name) + ')' : '';
   const content = [
-    isUpdate ? '🧪 *Atualização do exame*' : '🧪 *Novo exame*',
-    '',
-    present('client_name') ? '*Tutor:* ' + text(fields.client_name) : null,
-    present('pet_name') ? '*Pet:* ' + text(fields.pet_name) : null,
-    present('exam_type') ? '*Exame:* ' + text(fields.exam_type) : null,
-    dateLabel ? '*Data do exame:* ' + dateLabel : null,
-    responsible ? '🩺 *Responsável:* ' + responsible : null,
-    missingFields.length ? '📌 Informações incompletas — conferir no Pam Laudos.' : null,
-    '',
-    '📋 *Abrir e assumir no Pam Laudos*',
-    shortUrl,
-    '',
-    !responsible ? '⏳ Aguardando responsável' : null,
-    !document.pet_id ? 'Cadastro no PAM Nexus: selecionar tutor e pet' : null,
+    '🧪 *' + patient + tutor + '*',
+    dateLabel ? '📅 Exame: ' + dateLabel : null,
+    vetName ? '👩‍⚕️ ' + vetName : null,
+    shortUrl ? '🔗 ' + shortUrl : null,
     received ? '_Recebido em ' + received + '_' : null,
   ].filter(line => line !== null).join('\n');
   return {ready: missingFields.length === 0, missingFields, fileName, content, shortUrl};
