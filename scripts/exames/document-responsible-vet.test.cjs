@@ -1,3 +1,5 @@
+global.document = { activeElement: null };
+global.requestAnimationFrame = fn => fn();
 // Exercise the real responsibility UI without a browser, network, or clinical data.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -82,7 +84,8 @@ function harness(options = {}) {
     },
     'react/jsx-runtime': jsx,
     'react-router-dom': { Link: 'Link', useParams: () => ({}), useLocation: () => ({ state: null }), useSearchParams: () => [new URLSearchParams()] },
-    '@/lib/fireworks': { triggerFireworksAt: () => {} },
+    '@/components/documents/ExamCompletion': { ExamCompletion: 'ExamCompletion' },
+    '@/lib/document-version-review': { groupLabels: {} },
     'lucide-react': new Proxy({}, { get: (_, name) => String(name) }),
     '@phosphor-icons/react/dist/csr/WhatsappLogo': { WhatsappLogo: 'WhatsappLogo' },
     sonner: { toast: { success: message => notices.push({ type: 'success', message }), error: message => notices.push({ type: 'error', message }) } },
@@ -93,6 +96,10 @@ function harness(options = {}) {
       useDocumentAction: () => ({ isPending: false, mutateAsync: async entry => {
         mutations.push(entry);
         if (options.persist) await options.persist(entry);
+        if (entry.name === 'record_exam_document_contact') {
+          doc = { ...doc, contact_status: 'completed', items: doc.items.map(item => ({ ...item, contacted_at: '2026-10-29T20:00:00Z' })), completed: options.complete || false };
+          return doc;
+        }
         const vet = vets.find(item => item.id === entry.args.p_veterinarian_id);
         doc = { ...doc, version: doc.version + 1, responsible_vet_id: vet.id, responsible_vet_name: vet.nome, responsible_vet_avatar_url: vet.avatar_url, responsible_vet_source: 'manual' };
         return doc;
@@ -215,53 +222,68 @@ test('a completed request does not close a different panel opened while it was s
   pending.resolve();
   await settle();
   const sheet = h.render().find(node => node.type === 'ExamDetailSheet');
-  assert.equal(sheet.props.open, true);
-  assert.equal(sheet.props.title, 'PDF do exame');
+  assert.equal(sheet.props.open, false);
+  assert(h.render().some(node => node.type === 'DocumentPreview'));
 });
 
-test('identity and patient save callbacks dismiss their containing modal', () => {
-  const h = harness();
-  let tree = h.render();
-  tree.find(node => node.type === 'button' && node.props['aria-label'] === 'Opções do exame').props.onClick();
-  h.render().find(node => node.type === 'button' && text(node) === 'Conferir dados do exame').props.onClick();
-  tree = h.render();
-  assert.equal(tree.find(node => node.type === 'ExamDetailSheet').props.title, 'Dados do exame');
-  tree.find(node => node.type === 'DocumentForm').props.onSaved();
-  assert.equal(h.render().find(node => node.type === 'ExamDetailSheet').props.open, false);
-  tree = h.render();
-  tree.find(node => node.type === 'button' && text(node).includes('Adicionar exame ao cadastro')).props.onClick();
-  h.render().find(node => node.type === 'DocumentForm').props.onSaved();
-  assert.equal(h.render().find(node => node.type === 'ExamDetailSheet').props.open, false);
-});
-
-test('a late identity save does not dismiss a newer panel', () => {
+test('identity and patient editors stay inline while PDF and other panels open', () => {
   const h = harness();
   h.render().find(node => node.type === 'button' && node.props['aria-label'] === 'Opções do exame').props.onClick();
   h.render().find(node => node.type === 'button' && text(node) === 'Conferir dados do exame').props.onClick();
-  const saved = h.render().find(node => node.type === 'DocumentForm').props.onSaved;
-  h.render().find(node => node.type === 'ExamDetailSheet').props.onOpenChange(false);
-  h.render().find(node => node.type === 'button' && text(node) === 'Abrir PDF').props.onClick();
-  saved();
-  const sheet = h.render().find(node => node.type === 'ExamDetailSheet');
-  assert.equal(sheet.props.open, true);
-  assert.equal(sheet.props.title, 'PDF do exame');
+  let tree = h.render();
+  const editor = tree.find(node => node.type === 'DocumentForm');
+  assert.equal(editor.props.compact, true);
+  assert.equal(tree.find(node => node.type === 'ExamDetailSheet').props.open, false);
+  editor.props.onOpenPdf();
+  tree = h.render();
+  assert.equal(tree.find(node => node.type === 'DocumentForm').key, editor.key);
+  assert(tree.some(node => node.type === 'DocumentPreview'));
+  tree.find(node => node.type === 'button' && node.props['aria-label'] === 'Opções do exame').props.onClick();
+  assert.equal(h.render().find(node => node.type === 'DocumentForm').key, editor.key);
 });
 
-test('a persisted contact opens one centered confirmation even if its follow-up read fails', async () => {
+test('saved contact with a failed read reports the receipt without claiming completion or inviting another write', async () => {
   const h = harness({ doc: { pet_id: 'pet-fixture' }, refresh: () => Promise.reject(new Error('Read unavailable')) });
   h.render().find(node => node.type === 'button' && node.props['aria-label'] === 'Registrar contato com o tutor').props.onClick();
   await h.render().find(node => node.type === 'DocumentForm').props.onContactSaved();
-  let tree = h.render();
-  const sheet = tree.find(node => node.type === 'ExamDetailSheet');
-  assert.equal(sheet.props.title, 'Contato registrado');
-  assert.equal(sheet.props.centered, true);
-  assert.equal(h.refreshes, 1);
-  assert.deepEqual(h.notices, []);
-  assert.match(text(tree[0]), /O contato foi salvo para os itens selecionados/);
-  assert.doesNotMatch(text(tree[0]), /demais itens continuam pendentes/);
-  tree.find(node => node.type === 'button' && text(node).includes('Voltar ao exame')).props.onClick();
-  tree = h.render();
+  const tree = h.render();
   assert.equal(tree.find(node => node.type === 'ExamDetailSheet').props.open, false);
+  assert.equal(tree.some(node => node.type === 'ExamCompletion'), false);
+  assert.equal(h.refreshes, 1);
+  assert.match(h.notices[0].message, /Contato salvo/);
+  assert.equal(tree.find(node => node.type === 'button' && node.props['aria-label'] === 'Concluir contato com o tutor').props.disabled, true);
+});
+
+const clickContact = h => h.render().find(node => node.type === 'button' && node.props['aria-label'] === 'Concluir contato com o tutor').props.onClick({ stopPropagation() {} });
+const contactFixture = { pet_id: 'pet-fixture', items: [{ exam_item_id: 'old', contacted_at: '2026-10-28T20:00:00Z' }, { exam_item_id: 'pending', contacted_at: null }] };
+test('direct check waits for persistence and prevents duplicate clicks', async () => {
+  const pending = deferred();
+  const h = harness({ doc: contactFixture, persist: () => pending.promise, complete: true });
+  const handler = h.render().find(node => node.type === 'button' && node.props['aria-label'] === 'Concluir contato com o tutor').props.onClick;
+  const first = handler({ stopPropagation() {} }); const second = handler({ stopPropagation() {} });
+  assert.equal(h.mutations.length, 1);
+  assert.deepEqual(h.mutations[0].args.p_item_ids, ['pending']);
+  assert.equal(h.render().find(node => node.type === 'ExamCompletion').props.document, null);
+  pending.resolve(); await Promise.all([first, second]);
+  assert.equal(h.render().find(node => node.type === 'ExamCompletion').props.document.completed, true);
+});
+test('failed direct contact never celebrates or marks contact done', async () => {
+  const h = harness({ doc: contactFixture, persist: () => Promise.reject(new Error('Write failed')) });
+  await clickContact(h);
+  assert.equal(h.render().some(node => node.type === 'ExamCompletion'), false);
+  assert.equal(h.doc.contact_status, 'pending');
+  assert.equal(h.notices.at(-1).type, 'error');
+  assert.equal(h.refreshes, 0);
+});
+test('direct contact respects role, file preservation and patient prerequisites', async () => {
+  for (const options of [{ role: 'reception', doc: contactFixture }, { doc: { ...contactFixture, file_status: 'pending' } }, { doc: { ...contactFixture, pet_id: null } }]) {
+    const h = harness(options); await clickContact(h); assert.equal(h.mutations.length, 0);
+  }
+});
+test('successful direct contact retains pending group and overall status in the animation receipt', async () => {
+  const h = harness({ doc: { ...contactFixture, group_status: 'pending' } }); await clickContact(h);
+  const receipt = h.render().find(node => node.type === 'ExamCompletion').props.document;
+  assert.equal(receipt.completed, false); assert.equal(receipt.group_status, 'pending');
 });
 
 test('the unassigned list excludes both clinical and legacy assignments', async () => {

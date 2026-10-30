@@ -200,5 +200,54 @@ const check = (name, run) => { run(); checks++; console.log('ok ' + checks + ' -
     assert.equal(render({ mode: 'contact', onContactSaved: failedCallback }).find(node => node.type === 'textarea').props.value, 'Contato real ainda não salvo.');
   });
   mutateBehavior = undefined;
+  // The compact workspace keeps the same write contract with one primary action.
+  states = []; currentDocument = doc();
+  const compactRender = () => render({ compact: true });
+  tree = compactRender();
+  check('compact form starts with a disabled single confirmation and no redundant search instruction', () => {
+    assert.equal(button(tree, 'Confirmar cadastro e anexar').props.disabled, true);
+    assert.doesNotMatch(text(tree[0]), /Busque o pet ou tutor e confira no PDF/);
+    assert.equal(button(tree, 'Salvar identificação'), undefined);
+  });
+  tree.find(node => node.type === 'button' && node.props.className === 'candidate').props.onClick();
+  tree = compactRender();
+  tree.find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } });
+  tree = compactRender();
+  check('choosing and verifying a patient enables compact attachment', () => assert.equal(button(tree, 'Confirmar cadastro e anexar').props.disabled, false));
+  field(tree, 'Data do exame').props.onChange({ target: { value: '' } });
+  tree = compactRender();
+  check('blank date disables attachment instead of silently substituting the received date', () => {
+    assert.equal(button(tree, 'Confirmar cadastro e anexar').props.disabled, true);
+    assert.equal(tree.find(node => node.type === 'input' && node.props.type === 'checkbox').props.checked, false);
+  });
+  field(tree, 'Data do exame').props.onChange({ target: { value: '2026-10-29' } });
+  tree = compactRender();
+  tree.find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } });
+  tree = compactRender();
+  button(tree, 'Confirmar cadastro e anexar').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  check('compact attachment sends verified fields and the selected patient', () => {
+    const last = mutations.at(-1);
+    assert.equal(last.name, 'confirm_exam_document_link');
+    assert.equal(last.args.p_confirmed.exam_date, '2026-10-29');
+    assert.equal(last.args.p_pet_id, candidate.pet_id);
+  });
+  states = []; currentDocument = doc(); tree = compactRender();
+  tree.find(node => node.type === 'select').props.onChange({ target: { value: 'review' } });
+  tree = compactRender();
+  tree.find(node => node.type === 'textarea').props.onChange({ target: { value: 'Identificação ilegível' } });
+  button(compactRender(), 'Salvar conferência').props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  check('non-exam classification follows review rather than linking a patient', () => {
+    assert.equal(mutations.at(-1).name, 'review_exam_document');
+    assert.equal(mutations.at(-1).args.p_classification, 'review');
+  });
+  states = []; currentDocument = { ...contactDoc(), confirmed_data: { pet_name: 'Nina', client_name: 'Maria', exam_date: '2026-10-29' } };
+  tree = compactRender();
+  check('attached compact form displays a read-only summary without editable controls', () => {
+    assert.match(text(tree[0]), /Exame anexado ao cadastro/);
+    assert.equal(tree.some(node => ['input', 'select', 'textarea'].includes(node.type)), false);
+    assert.match(text(tree[0]), /correção exige uma nova versão/);
+  });
   console.log(checks + ' document detail regression checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
