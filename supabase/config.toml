@@ -2,3 +2,8 @@
 # Dedicated worker secret is not a JWT. The function verifies real users with getUser
 # and checks exam_document_member; every worker request verifies its dedicated secret.
 verify_jwt = false
+
+[functions.exam-whatsapp-fallback]
+# Dedicated Bearer for operator preflight; one-use HMAC triggers from Cron.
+# Authentication and nonce consumption are enforced by the function itself.
+verify_jwt = false
