@@ -44,7 +44,7 @@ Deno.serve(async req => {
   const service = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: (input, init) => fetch(input, { ...init, signal: runRequestSignal ? AbortSignal.any([runRequestSignal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000) }) } });
   async function rpc(name: string, args: Json): Promise<Json> {
     const { data, error } = await service.rpc(name, args);
-    if (error) throw new Error(error.code === '40001' ? 'fallback_fence_conflict' : error.code === '42501' ? 'fallback_scope_denied' : 'fallback_rpc_failed');
+    if (error) throw new Error(['40001', 'PT409'].includes(error.code) ? 'fallback_fence_conflict' : error.code === '42501' ? 'fallback_scope_denied' : 'fallback_rpc_failed');
     return obj(data);
   }
   try {

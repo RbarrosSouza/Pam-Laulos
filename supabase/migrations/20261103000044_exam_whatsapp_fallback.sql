@@ -43,7 +43,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
   IF NEW.deletion_state IS DISTINCT FROM OLD.deletion_state AND NEW.deletion_state IS NOT NULL
     AND EXISTS(SELECT 1 FROM public.exam_fallback_original WHERE document_id=NEW.id AND state='reserved') THEN
-    RAISE EXCEPTION 'Fallback de preservação em andamento; reconciliar antes de excluir' USING ERRCODE='40001';
+    RAISE EXCEPTION 'Fallback de preservação em andamento; reconciliar antes de excluir' USING ERRCODE='PT409';
   END IF;
   RETURN NEW;
 END $$;
@@ -145,9 +145,9 @@ BEGIN
     OR NOT public.exam_fallback_source_in_scope(d.id) THEN RAISE EXCEPTION 'Fallback document is no longer eligible'; END IF;
   IF f.lease_token IS DISTINCT FROM p_lease_token OR f.sha256 IS DISTINCT FROM lower(p_sha256) OR f.size_bytes IS DISTINCT FROM p_size_bytes
     OR d.sha256 IS DISTINCT FROM f.sha256 OR d.size_bytes IS DISTINCT FROM f.size_bytes
-    OR d.staging_bucket IS DISTINCT FROM f.bucket OR d.staging_path IS DISTINCT FROM f.path THEN RAISE EXCEPTION 'Fallback confirmation fence invalid' USING ERRCODE='40001'; END IF;
+    OR d.staging_bucket IS DISTINCT FROM f.bucket OR d.staging_path IS DISTINCT FROM f.path THEN RAISE EXCEPTION 'Fallback confirmation fence invalid' USING ERRCODE='PT409'; END IF;
   IF f.state='verified' THEN RETURN jsonb_build_object('document_id',d.id,'verified',true,'already_verified',true,'document',to_jsonb(d)); END IF;
-  IF f.lease_until<=now() THEN RAISE EXCEPTION 'Fallback storage lease expired' USING ERRCODE='40001'; END IF;
+  IF f.lease_until<=now() THEN RAISE EXCEPTION 'Fallback storage lease expired' USING ERRCODE='PT409'; END IF;
   IF NOT EXISTS(SELECT 1 FROM storage.objects o JOIN storage.buckets b ON b.id=o.bucket_id
     WHERE o.bucket_id=f.bucket AND o.name=f.path AND b.public=false AND (o.metadata->>'size')::bigint=f.size_bytes) THEN
     RAISE EXCEPTION 'Fallback Storage object is not confirmed';
@@ -256,10 +256,10 @@ BEGIN
   SELECT * INTO STRICT d FROM public.exam_document WHERE id=doc_id FOR NO KEY UPDATE;
   SELECT * INTO STRICT t FROM public.exam_document_delivery WHERE id=p_delivery_id FOR UPDATE;
   SELECT * INTO STRICT cfg FROM public.exam_document_configuration;
-  IF t.lease_token IS DISTINCT FROM p_lease_token OR t.destination<>'group' OR t.worker !~ '^fallback:' THEN RAISE EXCEPTION 'Fallback dispatch fence invalid' USING ERRCODE='40001'; END IF;
+  IF t.lease_token IS DISTINCT FROM p_lease_token OR t.destination<>'group' OR t.worker !~ '^fallback:' THEN RAISE EXCEPTION 'Fallback dispatch fence invalid' USING ERRCODE='PT409'; END IF;
   IF t.status IN ('uncertain','submitted','sent') THEN RETURN jsonb_build_object('dispatch_allowed',false,'status',t.status); END IF;
   IF t.status<>'reserved' OR t.lease_until<=now() OR t.destination_key IS DISTINCT FROM cfg.group_destination_key
-    OR NOT public.exam_fallback_group_eligible(d.id) THEN RAISE EXCEPTION 'Fallback dispatch no longer eligible' USING ERRCODE='40001'; END IF;
+    OR NOT public.exam_fallback_group_eligible(d.id) THEN RAISE EXCEPTION 'Fallback dispatch no longer eligible' USING ERRCODE='PT409'; END IF;
   UPDATE public.exam_document_delivery SET status='uncertain',last_error='Fallback submission started; reconcile before retry',lease_until=NULL,updated_at=now() WHERE id=t.id;
   PERFORM public.log_exam_document(d.id,'fallback_group_dispatch_started',jsonb_build_object('delivery_id',t.id,'lease_token',t.lease_token,'content_sha256',p_content_sha256));
   RETURN jsonb_build_object('dispatch_allowed',true,'delivery_id',t.id,'document_id',d.id,'destination_key',t.destination_key,'sha256',d.sha256,'content_sha256',p_content_sha256);
@@ -332,7 +332,7 @@ BEGIN
     OR (p_error_code IS NOT NULL AND p_error_code !~ '^[a-z][a-z0-9_]{0,95}$')
     OR (p_completed AND p_error_code IS NOT NULL) THEN RAISE EXCEPTION 'Invalid fallback checkpoint metadata'; END IF;
   SELECT * INTO STRICT r FROM public.exam_fallback_runtime WHERE singleton FOR UPDATE;
-  IF r.run_token IS DISTINCT FROM p_run_token OR r.run_until IS NULL OR r.run_until<=now() THEN RAISE EXCEPTION 'Fallback run fence expired' USING ERRCODE='40001'; END IF;
+  IF r.run_token IS DISTINCT FROM p_run_token OR r.run_until IS NULL OR r.run_until<=now() THEN RAISE EXCEPTION 'Fallback run fence expired' USING ERRCODE='PT409'; END IF;
   UPDATE public.exam_fallback_runtime SET scan=CASE WHEN p_completed THEN '{}'::jsonb ELSE p_state END,
     last_checkpoint_at=now(),last_completed_at=CASE WHEN p_completed THEN now() ELSE last_completed_at END,last_error_code=p_error_code,
     run_until=NULL WHERE singleton RETURNING * INTO r;
@@ -457,7 +457,7 @@ BEGIN
   IF p_outcome IS NULL OR p_outcome NOT IN ('retry','done') OR (p_error_code IS NOT NULL AND p_error_code !~ '^[a-z][a-z0-9_]{0,95}$')
     OR (p_retry_seconds IS NOT NULL AND p_retry_seconds NOT BETWEEN 15 AND 900) THEN RAISE EXCEPTION 'Invalid fallback source outcome'; END IF;
   SELECT * INTO STRICT q FROM public.exam_fallback_source_queue WHERE source_id=p_source_id FOR UPDATE;
-  IF q.state<>'reserved' OR q.lease_token IS DISTINCT FROM p_lease_token OR q.lease_until<=now() THEN RAISE EXCEPTION 'Fallback source queue fence expired' USING ERRCODE='40001'; END IF;
+  IF q.state<>'reserved' OR q.lease_token IS DISTINCT FROM p_lease_token OR q.lease_until<=now() THEN RAISE EXCEPTION 'Fallback source queue fence expired' USING ERRCODE='PT409'; END IF;
   SELECT * INTO STRICT s FROM public.exam_document_source WHERE id=q.source_id;
   SELECT * INTO STRICT d FROM public.exam_document WHERE id=s.document_id;
   IF p_outcome='done' AND NOT (d.deletion_state IS NOT NULL OR d.identification_status='not_exam'

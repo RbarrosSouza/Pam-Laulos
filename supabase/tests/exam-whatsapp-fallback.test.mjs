@@ -47,7 +47,7 @@ test('source scope rejects unknown sender, another conversation and pre-cutoff o
 test('Storage proof does not invent Drive completion, extraction or clinical identification',async()=>{
  const s=await source(),r=await reserve(s.document_id);assert(r.claimed);assert.equal(r.document.drive_file_id,null);
  await assert.rejects(confirm(r),/Storage object/);
- await put(r);await assert.rejects(rpc('confirm_exam_fallback_original',[r.document_id,crypto.randomUUID(),r.document.sha256,123]),/fence/);
+ await put(r);await assert.rejects(rpc('confirm_exam_fallback_original',[r.document_id,crypto.randomUUID(),r.document.sha256,123]),{code:'PT409',message:/fence/});
  const proof=await confirm(r);assert(proof.verified);assert(proof.drive_pending);
  const d=await one('SELECT * FROM exam_document WHERE id=$1',[r.document_id]);assert.equal(d.file_status,'pending');assert.equal(d.extractor_version,null);assert.equal(d.pet_id,null);
  assert.equal((await one("SELECT status FROM exam_document_delivery WHERE document_id=$1 AND destination='drive'",[d.id])).status,'pending');
@@ -70,7 +70,7 @@ test('backup does not steal or reset a primary Drive lease; late backup token ca
  const s=await source(),fingerprint=hash();const primary=await rpc('stage_exam_intake_file',[s.document_id,JSON.stringify({sha256:fingerprint,size_bytes:123,drive_file_id:'fixture-primary',drive_folder_id:'fixture-folder'}),'n8n:primary']);
  const r=await reserve(s.document_id,fingerprint);await put(r);await confirm(r);
  const t=await one("SELECT * FROM exam_document_delivery WHERE document_id=$1 AND destination='drive'",[r.document_id]);assert.equal(t.worker,'n8n:primary');assert.equal(t.lease_token,primary.lease_token);assert.equal(t.status,'reserved');assert.equal(t.attempts,1);
- const late=await reserve((await source()).document_id);await put(late);await db.query("UPDATE exam_fallback_original SET lease_until=now()-interval '1 second' WHERE document_id=$1",[late.document_id]);await assert.rejects(confirm(late),/lease expired/);
+ const late=await reserve((await source()).document_id);await put(late);await db.query("UPDATE exam_fallback_original SET lease_until=now()-interval '1 second' WHERE document_id=$1",[late.document_id]);await assert.rejects(confirm(late),{code:'PT409',message:/lease expired/});
 });
 
 test('fallback group requires proof, respects age, destination, and existing holds',async()=>{
@@ -116,13 +116,13 @@ test('one-shot dispatch survives lost HTTP responses and uses ordinary provider 
 
 test('dispatch rechecks deletion, hold, scope and lease just before the external POST',async()=>{
  const r=await ready(),g=await group(r.document_id);await db.query("INSERT INTO exam_intake_document_hold(document_id,state,reason) VALUES($1,'held','awaiting_snapshot')",[r.document_id]);
- await assert.rejects(rpc('begin_exam_fallback_group_dispatch',[g.task.id,g.task.lease_token,'b'.repeat(64)]),/no longer eligible/);
- const r2=await ready(),g2=await group(r2.document_id);await db.query("UPDATE exam_document_delivery SET lease_until=now()-interval '1 second' WHERE id=$1",[g2.task.id]);await assert.rejects(rpc('begin_exam_fallback_group_dispatch',[g2.task.id,g2.task.lease_token,'b'.repeat(64)]),/no longer eligible/);
+ await assert.rejects(rpc('begin_exam_fallback_group_dispatch',[g.task.id,g.task.lease_token,'b'.repeat(64)]),{code:'PT409',message:/no longer eligible/});
+ const r2=await ready(),g2=await group(r2.document_id);await db.query("UPDATE exam_document_delivery SET lease_until=now()-interval '1 second' WHERE id=$1",[g2.task.id]);await assert.rejects(rpc('begin_exam_fallback_group_dispatch',[g2.task.id,g2.task.lease_token,'b'.repeat(64)]),{code:'PT409',message:/no longer eligible/});
 });
 
 test('pending backup fences deletion, and deleted origins never resurrect',async()=>{
  const r=await reserve((await source()).document_id);await db.query("UPDATE exam_document_delivery SET status='pending',lease_until=NULL WHERE document_id=$1",[r.document_id]);
- let d=await one('SELECT * FROM exam_document WHERE id=$1',[r.document_id]);await assert.rejects(rpc('begin_exam_document_deletion',[d.id,d.version,actor,'DELETAR']),/Fallback.*andamento/);
+ let d=await one('SELECT * FROM exam_document WHERE id=$1',[r.document_id]);await assert.rejects(rpc('begin_exam_document_deletion',[d.id,d.version,actor,'DELETAR']),{code:'PT409',message:/Fallback.*andamento/});
  await put(r);await confirm(r);d=await one('SELECT * FROM exam_document WHERE id=$1',[r.document_id]);
  assert.equal((await rpc('begin_exam_document_deletion',[d.id,d.version,actor,'DELETAR'])).state,'deleting');
  await assert.rejects(confirm(r),/no longer eligible/);assert.equal((await group(d.id)).claimed,false);
@@ -136,15 +136,15 @@ test('run claim, scan validation and checkpoint are fenced and contain only boun
  await assert.rejects(rpc('checkpoint_exam_fallback_run',[a.run_token,{...scan,url:'https://secret.invalid'},false,null]),/Invalid fallback checkpoint/);
  await assert.rejects(rpc('checkpoint_exam_fallback_run',[a.run_token,{...scan,cursor:{...scan.cursor,scope:'https://secret.invalid'}},false,null]),/Invalid fallback checkpoint/);
  const checkpoint=await rpc('checkpoint_exam_fallback_run',[a.run_token,scan,false,'provider_unavailable']);assert.deepEqual(checkpoint.scan,scan);
- const b=await rpc('claim_exam_fallback_run',['fallback:run2',100]);assert.deepEqual(b.scan,scan);await assert.rejects(rpc('checkpoint_exam_fallback_run',[a.run_token,{},true,null]),/fence/);
- await db.query("UPDATE exam_fallback_runtime SET run_until=now()-interval '1 second'");await assert.rejects(rpc('checkpoint_exam_fallback_run',[b.run_token,{},true,null]),/expired/);
+ const b=await rpc('claim_exam_fallback_run',['fallback:run2',100]);assert.deepEqual(b.scan,scan);await assert.rejects(rpc('checkpoint_exam_fallback_run',[a.run_token,{},true,null]),{code:'PT409',message:/fence/});
+ await db.query("UPDATE exam_fallback_runtime SET run_until=now()-interval '1 second'");await assert.rejects(rpc('checkpoint_exam_fallback_run',[b.run_token,{},true,null]),{code:'PT409',message:/expired/});
  const c=await rpc('claim_exam_fallback_run',['fallback:run3',100]);assert.deepEqual((await rpc('checkpoint_exam_fallback_run',[c.run_token,{},true,null])).scan,{});
 });
 
 test('expired fallback pre-submit leases recover, while primary or started sends remain GET-only',async()=>{
  const r=await ready(),first=await group(r.document_id);await db.query("UPDATE exam_document_delivery SET lease_until=now()-interval '1 second' WHERE id=$1",[first.task.id]);
  const second=await group(r.document_id);assert(second.claimed);assert.notEqual(second.task.lease_token,first.task.lease_token);
- await assert.rejects(rpc('begin_exam_fallback_group_dispatch',[first.task.id,first.task.lease_token,'b'.repeat(64)]),/fence/);
+ await assert.rejects(rpc('begin_exam_fallback_group_dispatch',[first.task.id,first.task.lease_token,'b'.repeat(64)]),{code:'PT409',message:/fence/});
  await rpc('begin_exam_fallback_group_dispatch',[second.task.id,second.task.lease_token,'b'.repeat(64)]);
  assert.equal((await group(r.document_id)).claimed,false);
  const event=await one("SELECT details FROM exam_document_event WHERE document_id=$1 AND event_type='fallback_group_dispatch_started'",[r.document_id]);assert.equal(event.details.lease_token,second.task.lease_token);
@@ -172,7 +172,7 @@ test('durable source retry scheduling lets the seventh origin pass six recurring
 test('source queue expiry invalidates old tokens, respects primary grace, and refuses metadata URLs',async()=>{
  const old=await source(),q=await enqueueFromDocument(old.document_id);const task=(await rpc('claim_exam_fallback_sources',['fallback:queue-expiry',1])).tasks[0];assert.equal(task.source_id,q.source_id);
  await db.query("UPDATE exam_fallback_source_queue SET lease_until=now()-interval '1 second' WHERE source_id=$1",[q.source_id]);
- await rpc('claim_exam_fallback_sources',['fallback:next',1]);await assert.rejects(rpc('finish_exam_fallback_source',[q.source_id,task.lease_token,'retry','late',60]),/fence/);
+ await rpc('claim_exam_fallback_sources',['fallback:next',1]);await assert.rejects(rpc('finish_exam_fallback_source',[q.source_id,task.lease_token,'retry','late',60]),{code:'PT409',message:/fence/});
  const fresh=await source({received_at:new Date().toISOString()});const freshQueue=await enqueueFromDocument(fresh.document_id);assert(!(await rpc('claim_exam_fallback_sources',['fallback:grace',20])).tasks.some(t=>t.source_id===freshQueue.source_id));
  const s=await one('SELECT * FROM exam_document_source WHERE document_id=$1',[fresh.document_id]);await assert.rejects(rpc('enqueue_exam_fallback_source',[JSON.stringify({...s,metadata:{...s.metadata,url:'https://secret.invalid'},original_name:'fixture.pdf'})]),/outside/);
 });
