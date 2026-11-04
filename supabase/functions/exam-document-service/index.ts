@@ -120,7 +120,7 @@ Deno.serve(async (req: Request) => {
       const { data, error: rpcError } = await service.rpc(name, args);
       if (rpcError) {
         // Return controlled RPC messages without request bodies, secrets or PDF text in technical logs.
-        const status = rpcError.code === '42501' ? 403 : rpcError.code === '40001' ? 409 : 400;
+        const status = rpcError.code === '42501' ? 403 : ['40001', 'PT409'].includes(rpcError.code) ? 409 : 400;
         error(rpcError.message, status);
       }
       return data;
