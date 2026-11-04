@@ -230,7 +230,7 @@ test('invalid required or optional UUIDs cannot reach any collection RPC', async
 });
 
 test('controlled database failures remain failures with permission and CAS statuses', async () => {
-  for (const [code, status] of [['42501', 403], ['40001', 409], ['22023', 400]]) {
+  for (const [code, status] of [['42501', 403], ['40001', 409], ['PT409', 409], ['22023', 400]]) {
     reset();
     rpcFailure = {code, message: 'Falha controlada da fixture'};
     const response = await request('collection_commit', {sweep_id: sweepId});
