@@ -132,3 +132,10 @@ A reserva é única por dia local e destino. O banco concede a autorização par
 `OPERACIONAL-06-PREVIEW.json` consulta a mesma lista e verifica o grupo/histórico sem reservar ou enviar. Use essa prévia para conferência manual fora da janela. Listas acima de 200 documentos, resumos acima de 12.000 caracteres ou paginação incompleta falham explicitamente; nenhum item é cortado silenciosamente. A primeira execução da agenda continua sendo uma validação distinta da prévia.
 
 Verificações direcionadas: `node --test scripts/exames/pending-group-summary.test.mjs scripts/exames/pending-summary-runtime.test.mjs scripts/exames/pending-summary-build.test.mjs`, `node supabase/tests/exam-pending-summary.test.mjs` e `node supabase/tests/exam-document-service.test.mjs`.
+
+
+## Primary priority and Gmail/Drive recovery (2026-11-04)
+
+The independent fallback now separates early preservation from group dispatch. Apply migrations 46/47 and use the current primary-priority fallback bundle. A Gmail/Drive rollout must also patch both the active OP01 and its prospective Gmail child using `buildGmailDriveRecoveryCandidate` from `intake/gmail-drive-recovery-build.mjs`, starting from their verified current private exports. This patch is required after generating an unpatched intake template; do not overwrite the active recovery graph with an older generated template. The patch refuses duplicate application or unknown contracts and retains configuration, credential references, IDs and settings. Publish with the running n8n editor and verify the active version, not just the saved draft.
+
+See `docs/exames/intake/primary-priority-gmail-drive-review.md` for the policy, recovery invariants, release checks and limits. Keep bound exports, backups and candidates outside this repository.

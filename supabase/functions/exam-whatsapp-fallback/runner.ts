@@ -38,6 +38,7 @@ export async function recordDelivery(ports: FallbackPorts, task: GroupTask, outc
 export async function processFallbackOrigin(origin: CollectedOrigin, worker: string, ports: FallbackPorts, transport: FallbackTransport): Promise<OriginResult> {
   let documentId: string | null = null;
   let attempted = false;
+  let dispatchDeferred: string | null = null;
   try {
     const source = { ...origin.source, metadata: { ...origin.source.metadata,
       attachment_url_sha256: origin.attachment.downloadUrl ? await sha256(new TextEncoder().encode(origin.attachment.downloadUrl)) : null } };
@@ -102,14 +103,21 @@ export async function processFallbackOrigin(origin: CollectedOrigin, worker: str
     if (task.documentId !== documentId || task.sha256 !== pdf.sha256 || task.sizeBytes !== pdf.sizeBytes) throw new Error('fallback_group_bytes_mismatch');
     const outcome = await transport.sendGroupOnce(task, pdf, { beginDispatch: async input => {
       const result = await ports.rpc('begin_exam_fallback_group_dispatch', { p_delivery_id: input.deliveryId, p_lease_token: input.leaseToken, p_content_sha256: input.contentSha256 });
+      if (result.dispatch_allowed !== true && typeof result.reason === 'string' && result.reason.startsWith('primary_')) dispatchDeferred = result.reason;
       return { dispatch_allowed: result.dispatch_allowed === true };
     } });
     await recordDelivery(ports, task, outcome);
     return { state: outcome.status === 'failed' ? 'preserved' : outcome.status, durable: true, attempted, documentId, ...(outcome.error ? { code: outcome.error } : {}) };
   } catch (error) {
+    if (dispatchDeferred) return { state: 'preserved', durable: true, attempted, ...(documentId ? { documentId } : {}), code: dispatchDeferred };
     const code = safeError(error);
     // Keep the source in the window for a later attempt. Never repeat a POST here.
     await ports.failure(documentId, code);
     return { state: 'failed', durable: false, attempted, ...(documentId ? { documentId } : {}), code };
   }
+}
+
+/** Waiting for the primary is not a failed attempt and must not grow a 15-minute backoff. */
+export function fallbackRetrySeconds(result: Pick<OriginResult, 'code'>, attempts: number): number {
+  return result.code?.startsWith('primary_') ? 60 : Math.min(900, 30 * 2 ** Math.min(attempts || 1, 5));
 }

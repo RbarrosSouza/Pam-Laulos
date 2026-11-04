@@ -4,7 +4,7 @@ import ts from 'typescript';
 import { readFile } from 'node:fs/promises';
 const text = await readFile(new URL('../functions/exam-whatsapp-fallback/runner.ts', import.meta.url), 'utf8');
 const js = ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
-const { processFallbackOrigin, sha256 } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
+const { processFallbackOrigin, sha256, fallbackRetrySeconds } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
 const id='11111111-1111-4111-8111-111111111111', delivery='22222222-2222-4222-8222-222222222222', lease='33333333-3333-4333-8333-333333333333';
 const bytes=new TextEncoder().encode('%PDF-1.4\nfixture only\n%%EOF');
 const hash=await sha256(bytes);
@@ -61,4 +61,20 @@ test('a saved Drive original remains a recovery path when a stale staging path h
  f.ports.refreshOrigin=async()=>{throw new Error('unexpected_provider_dependency');};
  const r=await processFallbackOrigin(f.origin,'fallback:retry',f.ports,f.transport);
  assert.equal(r.state,'submitted');assert.equal(driveReads,1);assert.equal(f.state.posts,1);
+});
+
+
+test('primary priority deferral preserves bytes without POST or operational failure',async()=>{
+ const f=fixture();const rpc=f.ports.rpc;
+ f.ports.rpc=async(name,args)=>name==='reserve_exam_fallback_group'?{claimed:false,reason:'primary_active'}:rpc(name,args);
+ const result=await processFallbackOrigin(f.origin,'fallback:test',f.ports,f.transport);
+ assert.equal(result.state,'preserved');assert.equal(result.code,'primary_active');assert.equal(f.state.posts,0);assert.equal(f.state.failures.length,0);assert.equal(f.state.proofs,1);
+ assert.equal(fallbackRetrySeconds(result,50),60);assert.equal(fallbackRetrySeconds({code:'download_failed'},50),900);
+});
+
+test('primary resumes during provider preflight: a revoked POST grant is a normal preservation',async()=>{
+ const f=fixture();const rpc=f.ports.rpc;
+ f.ports.rpc=async(name,args)=>name==='begin_exam_fallback_group_dispatch'?{dispatch_allowed:false,reason:'primary_progress'}:rpc(name,args);
+ const result=await processFallbackOrigin(f.origin,'fallback:test',f.ports,f.transport);
+ assert.equal(result.state,'preserved');assert.equal(result.code,'primary_progress');assert.equal(f.state.posts,0);assert.equal(f.state.failures.length,0);
 });

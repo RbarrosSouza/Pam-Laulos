@@ -4,7 +4,7 @@ import { readOAuthDriveOriginal, oauthDriveReaderConfig } from '../exam-document
 import { createChatwootClient } from './chatwoot.ts';
 import { authenticateFallbackRequest } from './auth.ts';
 import { collectWhatsappOrigins, inspectFallbackMessage, verifyFallbackSourceConversation, type CollectedOrigin, type CollectorConfig, type CollectorCursor, type CollectorResult } from './collector.ts';
-import { processFallbackOrigin, groupTask, recordDelivery, safeError, sha256, type FallbackPorts } from './runner.ts';
+import { processFallbackOrigin, fallbackRetrySeconds, groupTask, recordDelivery, safeError, sha256, type FallbackPorts } from './runner.ts';
 
 type Json = Record<string, unknown>;
 function obj(x: unknown): Json { if (!x || typeof x !== 'object' || Array.isArray(x)) throw new Error('fallback_response_invalid'); return x as Json; }
@@ -197,7 +197,7 @@ Deno.serve(async req => {
       const done = ['sent', 'submitted', 'uncertain', 'excluded'].includes(result.state);
       await rpc('finish_exam_fallback_source', { p_source_id: str(task.source_id), p_lease_token: str(task.lease_token),
         p_outcome: done ? 'done' : 'retry', p_error_code: done ? null : result.code || 'fallback_delivery_pending',
-        p_retry_seconds: Math.min(900, 30 * 2 ** Math.min(Number(task.attempts || 1), 5)) });
+        p_retry_seconds: fallbackRetrySeconds(result, Number(task.attempts || 1)) });
     }
     const completed = Boolean(back?.complete && fast.reason !== 'source_error');
     const errorCode = fast.errorCode || back?.errorCode || null;

@@ -22,7 +22,7 @@ before(async()=>{
  ({db,role,rpc}=await collectionFixtureDB());await db.exec('RESET ROLE');
  for(const name of ['20261016000006_exam_operational_flow.sql','20261016000007_exam_clinical_group_eligibility.sql','20261016000008_exam_gmail_origin_identity.sql','20261016000009_exam_group_after_processing.sql','20261016000010_exam_group_without_identification.sql','20261027000023_exam_intake_receipts_incidents.sql','20261027000024_exam_hopelab_notice_snapshots.sql','20261027000025_exam_intake_panel_coverage.sql','20261027000026_exam_intake_source_lookup.sql','20261027000027_exam_intake_version_review.sql'])await db.exec(await readFile(new URL(name,migrations),'utf8'));
  await db.exec('CREATE TABLE public.exam_document_responsibility(document_id uuid PRIMARY KEY REFERENCES public.exam_document(id)); CREATE TABLE public.exam_document_reaction(document_id uuid REFERENCES public.exam_document(id)); GRANT ALL ON public.exam_document_reaction TO service_role');
- for(const name of ['20261028000040_exam_document_deletion.sql','20261028000041_exam_delete_after_group.sql','20261028000042_exam_delete_empty_aliases.sql','20261028000043_exam_versions_group_independent.sql','20261103000044_exam_whatsapp_fallback.sql'])await db.exec(await readFile(new URL(name,migrations),'utf8'));
+ for(const name of ['20261028000040_exam_document_deletion.sql','20261028000041_exam_delete_after_group.sql','20261028000042_exam_delete_empty_aliases.sql','20261028000043_exam_versions_group_independent.sql','20261103000044_exam_whatsapp_fallback.sql','20261104000046_exam_fallback_primary_priority.sql','20261104000047_exam_gmail_drive_retry_policy.sql'])await db.exec(await readFile(new URL(name,migrations),'utf8'));
  await db.query('INSERT INTO auth.users(id) VALUES($1)',[actor]);await db.query("INSERT INTO exam_document_member(user_id,role) VALUES($1,'admin')",[actor]);
  await role('service_role');await db.query("UPDATE exam_document_configuration SET ingestion_enabled=true,enabled_destinations=ARRAY['drive','processing','group','nexus'],notification_cutoff=now()-interval '2 days',group_destination_key='chatwoot:1:inbox:2:conversation:23'");
 });
@@ -186,4 +186,158 @@ test('an unsupported authorized attachment becomes visible review without blocki
  assert.equal(Number((await one("SELECT count(*) n FROM exam_intake_incident WHERE document_id=$1 AND code='unsupported_attachment_requires_review'",[s.document_id])).n),1);
  assert.equal(Number((await one('SELECT count(*) n FROM exam_fallback_source_queue WHERE source_id=$1',[src.id])).n),0);
  const next=await source();assert.equal((await enqueueFromDocument(next.document_id)).queued,true);
+});
+
+async function primaryLease(id,destination='drive') {
+ const token=crypto.randomUUID();
+ await db.query(`INSERT INTO exam_document_delivery(document_id,destination,status,worker,lease_token,lease_until,attempts)
+   VALUES($1,$2,'reserved','n8n:primary',$3,now()+interval '10 minutes',1)
+   ON CONFLICT(document_id,destination,destination_key) DO UPDATE SET status='reserved',worker='n8n:primary',lease_token=$3,lease_until=now()+interval '10 minutes',attempts=1`,[id,destination,token]);
+ return token;
+}
+async function eventAgo(id,type,minutes,details={}) {
+ await db.query("INSERT INTO exam_document_event(document_id,event_type,details,created_at) VALUES($1,$2,$3::jsonb,now()-make_interval(mins=>$4))",[id,type,JSON.stringify(details),minutes]);
+}
+async function receivedAgo(id,minutes) {await db.query("UPDATE exam_document SET received_at=now()-make_interval(mins=>$2) WHERE id=$1",[id,minutes]);}
+
+test('Zoey case: early preservation cannot overtake an active primary Drive upload',async()=>{
+ const r=await ready({received_at:new Date(Date.now()-180000).toISOString()});
+ const token=await primaryLease(r.document_id);
+ const result=await group(r.document_id);assert.equal(result.claimed,false);assert.equal(result.reason,'primary_active');
+ assert.equal((await one("SELECT lease_token FROM exam_document_delivery WHERE document_id=$1 AND destination='drive'",[r.document_id])).lease_token,token);
+ assert.equal((await one("SELECT attempts FROM exam_document_delivery WHERE document_id=$1 AND destination='group'",[r.document_id])).attempts,0);
+});
+
+test('a valid primary processing lease has priority and retry timestamps are not advancement',async()=>{
+ const r=await ready();await receivedAgo(r.document_id,20);await eventAgo(r.document_id,'file_saved',8);
+ await primaryLease(r.document_id,'processing');
+ assert.equal((await group(r.document_id)).reason,'primary_active');
+ const state=await rpc('exam_fallback_primary_state',[r.document_id]);assert(state.idle_seconds>=479);assert.equal(state.active_destination,'processing');
+});
+
+test('a primary that never starts gets two collection cycles, then verified backup may deliver',async()=>{
+ const r=await ready({received_at:new Date(Date.now()-180000).toISOString()});
+ assert.equal((await group(r.document_id)).reason,'primary_start_grace');
+ await receivedAgo(r.document_id,11);
+ const claim=await group(r.document_id);assert(claim.claimed);assert.equal(claim.reason,'primary_stalled');
+ const audit=await one("SELECT details FROM exam_document_event WHERE document_id=$1 AND event_type='fallback_group_reserved'",[r.document_id]);assert.equal(audit.details.primary.reason,'primary_stalled');
+});
+
+test('recent verified extraction or Drive completion keeps the principal first',async()=>{
+ for(const stage of ['file_saved','extraction_updated']){
+  const r=await ready();await receivedAgo(r.document_id,40);await eventAgo(r.document_id,stage,3);
+  assert.equal((await group(r.document_id)).reason,'primary_progress');
+ }
+});
+
+test('stale historic Gmail failures do not override later successful advancement',async()=>{
+ const r=await ready();await receivedAgo(r.document_id,30);
+ await db.query("UPDATE exam_document SET file_status='failed' WHERE id=$1",[r.document_id]);
+ await eventAgo(r.document_id,'source_failed',20,{error:'Não foi possível preservar o original Gmail/Drive'});
+ await eventAgo(r.document_id,'file_saved',2);
+ const state=await rpc('exam_fallback_primary_state',[r.document_id]);assert.equal(state.eligible,false);assert.equal(state.reason,'primary_progress');assert.equal(state.last_failure_at,null);
+});
+
+test('Paçoca case: confirmed failed Gmail/Drive and no valid primary lease allows fallback',async()=>{
+ const r=await ready({received_at:new Date(Date.now()-180000).toISOString()});
+ await db.query("UPDATE exam_document SET file_status='failed' WHERE id=$1",[r.document_id]);
+ await eventAgo(r.document_id,'source_failed',0,{error:'Não foi possível preservar o original Gmail/Drive'});
+ const claim=await group(r.document_id);assert(claim.claimed);assert.equal(claim.reason,'primary_failed');
+ const started=await rpc('begin_exam_fallback_group_dispatch',[claim.task.id,claim.task.lease_token,'b'.repeat(64)]);assert(started.dispatch_allowed);
+ const audit=await one("SELECT details FROM exam_document_event WHERE document_id=$1 AND event_type='fallback_group_dispatch_started'",[r.document_id]);assert.equal(audit.details.primary.reason,'primary_failed');
+});
+
+test('busy/deferred source work and failures on a now healthy source are not immediate failover',async()=>{
+ for(const reason of ['primary_busy','primary_deferred','deferred']){
+  const r=await ready({received_at:new Date(Date.now()-180000).toISOString()});
+  await db.query("UPDATE exam_document SET file_status='failed' WHERE id=$1",[r.document_id]);
+  await eventAgo(r.document_id,'source_failed',0,{reason_code:reason});
+  assert.equal((await group(r.document_id)).reason,'primary_start_grace');
+ }
+ const r=await ready({received_at:new Date(Date.now()-180000).toISOString()});
+ await eventAgo(r.document_id,'source_failed',0,{error:'old generic'});
+ assert.equal((await group(r.document_id)).reason,'primary_start_grace');
+});
+
+test('an explicit failed primary task can fail over before the no-progress window',async()=>{
+ const r=await ready({received_at:new Date(Date.now()-180000).toISOString()});
+ await db.query("UPDATE exam_document_delivery SET status='failed',worker='n8n:primary',last_error='drive_upload_failed',updated_at=now() WHERE document_id=$1 AND destination='drive'",[r.document_id]);
+ const claim=await group(r.document_id);assert(claim.claimed);assert.equal(claim.reason,'primary_failed');
+});
+
+test('fallback events, document edits, retries and new source aliases cannot reset a stalled primary',async()=>{
+ const r=await ready();await receivedAgo(r.document_id,40);await eventAgo(r.document_id,'file_saved',12);
+ for(const type of ['fallback_original_verified','retry_requested','source_reserved','source_deduplicated','contact_recorded'])await eventAgo(r.document_id,type,0);
+ await db.query("UPDATE exam_document SET original_name='unchanged identity.pdf' WHERE id=$1",[r.document_id]);
+ const claim=await group(r.document_id);assert(claim.claimed);assert.equal(claim.reason,'primary_stalled');assert(claim.primary.idle_seconds>=719);
+});
+
+test('renewed Drive lease cannot starve last-resort delivery after 30 minutes without real progress',async()=>{
+ const r=await ready();await receivedAgo(r.document_id,20);const token=await primaryLease(r.document_id);
+ assert.equal((await group(r.document_id)).reason,'primary_active');
+ await receivedAgo(r.document_id,31);
+ const claim=await group(r.document_id);assert(claim.claimed);assert.equal(claim.reason,'primary_stalled_max');
+ assert.equal((await one("SELECT lease_token FROM exam_document_delivery WHERE document_id=$1 AND destination='drive'",[r.document_id])).lease_token,token);
+});
+
+test('even the hard stall limit never invades a live or uncertain primary group delivery',async()=>{
+ for(const status of ['reserved','sent','submitted','uncertain']){
+  const r=await ready();await receivedAgo(r.document_id,40);
+  await db.query("UPDATE exam_document_delivery SET status=$2,worker='n8n:primary',lease_token=gen_random_uuid(),lease_until=now()+interval '10 minutes',external_id='existing' WHERE document_id=$1 AND destination='group'",[r.document_id,status]);
+  assert.equal((await group(r.document_id)).claimed,false);
+ }
+});
+
+test('primary progress between reserve and provider POST revokes only the unstarted fallback claim',async()=>{
+ const r=await ready();await receivedAgo(r.document_id,15);const claim=await group(r.document_id);assert(claim.claimed);
+ await eventAgo(r.document_id,'file_saved',0);
+ const result=await rpc('begin_exam_fallback_group_dispatch',[claim.task.id,claim.task.lease_token,'b'.repeat(64)]);
+ assert.equal(result.dispatch_allowed,false);assert.equal(result.reason,'primary_progress');
+ const task=await one('SELECT * FROM exam_document_delivery WHERE id=$1',[claim.task.id]);assert.equal(task.status,'pending');assert.equal(task.lease_token,null);assert.equal(task.attempts,0);
+ assert.equal(Number((await one("SELECT count(*) n FROM exam_document_event WHERE document_id=$1 AND event_type='fallback_group_dispatch_started'",[r.document_id])).n),0);
+});
+
+test('priority settings and state remain service-only and invalid time limits are rejected',async()=>{
+ for(const roleName of ['anon','authenticated']){await role(roleName);await assert.rejects(rpc('exam_fallback_primary_state',[crypto.randomUUID()]),e=>e.code==='42501');}
+ await role('service_role');await assert.rejects(db.query('UPDATE exam_fallback_configuration SET primary_idle_seconds=120'),e=>e.code==='23514');
+ await assert.rejects(db.query('UPDATE exam_fallback_configuration SET primary_max_stall_seconds=500'),e=>e.code==='23514');
+});
+
+
+test('source failures after a verified saved document and fallback-owned failed group are not primary failure',async()=>{
+ const healthy=await ready({received_at:new Date(Date.now()-1200000).toISOString()});
+ const stage=await rpc('stage_exam_intake_file',[healthy.document_id,JSON.stringify({sha256:healthy.document.sha256,size_bytes:123,drive_file_id:'healthy-drive',drive_folder_id:'fixture-folder'}),'n8n:healthy']);
+ await rpc('confirm_exam_document_file',[healthy.document_id,JSON.stringify({sha256:healthy.document.sha256,size_bytes:123,drive_file_id:'healthy-drive',drive_folder_id:'fixture-folder'}),stage.lease_token]);
+ await eventAgo(healthy.document_id,'source_failed',0,{error:'stale child reports failure after completion'});
+ assert.equal((await group(healthy.document_id)).reason,'primary_progress');
+ const fallback=await ready({received_at:new Date(Date.now()-180000).toISOString()});
+ await db.query("UPDATE exam_document_delivery SET status='failed',worker='fallback:old',updated_at=now() WHERE document_id=$1 AND destination='group'",[fallback.document_id]);
+ assert.equal((await group(fallback.document_id)).reason,'primary_start_grace');
+ const busy=await ready({received_at:new Date(Date.now()-180000).toISOString()});
+ await db.query("UPDATE exam_document SET file_status='failed' WHERE id=$1",[busy.document_id]);
+ await eventAgo(busy.document_id,'source_failed',0,{error:'Gmail/Drive [primary_busy]'});
+ assert.equal((await group(busy.document_id)).reason,'primary_start_grace');
+});
+
+test('a fresh WhatsApp alias does not reset prior failure or stagnation of the same canonical bytes',async()=>{
+ const old=await ready();await receivedAgo(old.document_id,31);
+ const fresh=await source({received_at:new Date(Date.now()-180000).toISOString()});
+ const matched=await reserve(fresh.document_id,old.document.sha256);assert.equal(matched.document_id,old.document_id);
+ const claim=await group(old.document_id);assert(claim.claimed);assert.equal(claim.reason,'primary_stalled');
+});
+
+
+test('typed Gmail failure and retry cooldown preserve fallback eligibility and immutable original',async()=>{
+ const r=await ready({received_at:new Date(Date.now()-20*60000).toISOString()});
+ const failed=await rpc('record_exam_document_source_error',[r.document_id,'Gmail/Drive [drive_upload_failed]','Fixture storage failure']);
+ assert.equal(failed.intake_retry.failure_count,1);
+ const before=await rpc('exam_fallback_primary_state',[r.document_id]);
+ assert.equal(before.eligible,true);assert.equal(before.reason,'primary_failed');
+ const original=await one('SELECT * FROM exam_document_source WHERE document_id=$1',[r.document_id]);
+ const replay=await rpc('reserve_exam_intake_source',[JSON.stringify({...original,original_name:'fixture.pdf',mime_type:'application/pdf'})]);
+ assert.equal(replay.intake_retry,undefined);
+ const after=await rpc('exam_fallback_primary_state',[r.document_id]);
+ assert.equal(after.last_progress_at,before.last_progress_at);assert.equal(after.reason,'primary_failed');
+ assert.equal((await one('SELECT sha256 FROM exam_document WHERE id=$1',[r.document_id])).sha256,r.document.sha256);
+ const claim=await group(r.document_id);assert.equal(claim.claimed,true);assert.equal(claim.reason,'primary_failed');
 });
