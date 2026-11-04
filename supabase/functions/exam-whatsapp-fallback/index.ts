@@ -153,7 +153,9 @@ Deno.serve(async req => {
       return json({ claimed: true, processed: 0, reconciled, dispatched: 0, waitingForGrace: true });
     }
     // Newest pages get priority every run, even while an old window needs recovery.
-    const fast = await collectWhatsappOrigins(collectorConfig, io, { receivedFrom: from, receivedThrough: through, maxPages: 2, maxOrigins: 100, maxMillis: 8000 });
+    const fast = await collectWhatsappOrigins(collectorConfig, io, { receivedFrom: from, receivedThrough: through, maxPages: 2, maxOrigins: 100, maxMillis: 12000 });
+    const liveOrigins = new Map<string, CollectedOrigin>();
+    const originKey = (source: { channel: unknown; account_id: unknown; message_id: unknown; attachment_id: unknown }) => JSON.stringify([source.channel, source.account_id, source.message_id, source.attachment_id]);
     let enqueued = 0;
     async function enqueue(result: CollectorResult): Promise<void> {
       for (const origin of result.origins) {
@@ -161,6 +163,8 @@ Deno.serve(async req => {
         const source = { ...origin.source, metadata: { ...origin.source.metadata,
           attachment_url_sha256: origin.attachment.downloadUrl ? await sha256(new TextEncoder().encode(origin.attachment.downloadUrl)) : null } };
         await rpc('enqueue_exam_fallback_source', { p_source: source });
+        // Already authorized media URLs live only for this run, never in the queue.
+        liveOrigins.set(originKey(origin.source), origin);
         enqueued++;
       }
     }
@@ -170,7 +174,7 @@ Deno.serve(async req => {
       const windowStart = typeof scan.window_start === 'string' ? scan.window_start : from;
       const windowEnd = typeof scan.window_end === 'string' ? scan.window_end : through;
       back = await collectWhatsappOrigins(collectorConfig, io, { receivedFrom: windowStart, receivedThrough: windowEnd,
-        cursor: scan.cursor as CollectorCursor | undefined, maxPages: 3, maxOrigins: 100, maxMillis: 8000 });
+        cursor: scan.cursor as CollectorCursor | undefined, maxPages: 2, maxOrigins: 100, maxMillis: 10000 });
       // Discovery advances after durable queueing. A poison PDF cannot stall discovery.
       await enqueue(back);
       scan = back.complete ? {} : { cursor: back.cursor, window_start: windowStart, window_end: windowEnd };
@@ -182,7 +186,7 @@ Deno.serve(async req => {
       if (!row) break;
       const task = obj(row), source = obj(task.source), metadata = obj(source.metadata);
       const document = task.document && typeof task.document === 'object' ? obj(task.document) : {};
-      const origin: CollectedOrigin = {
+      const origin: CollectedOrigin = liveOrigins.get(originKey({channel: source.channel, account_id: source.account_id, message_id: source.message_id, attachment_id: source.attachment_id})) ?? {
         source: { channel: 'whatsapp', account_id: str(source.account_id), message_id: str(source.message_id), attachment_id: str(source.attachment_id),
           original_name: str(document.original_name), mime_type: 'application/pdf', received_at: str(source.received_at), metadata },
         attachment: { id: str(source.attachment_id), chatwootAttachmentId: str(metadata.chatwoot_attachment_id), name: str(document.original_name), contentType: 'application/pdf', size: null, downloadUrl: null },
