@@ -4,7 +4,7 @@ This replaces repeated full-history OP01 polling with the existing durable audit
 
 The factory reads three verified private exports: current OP01, the published per-message Gmail child, and the published prospective Gmail collector. It never reads credential values. Generated bound workflows must remain outside the repository.
 
-- **Current:** explicit handoff minus five minutes, schedule every five minutes. Enumeration runs before a maximum of one pending-origin recheck per window. The recheck cursor survives between windows.
+- **Current:** explicit handoff minus five minutes, schedule every minute. The five-minute overlap remains unchanged. Enumeration runs before a maximum of one pending-origin recheck per window. The recheck cursor survives between windows.
 - **History:** the OP01 original cutoff through a frozen handoff, schedule every fifteen minutes. Windows never exceed one day. Failed coverage intervals remain explicit round-robin gaps. Reaching the handoff does not abandon pending originals: the same collector continues bounded rechecks without re-enumerating history. Only an empty pending first page proves no originals remain pending; an empty tail only resets the cursor.
 - **Both:** separate collector identities/state rows, the existing fifteen-minute CAS lease, maximum 100 operations/180 seconds per tick, thirty-second HTTP timeouts, 180-second child and 300-second parent engine timeouts. A late child call yields the persisted pending bridge rather than starting without sufficient budget. The child may preserve a PDF but never sends it to the group.
 
@@ -24,6 +24,10 @@ Use `scripts/exames/intake/gmail-stability-build.mjs`. Its exports are `gmailSta
 Do not change the historical cutoff to a rolling 24-hour lookback. Do not use `staticData` as a lock, delete old pending receipts, or replay a group send to validate this change. If a child times out during Drive upload, the persisted Drive ID/hash/readback path must reconcile that same original on the next attempt.
 
 ## Verification
+
+For an already installed current collector, this interval change requires no new handoff, collector, child, state row or bootstrap. Back up the live workflow, change only its display name and the schedule node's `minutesInterval` from 5 to 1, then publish/read back that same workflow ID. Preserve the schedule node's existing technical name/ID and all connections, configuration, credentials and settings. Leave history at 15 minutes and every other workflow unchanged. The generator permits one-minute polling only for the bounded current Gmail collector; its generic default remains five minutes.
+
+A tick while the same collector owns a live lease exits without collecting again. A long execution can therefore exceed the one-minute interval; the change reduces idle polling delay, not the duration of extraction or Drive operations. Read back scheduled progress and unchanged cursor/receipt identity. If needed, restore only the current schedule interval to 5 and its display name; do not reset state or replay messages.
 
 `node --test scripts/exames/intake/gmail-stability.test.mjs scripts/exames/intake/n8n-discovery-audit.test.mjs scripts/exames/intake/gmail-drive-recovery.test.mjs`
 

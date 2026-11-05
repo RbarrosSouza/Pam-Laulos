@@ -33,10 +33,50 @@ test('factory preserves the initial cutoff and published child recovery while sp
   assert.deepEqual(c.connections,sourceChild.connections);assert.equal(c.nodes.filter(n=>n.type.endsWith('.executeWorkflowTrigger')).length,1);
   const note=p.nodes.find(n=>n.name==='Leia antes de habilitar').parameters.content;assert.match(note,/coordenador 300s/);assert.match(note,/subprocessador 180s/);assert.match(note,/preservar o original no Drive/);assert.doesNotMatch(note,/não cria documentos/);
   const cfg=config(lane);validateAuditConfig(cfg,'trigger');assert.equal(cfg.collectorId,lanes[lane].collectorId);assert.equal(cfg.recheckPageSize,1);assert.equal(cfg.monitoring,false);
-  assert.equal(p.nodes.find(n=>n.type.endsWith('.scheduleTrigger')).parameters.rule.interval[0].minutesInterval,lane==='fresh'?5:15);
+  assert.equal(p.nodes.find(n=>n.type.endsWith('.scheduleTrigger')).parameters.rule.interval[0].minutesInterval,lane==='fresh'?1:15);
+  assert.match(p.name,lane==='fresh'?/a cada 1 minuto$/:/a cada 15 minutos$/);
   const script=new vm.Script('(function(){'+c.nodes[0].parameters.jsCode+'})()');const request={collector_id:cfg.collectorId,cutoff:cfg.intakeCutoff,account_id:'gmail:fixture@example.invalid',message_id:'abcdef01',targets:[{kind:'gmail_part',part_id:'1'}]};
   const result=script.runInNewContext({$input:{all:()=>[{json:{payload:request}}]}})[0].json;assert.equal(result.manualMessageId,request.message_id);assert.equal(result.intakeCutoff,cfg.intakeCutoff);assert.throws(()=>script.runInNewContext({$input:{all:()=>[{json:{payload:{...request,collector_id:previousCollector}}}]}}),/IDENTITY/);
  }
+});
+
+test('one-minute polling changes only the current schedule, retaining node identities and durable configuration',()=>{
+ const spec=gmailStabilityLanes(primary,handoff).fresh;
+ const options={scheduledCandidate:true,resumeFence:true,prospectiveCutoff:spec.cutoff,bridgeWorkflowId:'syntheticChildId',
+  captureAttachmentDetails:true,executionTimeoutSeconds:300,recheckAfterEnumeration:true,recheckPageSize:1,stabilityBudget:true};
+ const previous=buildN8nAuditWorkflow('gmail',primary,'syntheticDataTable',{...options,scheduleMinutes:5});
+ const current=buildN8nAuditWorkflow('gmail',primary,'syntheticDataTable',{...options,scheduleMinutes:1});
+ assert.deepEqual(readGmailCollectorConfig(current),readGmailCollectorConfig(previous));
+ const cfg=readGmailCollectorConfig(current);
+ assert.deepEqual([cfg.maxActions,cfg.maxMillis,cfg.leaseMillis,cfg.overlapSeconds,cfg.executionBudgetMillis,cfg.bridgeBudgetMillis,cfg.bridgeCheckpointMarginMillis,cfg.recheckPageSize],
+  [100,180000,900000,300,300000,180000,30000,1]);
+ // IF condition IDs are intentionally fresh on each build; node IDs, credentials,
+ // connections and all other parameters must remain identical for this change.
+ const normalize=workflow=>{const result=structuredClone(workflow);for(const n of result.nodes)for(const c of n.parameters.conditions?.conditions||[])delete c.id;return result;};
+ const normalized=normalize(current);normalized.nodes.find(n=>n.type.endsWith('.scheduleTrigger')).parameters.rule.interval[0].minutesInterval=5;
+ assert.deepEqual(normalized,normalize(previous));
+ const build=extra=>buildN8nAuditWorkflow('gmail',primary,'syntheticDataTable',{...options,scheduleMinutes:1,...extra});
+ assert.throws(()=>build({stabilityBudget:false}),/One-minute polling/);
+ assert.throws(()=>build({historicalThrough:handoff}),/One-minute polling/);
+ assert.throws(()=>build({canary:true,canaryMessageId:'abcdef01'}),/One-minute polling/);
+ for(const interval of [0,2,30,'1'])assert.throws(()=>build({scheduleMinutes:interval}),/Invalid bounded collector settings/);
+ assert.equal(buildN8nAuditWorkflow('gmail',primary,'syntheticDataTable',{scheduledCandidate:true}).nodes.find(n=>n.type.endsWith('.scheduleTrigger')).parameters.rule.interval[0].minutesInterval,5);
+});
+
+test('minute ticks keep the live lease exclusive and resume the same persisted cursor after release',()=>{
+ const cfg=config('fresh');let state=loadAuditState([],cfg,'first-minute',now);
+ state=applyAuditResponse(nextAuditOperation(state,cfg,now),ok(run),cfg,now);
+ state=applyAuditResponse(nextAuditOperation(state,cfg,now),ok({messages:[{id:'abcdef01'}],nextPageToken:'next-page'}),cfg,now);
+ const saved=row(state,cfg);
+ const overlapping=loadAuditState([saved],cfg,'next-minute',now+60000);
+ assert.equal(overlapping.busy,true);assert.equal(overlapping.lease.owner,'first-minute');
+ assert.equal(overlapping.lease.until,now+900000);
+ const released=row({...state,releaseLease:true},cfg);
+ const resumed=loadAuditState([released],{...cfg,executionStartedAt:now+120000},'after-release',now+120000);
+ assert.equal(resumed.busy,false);assert.equal(resumed.lease.owner,'after-release');
+ for(const key of ['identityHash','requestId','sweepId','receivedFrom','receivedThrough','cursor','messageQueue','pendingEvents'])assert.deepEqual(resumed[key],state[key],key);
+ assert.equal(resumed.revision,JSON.parse(released.state_json).revision);assert(resumed.resumeRequest);
+ assert.equal(nextAuditOperation(resumed,{...cfg,executionStartedAt:now+120000},now+120000).action,'intake_resume');
 });
 
 test('history advances in at most one-day windows and terminates only after all bounded intervals are acknowledged',()=>{

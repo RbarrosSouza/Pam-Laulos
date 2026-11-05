@@ -26,7 +26,7 @@ export function gmailStabilityLanes(primarySource,handoff) {
  const freshCutoff=new Date(Date.parse(handoff)-300000).toISOString();
  return {
   history:{cutoff:originalCutoff,historicalThrough:handoff,collectorId:'gmail_history_'+digest([originalCutoff,handoff]).slice(0,16),scheduleMinutes:15},
-  fresh:{cutoff:freshCutoff,collectorId:'gmail_prospective_'+digest(freshCutoff).slice(0,16),scheduleMinutes:5},
+  fresh:{cutoff:freshCutoff,collectorId:'gmail_prospective_'+digest(freshCutoff).slice(0,16),scheduleMinutes:1},
  };
 }
 
@@ -67,7 +67,7 @@ export function buildGmailStabilityParent(primarySource,publishedCollector,dataT
  for(const [name,type,old]of [['Conferir conta autorizada','oAuth2Api','Conferir conta autorizada'],['Ledger — evento durável','httpHeaderAuth','Ledger — evento durável']]){
   if(JSON.stringify(node(workflow,name).credentials?.[type])!==JSON.stringify(node(publishedCollector,old).credentials?.[type]))throw new Error('gmail_stability_collector_credential_drift');
  }
- workflow.name=lane==='fresh'?'OP01 — Gmail atual — coleta limitada a cada 5 minutos':'OP01 — Reconciliação histórica — blocos a cada 15 minutos';
+ workflow.name=lane==='fresh'?'OP01 — Gmail atual — coleta limitada a cada 1 minuto':'OP01 — Reconciliação histórica — blocos a cada 15 minutos';
  workflow.settings={...clone(publishedCollector.settings||{}),...workflow.settings,executionTimeout:300};
  return workflow;
 }
