@@ -27,7 +27,7 @@ function fields(depth = 8) {
   return 'id,threadId,internalDate,payload(' + part(depth) + ')';
 }
 
-export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPilot = false, scheduledCandidate = false, resumeFence = false, prospectiveCutoff = null, bridgeWorkflowId = null, canary = false, canaryMessageId = null, canaryCollectorId = null, canaryRecheckOnly = false, scheduleDisabled = false, captureAttachmentDetails = false } = {}) {
+export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPilot = false, scheduledCandidate = false, resumeFence = false, prospectiveCutoff = null, bridgeWorkflowId = null, canary = false, canaryMessageId = null, canaryCollectorId = null, canaryRecheckOnly = false, scheduleDisabled = false, captureAttachmentDetails = false, historicalThrough = null, executionTimeoutSeconds = 240, recheckAfterEnumeration = false, recheckPageSize = 50, stabilityBudget = false, scheduleMinutes = 5 } = {}) {
   if (!['gmail', 'chatwoot'].includes(provider)) throw new Error('Unsupported audit provider');
   if (scheduledCandidate && (provider !== 'gmail' || manualPilot)) throw new Error('A separate Gmail-only scheduled candidate is required');
   if (prospectiveCutoff !== null && (!scheduledCandidate || typeof prospectiveCutoff !== 'string'
@@ -42,26 +42,32 @@ export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPil
   if (canaryRecheckOnly && (!canary || !canaryCollectorId)) throw new Error('Recheck-only requires a separate manual canary');
   if(typeof scheduleDisabled!=='boolean')throw new Error('Schedule guard must be boolean');
   if(typeof captureAttachmentDetails!=='boolean'||captureAttachmentDetails&&!prospectiveCutoff)throw new Error('Attachment metadata requires prospective collection');
+  if(historicalThrough!==null&&(!prospectiveCutoff||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(historicalThrough)||!Number.isFinite(Date.parse(historicalThrough))
+    ||new Date(historicalThrough).toISOString()!==historicalThrough||Date.parse(historicalThrough)<=Date.parse(prospectiveCutoff)))throw new Error('Historical upper bound requires a canonical interval');
+  if(![240,300].includes(executionTimeoutSeconds)||!Number.isSafeInteger(recheckPageSize)||recheckPageSize<1||recheckPageSize>50||typeof recheckAfterEnumeration!=='boolean'||typeof stabilityBudget!=='boolean'||![5,15].includes(scheduleMinutes))throw new Error('Invalid bounded collector settings');
+  if(stabilityBudget&&(!prospectiveCutoff||!bridgeWorkflowId||executionTimeoutSeconds!==300))throw new Error('Bounded bridge requires prospective processing and 300 second parent timeout');
   const addBridge=Boolean(bridgeWorkflowId)&&!canaryRecheckOnly;
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(dataTableId)) throw new Error('Verified private Data Table ID required');
   const previous = exportConfiguration(source);
   const cfg = { enabled: manualPilot === true || scheduledCandidate === true, allowScheduled: scheduledCandidate === true && !canary, monitoring: false, auditLookbackSeconds: 86400, provider, dataTableId, serviceUrl: previous.serviceUrl,
     mailbox: previous.mailbox, intakeCutoff: prospectiveCutoff ?? previous.intakeCutoff, includeSpamTrash: true,
     accountId: previous.accountId, inboxId: previous.inboxId, chatwootBaseUrl: previous.chatwootBaseUrl,
-    collectorId: canaryCollectorId ?? (prospectiveCutoff ? 'gmail_prospective_' + crypto.createHash('sha256').update(prospectiveCutoff).digest('hex').slice(0,16)
+    collectorId: canaryCollectorId ?? (historicalThrough ? 'gmail_history_'+crypto.createHash('sha256').update(JSON.stringify([prospectiveCutoff,historicalThrough])).digest('hex').slice(0,16) : prospectiveCutoff ? 'gmail_prospective_' + crypto.createHash('sha256').update(prospectiveCutoff).digest('hex').slice(0,16)
       : provider === 'gmail' ? 'gmail_audit_v2' : 'chatwoot_audit_v2'), maxActions: 100, maxMillis: 180000, leaseMillis: 900000,
     gmailMetadataFields: fields(), gmailNoticeFields: fields().replaceAll('body(attachmentId,size)', 'body(attachmentId,size,data)'), notificationMode: 'home_only',
     ...(resumeFence || scheduledCandidate ? { resumeFence: true } : {}),
     ...(scheduledCandidate ? { continuous: true, overlapSeconds: 300, maxRepeatedFailures: 3, notificationMode: 'home_only', recheckPending: true } : {}),
     ...(prospectiveCutoff ? { prospective: true } : {}), ...(bridgeWorkflowId ? {bridgeEnabled:true,bridgeWorkflowId} : {}), ...(canary ? {canary:true,canaryMessageId} : {}),
-    ...(canaryRecheckOnly ? {canaryRecheckOnly:true} : {}), ...(captureAttachmentDetails ? {captureAttachmentDetails:true} : {}) };
+    ...(canaryRecheckOnly ? {canaryRecheckOnly:true} : {}), ...(captureAttachmentDetails ? {captureAttachmentDetails:true} : {}),
+    ...(historicalThrough?{historicalThrough}:{}),...(recheckAfterEnumeration?{recheckAfterEnumeration:true,recheckPageSize}:{}),
+    ...(stabilityBudget?{executionBudgetMillis:300000,bridgeBudgetMillis:180000,bridgeCheckpointMarginMillis:30000}:{}) };
   const workerReference = credential(source, 'Reservar origem', 'httpHeaderAuth');
   const providerReference = provider === 'gmail'
     ? credential(source, 'Gmail - IDs paginados', 'oAuth2Api')
     : credential(source, 'Chatwoot - listar conversas da caixa', 'chatwootApi');
   const workflow = { name: 'INTAKE AUDIT — ' + (provider === 'gmail' ? 'Gmail' : 'WhatsApp') + (scheduledCandidate ? ' — PERIÓDICO CANDIDATO (INATIVO)' : manualPilot ? ' — PILOTO MANUAL 1 DIA (INATIVO)' : ' — registros duráveis (INATIVO)'), active: false,
     nodes: [], connections: {}, pinData: {}, settings: { executionOrder: 'v1', saveDataSuccessExecution: 'none', saveDataErrorExecution: 'none',
-      saveManualExecutions: false, saveExecutionProgress: false, executionTimeout: 240, timezone: 'America/Sao_Paulo' } };
+      saveManualExecutions: false, saveExecutionProgress: false, executionTimeout: executionTimeoutSeconds, timezone: 'America/Sao_Paulo' } };
   const add = (name, type, version, parameters, position, extra = {}) => {
     const hex = crypto.createHash('sha256').update('pamvet-intake-discovery-v2:' + provider + ':' + name).digest('hex');
     const id = hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-5' + hex.slice(13, 16) + '-a' + hex.slice(17, 20) + '-' + hex.slice(20, 32);
@@ -81,8 +87,8 @@ export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPil
   const scheduleName = scheduledCandidate ? 'Agenda 5 minutos — candidato INATIVO' : 'Agenda futura — bloqueada por configuração';
   add('Leia antes de habilitar', 'stickyNote', 1, { content: 'AUDITORIA DE RECEBIMENTOS — WORKFLOW INATIVO. Credenciais existentes nos HTTP Request, nenhum segredo em Code. Só GET nos provedores e POST de recibos/reconferência no backend. IDs persistidos por página antes dos metadados; estado e cursores na Data Table privada, nunca staticData. Lease de 15min por CAS; orçamento 100 ações/180s; timeout 240s do engine é soft, precisa prova real. Lookup exige SQL26; retomada exige SQL28; reconferência exige SQL30/Edge correspondente. Não lê PDF, não cria documentos/Drive/grupo e não envia WhatsApp. Recebimento sem documento é pendência genérica; não é exame comprovado. ' + (prospectiveCutoff ? 'PROSPECTIVO: novo coletor isolado; somente a partir do corte explícito. Revisar a integração de processamento e o horário do corte antes da ativação.' : scheduledCandidate ? 'CANDIDATO PERIÓDICO: revisar antes de ativar. Mantém o mesmo coletor, sobreposição de 5min e prova de enumeração independente de preservação.' : 'MANUAL: agenda bloqueada pela configuração e desabilitada no piloto.') }, [-700, -400]);
   add('Conferir manualmente', 'manualTrigger', 1, {}, [-700, 0]);
-  add(scheduleName, 'scheduleTrigger', 1.2, { rule: { interval: [{ field: 'minutes', minutesInterval: 5 }] } }, [-700, 200], { disabled: manualPilot === true || canary || scheduleDisabled });
-  code('Configuração de auditoria', 'const cfg=' + JSON.stringify(cfg, null, 2) + ";validateAuditConfig(cfg,$execution.mode);return [{json:cfg}];", [-460, 0]);
+  add(scheduleName, 'scheduleTrigger', 1.2, { rule: { interval: [{ field: 'minutes', minutesInterval: scheduleMinutes }] } }, [-700, 200], { disabled: manualPilot === true || canary || scheduleDisabled });
+  code('Configuração de auditoria', 'const cfg=' + JSON.stringify(cfg, null, 2) + (stabilityBudget?";cfg.executionStartedAt=Date.now();":";")+"validateAuditConfig(cfg,$execution.mode);return [{json:cfg}];", [-460, 0]);
   const identityUrl = provider === 'gmail' ? 'https://gmail.googleapis.com/gmail/v1/users/me/profile?fields=emailAddress'
     : previous.chatwootBaseUrl + '/api/v1/accounts/' + previous.accountId + '/inboxes/' + previous.inboxId;
   add('Conferir conta autorizada', 'httpRequest', 4.2, providerHttp(identityUrl), [-220, 0], { credentials: providerCredentials, retryOnFail: false });
@@ -147,6 +153,15 @@ export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPil
   connect('Ledger — evento durável', [['Aplicar resposta sem perder cursor'], ['Aplicar resposta sem perder cursor']]);
   connect('Provedor — somente leitura', [['Aplicar resposta sem perder cursor'], ['Aplicar resposta sem perder cursor']]);
   connect('Aplicar resposta sem perder cursor', [['Preparar persistência privada']]);
+  if(stabilityBudget){
+    workflow.nodes.find(n=>n.name==='Leia antes de habilitar').parameters.content=
+      'COLETA GMAIL LIMITADA — CANDIDATO INATIVO. '+(historicalThrough?'Reconciliação histórica: início original preservado, fim congelado; lacunas e originais pendentes continuam em reconferência até resolução. ':'Recebimentos atuais: janela independente do histórico, enumeração antes de uma reconferência pendente por janela. ')+
+      'Estado/cursor na Data Table privada com revisão CAS e lease de 15min; bootstrap de uma linha revision=0/state_json=null por coletor antes de ativar. '+
+      'Até 100 operações/180s por tick, timeout do coordenador 300s e subprocessador 180s. Chamada tardia ao filho cede a execução mantendo a origem pendente e exige orçamento para reconferência. '+
+      'O subprocessador pode baixar o PDF e preservar o original no Drive com identidade/hash/reservas existentes; não envia ao grupo nem força vínculo clínico. '+
+      'HTTP e credenciais mantidos nos nós nativos, sem segredos em Code. Cadastro/recibos não significam original salvo: exige nova consulta de prova. '+
+      'Publicação não comprova estabilidade da VPS, cobertura ou entrega clínica; verificar progresso real antes de pausar agendas antigas.';
+  }
   return workflow;
 }
 
