@@ -44,8 +44,9 @@ export function buildN8nAuditWorkflow(provider, source, dataTableId, { manualPil
   if(typeof captureAttachmentDetails!=='boolean'||captureAttachmentDetails&&!prospectiveCutoff)throw new Error('Attachment metadata requires prospective collection');
   if(historicalThrough!==null&&(!prospectiveCutoff||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(historicalThrough)||!Number.isFinite(Date.parse(historicalThrough))
     ||new Date(historicalThrough).toISOString()!==historicalThrough||Date.parse(historicalThrough)<=Date.parse(prospectiveCutoff)))throw new Error('Historical upper bound requires a canonical interval');
-  if(![240,300].includes(executionTimeoutSeconds)||!Number.isSafeInteger(recheckPageSize)||recheckPageSize<1||recheckPageSize>50||typeof recheckAfterEnumeration!=='boolean'||typeof stabilityBudget!=='boolean'||![5,15].includes(scheduleMinutes))throw new Error('Invalid bounded collector settings');
+  if(![240,300].includes(executionTimeoutSeconds)||!Number.isSafeInteger(recheckPageSize)||recheckPageSize<1||recheckPageSize>50||typeof recheckAfterEnumeration!=='boolean'||typeof stabilityBudget!=='boolean'||![1,5,15].includes(scheduleMinutes))throw new Error('Invalid bounded collector settings');
   if(stabilityBudget&&(!prospectiveCutoff||!bridgeWorkflowId||executionTimeoutSeconds!==300))throw new Error('Bounded bridge requires prospective processing and 300 second parent timeout');
+  if(scheduleMinutes===1&&(!scheduledCandidate||provider!=='gmail'||!stabilityBudget||historicalThrough!==null||canary))throw new Error('One-minute polling requires the bounded current Gmail collector');
   const addBridge=Boolean(bridgeWorkflowId)&&!canaryRecheckOnly;
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(dataTableId)) throw new Error('Verified private Data Table ID required');
   const previous = exportConfiguration(source);
