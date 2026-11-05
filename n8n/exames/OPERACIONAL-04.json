@@ -47,7 +47,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Referências de credenciais são selecionadas nos HTTPs. Corte e enabled são a única liberação deste fluxo.\nconst cfg={\n  \"enabled\": false,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"mailbox\": \"exames@example.invalid\",\n  \"driveFolderId\": \"SELECT_PRIVATE_DRIVE_FOLDER\",\n  \"intakeCutoff\": \"\",\n  \"notificationCutoff\": \"\",\n  \"manualMessageId\": \"\",\n  \"dedicatedMailbox\": false,\n  \"allowedSenders\": [],\n  \"examSubjectHints\": [\n    \"exame\",\n    \"laudo\",\n    \"resultados do atendimento\",\n    \"resultado de exame\",\n    \"hemograma\",\n    \"ultrassom\"\n  ],\n  \"maxBytes\": 20971520,\n  \"maxMimeDepth\": 8,\n  \"maxPages\": 100,\n  \"includeSpamTrash\": false,\n  \"worker\": \"n8n-exames-operacional\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"pamLaudosBaseUrl\": \"https://pamlaudos.example.invalid\",\n  \"allowHttpChatwoot\": false,\n  \"providerConfirmationStatuses\": [\n    \"delivered\",\n    \"read\"\n  ],\n  \"extractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"extractorModel\": \"gpt-4.1\",\n  \"enableVision\": false,\n  \"fallbackExtractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"fallbackExtractorModel\": \"gpt-4o-mini\",\n  \"maxTextChars\": 80000,\n  \"maxProcessingPages\": 100\n};\nif(!cfg.enabled)throw new Error('EXAMES_OPERACIONAL_PAUSADO');\nif(!cfg.serviceUrl.startsWith('https://')||!cfg.serviceUrl.endsWith('/functions/v1/exam-document-service')||!cfg.pamLaudosBaseUrl.startsWith('https://'))throw new Error('Configuração de serviço/painel inválida');\nif(!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(cfg.intakeCutoff)||!Number.isFinite(Date.parse(cfg.intakeCutoff)))throw new Error('Defina o marco de corte do coletor legado');\nif(!cfg.driveFolderId||typeof cfg.includeSpamTrash!=='boolean')throw new Error('Destino Drive inválido');\n\nif(cfg.manualMessageId&&$execution.mode!=='test')throw new Error('Seleção de mensagem só pode ser usada manualmente');\nif(cfg.manualMessageId&&!/^[a-f0-9]{8,64}$/i.test(cfg.manualMessageId))throw new Error('ID de mensagem manual inválido');\ncfg.worker+=':'+$execution.id;\ncfg.maxPages=cfg.maxPages;\nreturn [{json:cfg}];"
+        "jsCode": "// Referências de credenciais são selecionadas nos HTTPs. Corte e enabled são a única liberação deste fluxo.\nconst cfg={\n  \"enabled\": false,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"mailbox\": \"exames@example.invalid\",\n  \"driveFolderId\": \"SELECT_PRIVATE_DRIVE_FOLDER\",\n  \"intakeCutoff\": \"\",\n  \"notificationCutoff\": \"\",\n  \"manualMessageId\": \"\",\n  \"dedicatedMailbox\": false,\n  \"allowedSenders\": [],\n  \"examSubjectHints\": [\n    \"exame\",\n    \"laudo\",\n    \"resultados do atendimento\",\n    \"resultado de exame\",\n    \"hemograma\",\n    \"ultrassom\"\n  ],\n  \"maxBytes\": 20971520,\n  \"maxMimeDepth\": 8,\n  \"maxPages\": 100,\n  \"includeSpamTrash\": false,\n  \"worker\": \"n8n-exames-operacional\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"pamLaudosBaseUrl\": \"https://pamlaudos.example.invalid\",\n  \"allowHttpChatwoot\": false,\n  \"providerConfirmationStatuses\": [\n    \"delivered\",\n    \"read\"\n  ],\n  \"extractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"extractorModel\": \"gpt-4.1\",\n  \"enableVision\": false,\n  \"fallbackExtractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"fallbackExtractorModel\": \"gpt-4o-mini\",\n  \"maxTextChars\": 80000,\n  \"maxProcessingPages\": 100\n};\nif(!cfg.enabled)throw new Error('EXAMES_OPERACIONAL_PAUSADO');\nif(!cfg.serviceUrl.startsWith('https://')||!cfg.serviceUrl.endsWith('/functions/v1/exam-document-service')||!cfg.pamLaudosBaseUrl.startsWith('https://'))throw new Error('Configuração de serviço/painel inválida');\nif(!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(cfg.intakeCutoff)||!Number.isFinite(Date.parse(cfg.intakeCutoff)))throw new Error('Defina o marco de corte do coletor legado');\nif(!cfg.driveFolderId||typeof cfg.includeSpamTrash!=='boolean')throw new Error('Destino Drive inválido');\n\nif(cfg.manualMessageId&&$execution.mode!=='test')throw new Error('Seleção de mensagem só pode ser usada manualmente');\nif(cfg.manualMessageId&&!/^[a-f0-9]{8,64}$/i.test(cfg.manualMessageId))throw new Error('ID de mensagem manual inválido');\ncfg.worker+=':'+$execution.id;\ncfg.maxPages=cfg.maxPages;\ncfg.pipelineStage=$json.__pipelineStage||\"nexus\";\nif(![\"nexus\"].includes(cfg.pipelineStage))throw new Error('pipeline_stage_invalid');\nreturn [{json:cfg}];"
       }
     },
     {
@@ -79,7 +79,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({action:\"reserve_tasks\",payload:{destination:\"nexus\",worker:$('Configuração').first().json.worker,limit:1} }) }}"
+        "jsonBody": "={{ ({action:'reserve_tasks',payload:{destination:\"nexus\",worker:$('Configuração').first().json.worker,worker_lease_token:$json.workerToken,limit:1} }) }}"
       },
       "retryOnFail": false,
       "credentials": {
@@ -99,7 +99,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "if(!$json.tasks?.length)return [];return $json.tasks.map(t=>({json:t}));"
+        "jsCode": "const state=$('Orçamento disponível').item.json;\nconst task=$json.tasks[0];\nif(!task||task.destination!==\"nexus\")throw new Error('pipeline_task_destination_invalid');\nconst cfg=$('Configuração').first().json;\nconst expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;\nreturn [{json:{...task,drain:state,destinationVerified:task.configured_destination===expected}}];"
       }
     },
     {
@@ -230,6 +230,285 @@
         }
       },
       "retryOnFail": false
+    },
+    {
+      "id": "6d27a830-376a-52f9-a90a-58f0ff915be5",
+      "name": "Acordar nexus",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        800
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pamvet-exam-nexus-wakeup",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "pamvet-exam-nexus-wakeup",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "9b47cdc3-5021-51fa-a1e1-b815b067e5f2",
+      "name": "Reservar trabalhador exclusivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"worker_acquire\",payload:{stage:$('Configuração').first().json.pipelineStage,worker:$('Configuração').first().json.worker,lease_seconds:660} }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "5bcc8db0-82e0-5983-a59e-2b3930363e1d",
+      "name": "Trabalhador reservado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.claimed === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3d32e541-a1c3-56ee-a522-6fd8243de268",
+      "name": "Iniciar rodada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        800
+      ],
+      "parameters": {
+        "jsCode": "function startPipelineDrain(stage, worker, lease, now = Date.now()) {\n  if (!['processing','group','nexus','rename','reconcile'].includes(stage) || typeof worker !== 'string' || !worker ||\n      lease?.claimed !== true || typeof lease.lease_token !== 'string' || !lease.lease_token || !Number.isFinite(now) ||\n      !Number.isFinite(Date.parse(lease.lease_until)) || Date.parse(lease.lease_until) < now + 600000)\n    throw new Error('pipeline_worker_lease_unproven');\n  return {stage,worker,workerToken:lease.lease_token,startedAt:now,count:0,maxTasks:4,maxSeconds:180};\n}\nreturn [{json:startPipelineDrain($('Configuração').first().json.pipelineStage,$('Configuração').first().json.worker,$json)}];"
+      }
+    },
+    {
+      "id": "9912a6b5-993b-5194-a789-7c9c6bef1c99",
+      "name": "Orçamento disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.count < 4 && Date.now() - $json.startedAt < 180000 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b9f3c714-bffb-58aa-a805-83349ebd0a79",
+      "name": "Liberar trabalhador exclusivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        1040
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"worker_release\",payload:{stage:$('Iniciar rodada').first().json.stage,lease_token:$('Iniciar rodada').first().json.workerToken} }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "0638d0f6-63d8-587b-a46a-687c79ec3f43",
+      "name": "Há tarefa reservada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ Array.isArray($json.tasks) && $json.tasks.length === 1 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "365717c5-2985-5829-a4b9-930121ef708e",
+      "name": "Preparar próxima tarefa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        800
+      ],
+      "parameters": {
+        "jsCode": "function pipelineDrainAvailable(state, now = Date.now()) {\n  if (!state || !Number.isFinite(state.startedAt) || !Number.isInteger(state.count) || state.count < 0 ||\n      state.maxTasks !== 4 || state.maxSeconds !== 180 || typeof state.workerToken !== 'string' || !state.workerToken ||\n      !Number.isFinite(now) || now < state.startedAt) throw new Error('pipeline_drain_state_invalid');\n  return state.count < state.maxTasks && now - state.startedAt < state.maxSeconds * 1000;\n}\nfunction advancePipelineDrain(state, receipt, taskId) {\n  pipelineDrainAvailable(state);\n  if (!taskId || receipt?.task?.id !== taskId || !['completed','sent','submitted','uncertain','failed'].includes(receipt.task.status))\n    throw new Error('pipeline_task_outcome_unproven');\n  return {...state,count:state.count + 1};\n}\nconst task=$('Tarefa disponível').item.json;return [{json:advancePipelineDrain(task.drain,$json,task.id)}];"
+      }
+    },
+    {
+      "id": "f15272c7-e1da-59fc-afd0-f02455c9dbef",
+      "name": "Restaurar rodada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        800
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Iniciar rodada').first().json}];"
+      }
+    },
+    {
+      "id": "51151001-d3fb-5527-a6d9-8230750cce49",
+      "name": "Continuar fila após orçamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        1040
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"worker_release\",payload:{stage:$('Iniciar rodada').first().json.stage,lease_token:$('Iniciar rodada').first().json.workerToken,continue:$json.count>0} }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
     }
   ],
   "connections": {
@@ -237,7 +516,7 @@
       "main": [
         [
           {
-            "node": "Reconciliar reservas vencidas",
+            "node": "Reservar trabalhador exclusivo",
             "type": "main",
             "index": 0
           }
@@ -248,7 +527,7 @@
       "main": [
         [
           {
-            "node": "Tarefa disponível",
+            "node": "Há tarefa reservada",
             "type": "main",
             "index": 0
           }
@@ -290,7 +569,13 @@
     },
     "Anexar e verificar no backend": {
       "main": [
-        [],
+        [
+          {
+            "node": "Preparar próxima tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Registrar falha de anexação",
@@ -304,7 +589,121 @@
       "main": [
         [
           {
+            "node": "Restaurar rodada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acordar nexus": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar trabalhador exclusivo": {
+      "main": [
+        [
+          {
+            "node": "Trabalhador reservado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trabalhador reservado": {
+      "main": [
+        [
+          {
+            "node": "Iniciar rodada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Orçamento disponível": {
+      "main": [
+        [
+          {
             "node": "Reservar tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Continuar fila após orçamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Há tarefa reservada": {
+      "main": [
+        [
+          {
+            "node": "Tarefa disponível",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Liberar trabalhador exclusivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar próxima tarefa": {
+      "main": [
+        [
+          {
+            "node": "Orçamento disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iniciar rodada": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar reservas vencidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar rodada": {
+      "main": [
+        [
+          {
+            "node": "Orçamento disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar falha de anexação": {
+      "main": [
+        [
+          {
+            "node": "Preparar próxima tarefa",
             "type": "main",
             "index": 0
           }
@@ -318,7 +717,7 @@
     "saveDataErrorExecution": "none",
     "saveManualExecutions": false,
     "saveExecutionProgress": false,
-    "executionTimeout": 900,
+    "executionTimeout": 600,
     "timezone": "America/Sao_Paulo"
   },
   "pinData": {}

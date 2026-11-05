@@ -47,7 +47,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "// Referências de credenciais são selecionadas nos HTTPs. Corte e enabled são a única liberação deste fluxo.\nconst cfg={\n  \"enabled\": false,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"mailbox\": \"exames@example.invalid\",\n  \"driveFolderId\": \"SELECT_PRIVATE_DRIVE_FOLDER\",\n  \"intakeCutoff\": \"\",\n  \"notificationCutoff\": \"\",\n  \"manualMessageId\": \"\",\n  \"dedicatedMailbox\": false,\n  \"allowedSenders\": [],\n  \"examSubjectHints\": [\n    \"exame\",\n    \"laudo\",\n    \"resultados do atendimento\",\n    \"resultado de exame\",\n    \"hemograma\",\n    \"ultrassom\"\n  ],\n  \"maxBytes\": 20971520,\n  \"maxMimeDepth\": 8,\n  \"maxPages\": 100,\n  \"includeSpamTrash\": false,\n  \"worker\": \"n8n-exames-operacional\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"pamLaudosBaseUrl\": \"https://pamlaudos.example.invalid\",\n  \"allowHttpChatwoot\": false,\n  \"providerConfirmationStatuses\": [\n    \"delivered\",\n    \"read\"\n  ],\n  \"extractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"extractorModel\": \"gpt-4.1\",\n  \"enableVision\": false,\n  \"fallbackExtractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"fallbackExtractorModel\": \"gpt-4o-mini\",\n  \"maxTextChars\": 80000,\n  \"maxProcessingPages\": 100\n};\nif(!cfg.enabled)throw new Error('EXAMES_OPERACIONAL_PAUSADO');\nif(!cfg.serviceUrl.startsWith('https://')||!cfg.serviceUrl.endsWith('/functions/v1/exam-document-service')||!cfg.pamLaudosBaseUrl.startsWith('https://'))throw new Error('Configuração de serviço/painel inválida');\nif(!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(cfg.intakeCutoff)||!Number.isFinite(Date.parse(cfg.intakeCutoff)))throw new Error('Defina o marco de corte do coletor legado');\nif(!cfg.driveFolderId||typeof cfg.includeSpamTrash!=='boolean')throw new Error('Destino Drive inválido');\nif(cfg.notificationCutoff!==cfg.intakeCutoff||!cfg.groupJid.endsWith('@g.us')||!cfg.accountId||!cfg.inboxId||!cfg.conversationId)throw new Error('Destino do grupo ou marco de aviso inválido');\nif(cfg.manualMessageId&&$execution.mode!=='test')throw new Error('Seleção de mensagem só pode ser usada manualmente');\nif(cfg.manualMessageId&&!/^[a-f0-9]{8,64}$/i.test(cfg.manualMessageId))throw new Error('ID de mensagem manual inválido');\ncfg.worker+=':'+$execution.id;\ncfg.maxPages=cfg.maxPages;\nreturn [{json:cfg}];"
+        "jsCode": "// Referências de credenciais são selecionadas nos HTTPs. Corte e enabled são a única liberação deste fluxo.\nconst cfg={\n  \"enabled\": false,\n  \"serviceUrl\": \"https://PROJECT_REF.supabase.co/functions/v1/exam-document-service\",\n  \"mailbox\": \"exames@example.invalid\",\n  \"driveFolderId\": \"SELECT_PRIVATE_DRIVE_FOLDER\",\n  \"intakeCutoff\": \"\",\n  \"notificationCutoff\": \"\",\n  \"manualMessageId\": \"\",\n  \"dedicatedMailbox\": false,\n  \"allowedSenders\": [],\n  \"examSubjectHints\": [\n    \"exame\",\n    \"laudo\",\n    \"resultados do atendimento\",\n    \"resultado de exame\",\n    \"hemograma\",\n    \"ultrassom\"\n  ],\n  \"maxBytes\": 20971520,\n  \"maxMimeDepth\": 8,\n  \"maxPages\": 100,\n  \"includeSpamTrash\": false,\n  \"worker\": \"n8n-exames-operacional\",\n  \"chatwootBaseUrl\": \"https://chatwoot.example.invalid\",\n  \"accountId\": null,\n  \"inboxId\": null,\n  \"conversationId\": null,\n  \"groupJid\": \"\",\n  \"pamLaudosBaseUrl\": \"https://pamlaudos.example.invalid\",\n  \"allowHttpChatwoot\": false,\n  \"providerConfirmationStatuses\": [\n    \"delivered\",\n    \"read\"\n  ],\n  \"extractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"extractorModel\": \"gpt-4.1\",\n  \"enableVision\": false,\n  \"fallbackExtractorUrl\": \"https://api.openai.com/v1/chat/completions\",\n  \"fallbackExtractorModel\": \"gpt-4o-mini\",\n  \"maxTextChars\": 80000,\n  \"maxProcessingPages\": 100\n};\nif(!cfg.enabled)throw new Error('EXAMES_OPERACIONAL_PAUSADO');\nif(!cfg.serviceUrl.startsWith('https://')||!cfg.serviceUrl.endsWith('/functions/v1/exam-document-service')||!cfg.pamLaudosBaseUrl.startsWith('https://'))throw new Error('Configuração de serviço/painel inválida');\nif(!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(cfg.intakeCutoff)||!Number.isFinite(Date.parse(cfg.intakeCutoff)))throw new Error('Defina o marco de corte do coletor legado');\nif(!cfg.driveFolderId||typeof cfg.includeSpamTrash!=='boolean')throw new Error('Destino Drive inválido');\nif(cfg.notificationCutoff!==cfg.intakeCutoff||!cfg.groupJid.endsWith('@g.us')||!cfg.accountId||!cfg.inboxId||!cfg.conversationId)throw new Error('Destino do grupo ou marco de aviso inválido');\nif(cfg.manualMessageId&&$execution.mode!=='test')throw new Error('Seleção de mensagem só pode ser usada manualmente');\nif(cfg.manualMessageId&&!/^[a-f0-9]{8,64}$/i.test(cfg.manualMessageId))throw new Error('ID de mensagem manual inválido');\ncfg.worker+=':'+$execution.id;\ncfg.maxPages=cfg.maxPages;\ncfg.pipelineStage=$json.__pipelineStage||\"group\";\nif(![\"group\",\"reconcile\"].includes(cfg.pipelineStage))throw new Error('pipeline_stage_invalid');\nreturn [{json:cfg}];"
       }
     },
     {
@@ -79,7 +79,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({action:\"reserve_tasks\",payload:{destination:\"group\",worker:$('Configuração').first().json.worker,limit:1} }) }}"
+        "jsonBody": "={{ ({action:'reserve_tasks',payload:{destination:\"group\",worker:$('Configuração').first().json.worker,worker_lease_token:$json.workerToken,limit:1} }) }}"
       },
       "retryOnFail": false,
       "credentials": {
@@ -99,7 +99,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "if(!$json.tasks?.length)return [];\nconst cfg=$('Configuração').first().json;\nconst expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;\nreturn $json.tasks.map(t=>({json:{...t,destinationVerified:t.configured_destination===expected}}));"
+        "jsCode": "const state=$('Orçamento disponível').item.json;\nconst task=$json.tasks[0];\nif(!task||task.destination!==\"group\")throw new Error('pipeline_task_destination_invalid');\nconst cfg=$('Configuração').first().json;\nconst expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;\nreturn [{json:{...task,drain:state,destinationVerified:task.configured_destination===expected}}];"
       }
     },
     {
@@ -148,7 +148,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const cfg=$('Configuração').first().json;\nconst contact=$json.meta?.sender||$json.contact||{};\nconst identifier=contact.identifier||$json.contact_inbox?.source_id||$json.meta?.sender?.additional_attributes?.jid;\nif(Number($json.inbox_id)!==Number(cfg.inboxId)||Number($json.id)!==Number(cfg.conversationId)||identifier!==cfg.groupJid)throw new Error('Conversa não confere com inbox/JID verificados.');\nreturn [{json:cfg}];\n"
+        "jsCode": "const cfg=$('Configuração').first().json;\nconst contact=$json.meta?.sender||$json.contact||{};\nconst identifier=contact.identifier||$json.contact_inbox?.source_id||$json.meta?.sender?.additional_attributes?.jid;\nif(Number($json.inbox_id)!==Number(cfg.inboxId)||Number($json.id)!==Number(cfg.conversationId)||identifier!==cfg.groupJid)throw new Error('Conversa não confere com inbox/JID verificados.');\nreturn [{json:$('Iniciar rodada').first().json}];\n"
       }
     },
     {
@@ -199,7 +199,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "function examPresentation(document, baseUrl) {\n  const confirmed = {...(document.confirmed_data || {})};\n  if (!Object.hasOwn(confirmed, 'client_name') && Object.hasOwn(confirmed, 'tutor_name')) confirmed.client_name = confirmed.tutor_name;\n  const fields = document.notification_fields || {...(document.extracted_data || {}), ...confirmed};\n  const clean = value => typeof value === 'string' ? value.normalize('NFC').replace(/[\\x00-\\x1f\\x7f]/g, ' ').replace(/\\s+/g, ' ').trim() : '';\n  const text = value => clean(value).replace(/[*_`~]/g, '').trim();\n  const filePart = (value, fallback, length) => (clean(value).replace(/[\\\\/:*?\"<>|]/g, ' ').replace(/\\s+/g, ' ').trim() || fallback).slice(0, length);\n  const examDate = typeof fields.exam_date === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(fields.exam_date) && Number.isFinite(Date.parse(fields.exam_date + 'T00:00:00Z')) && new Date(fields.exam_date + 'T00:00:00Z').toISOString().slice(0, 10) === fields.exam_date ? fields.exam_date : null;\n  const dateLabel = examDate ? examDate.slice(8, 10) + '/' + examDate.slice(5, 7) + '/' + examDate.slice(0, 4) : '';\n  const missingFields = ['pet_name', 'client_name', 'exam_type'].filter(field => !/[\\p{L}\\p{N}]/u.test(text(fields[field])));\n  if (!examDate) missingFields.push('exam_date');\n  const present = field => !missingFields.includes(field);\n  // Only the resolved clinical assignment may be announced as responsible.\n  // Raw requester text or an authenticated actor is not a clinical assignment.\n  const responsible = document.responsible_vet_id && document.responsible_vet_source !== 'conflict' ? text(document.responsible_vet_name) : '';\n  const fileName = ([present('pet_name') ? filePart(fields.pet_name, '', 300) : null, present('client_name') ? filePart(fields.client_name, '', 300) : null, present('exam_type') ? filePart(fields.exam_type, '', 300) : null, dateLabel ? dateLabel.replace(/\\//g, '-') : null].filter(Boolean).join(' - ') || 'Exame') + '.pdf';\n  let shortUrl = null;\n  if (baseUrl) {\n    if (typeof document.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(document.id)) throw new Error('Identificador do documento inválido');\n    shortUrl = baseUrl.replace(/\\/$/, '') + '/e/' + Buffer.from(document.id.replace(/-/g, ''), 'hex').toString('base64url');\n  }\n  let received = '';\n  if (document.received_at && Number.isFinite(Date.parse(document.received_at))) {\n    received = new Intl.DateTimeFormat('pt-BR', {timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).format(new Date(document.received_at)).replace(', ', ' às ');\n  }\n  const vetName = responsible.replace(/^(?:dra?\\.?|doutora?)\\s+/iu, '').split(/\\s+/).slice(0, 2).join(' ');\n  const patient = present('pet_name') ? text(fields.pet_name) : 'Exame';\n  const tutor = present('client_name') ? ' (' + text(fields.client_name) + ')' : '';\n  const content = [\n    '🧪 *' + patient + tutor + '*',\n    present('exam_type') ? '🔬 ' + text(fields.exam_type) : null,\n    dateLabel ? '📅 Exame: ' + dateLabel : null,\n    vetName ? '👩‍⚕️ ' + vetName : null,\n    shortUrl ? '🔗 ' + shortUrl : null,\n    received ? '_Recebido em ' + received + '_' : null,\n  ].filter(line => line !== null).join('\\n');\n  return {ready: missingFields.length === 0, missingFields, fileName, content, shortUrl};\n}\nconst crypto=require('crypto');\nconst bytes=await this.helpers.getBinaryDataBuffer(0,'data');\nconst cfg=$('Configuração').first().json;const task=$('Tarefa disponível').item.json;const doc=task.document;\nif(!bytes.length||bytes.length>cfg.maxBytes||!bytes.subarray(0,1024).includes(Buffer.from('%PDF-')))throw new Error('PDF vazio, inválido ou fora do limite.');\nif(crypto.createHash('sha256').update(bytes).digest('hex')!==doc.sha256||bytes.length!==Number(doc.size_bytes))throw new Error('PDF para grupo sem integridade comprovada.');\nconst presentation=examPresentation({...doc,notification_fields:task.notification_fields||doc.notification_fields},cfg.pamLaudosBaseUrl);\nconst correlation='[EXAM:'+doc.id+':DELIVERY:'+task.id+']';\nconst contentAttributes={pamvet_exam_document_id:doc.id,pamvet_exam_delivery_id:task.id,pamvet_exam_sha256:doc.sha256};\nconst binary=$input.first().binary;binary.data.fileName=presentation.fileName;binary.data.mimeType='application/pdf';\nreturn [{json:{task,correlation,contentAttributes,content:presentation.content,verified:true},binary}];\n"
+        "jsCode": "function examPresentation(document, baseUrl) {\n  const confirmed = {...(document.confirmed_data || {})};\n  if (!Object.hasOwn(confirmed, 'client_name') && Object.hasOwn(confirmed, 'tutor_name')) confirmed.client_name = confirmed.tutor_name;\n  const fields = document.notification_fields || {...(document.extracted_data || {}), ...confirmed};\n  const clean = value => typeof value === 'string' ? value.normalize('NFC').replace(/[\\x00-\\x1f\\x7f]/g, ' ').replace(/\\s+/g, ' ').trim() : '';\n  const text = value => clean(value).replace(/[*_`~]/g, '').trim();\n  const filePart = (value, fallback, length) => (clean(value).replace(/[\\\\/:*?\"<>|]/g, ' ').replace(/\\s+/g, ' ').trim() || fallback).slice(0, length);\n  const examDate = typeof fields.exam_date === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(fields.exam_date) && Number.isFinite(Date.parse(fields.exam_date + 'T00:00:00Z')) && new Date(fields.exam_date + 'T00:00:00Z').toISOString().slice(0, 10) === fields.exam_date ? fields.exam_date : null;\n  const dateLabel = examDate ? examDate.slice(8, 10) + '/' + examDate.slice(5, 7) + '/' + examDate.slice(0, 4) : '';\n  const missingFields = ['pet_name', 'client_name', 'exam_type'].filter(field => !/[\\p{L}\\p{N}]/u.test(text(fields[field])));\n  if (!examDate) missingFields.push('exam_date');\n  const present = field => !missingFields.includes(field);\n  // Only the resolved clinical assignment may be announced as responsible.\n  // Raw requester text or an authenticated actor is not a clinical assignment.\n  const responsible = document.responsible_vet_id && document.responsible_vet_source !== 'conflict' ? text(document.responsible_vet_name) : '';\n  const fileName = ([present('pet_name') ? filePart(fields.pet_name, '', 300) : null, present('client_name') ? filePart(fields.client_name, '', 300) : null, present('exam_type') ? filePart(fields.exam_type, '', 300) : null, dateLabel ? dateLabel.replace(/\\//g, '-') : null].filter(Boolean).join(' - ') || 'Exame') + '.pdf';\n  let shortUrl = null;\n  if (baseUrl) {\n    if (typeof document.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(document.id)) throw new Error('Identificador do documento inválido');\n    shortUrl = baseUrl.replace(/\\/$/, '') + '/e/' + Buffer.from(document.id.replace(/-/g, ''), 'hex').toString('base64url');\n  }\n  let received = '';\n  if (document.received_at && Number.isFinite(Date.parse(document.received_at))) {\n    received = new Intl.DateTimeFormat('pt-BR', {timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).format(new Date(document.received_at)).replace(', ', ' às ');\n  }\n  const vetName = responsible.replace(/^(?:dra?\\.?|doutora?)\\s+/iu, '').split(/\\s+/).slice(0, 2).join(' ');\n  const patient = present('pet_name') ? text(fields.pet_name) : 'Exame';\n  const tutor = present('client_name') ? ' (' + text(fields.client_name) + ')' : '';\n  const content = [\n    '🧪 *' + patient + tutor + '*',\n    present('exam_type') ? '🔬 ' + text(fields.exam_type) : null,\n    dateLabel ? '📅 Exame: ' + dateLabel : null,\n    vetName ? '👩‍⚕️ ' + vetName : null,\n    shortUrl ? '🔗 ' + shortUrl : null,\n    received ? '_Recebido em ' + received + '_' : null,\n  ].filter(line => line !== null).join('\\n');\n  return {ready: missingFields.length === 0, missingFields, fileName, content, shortUrl};\n}\nconst crypto=require('crypto');\nconst bytes=await this.helpers.getBinaryDataBuffer(0,'data');\nconst cfg=$('Configuração').first().json;const task=$json.task;const doc=task.document;\nif(!bytes.length||bytes.length>cfg.maxBytes||!bytes.subarray(0,1024).includes(Buffer.from('%PDF-')))throw new Error('PDF vazio, inválido ou fora do limite.');\nif(crypto.createHash('sha256').update(bytes).digest('hex')!==doc.sha256||bytes.length!==Number(doc.size_bytes))throw new Error('PDF para grupo sem integridade comprovada.');\nconst presentation=examPresentation({...doc,notification_fields:task.notification_fields||doc.notification_fields},cfg.pamLaudosBaseUrl);\nconst correlation='[EXAM:'+doc.id+':DELIVERY:'+task.id+']';\nconst contentAttributes={pamvet_exam_document_id:doc.id,pamvet_exam_delivery_id:task.id,pamvet_exam_sha256:doc.sha256};\nconst binary=$input.first().binary;binary.data.fileName=presentation.fileName;binary.data.mimeType='application/pdf';\nreturn [{json:{task,correlation,contentAttributes,content:presentation.content,contentSha256:crypto.createHash('sha256').update(presentation.content).digest('hex'),verified:true},binary}];\n"
       },
       "onError": "continueErrorOutput"
     },
@@ -283,7 +283,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const context=$('Preparar PDF e correlação').item.json;\nconst response=$json;const status=Number(response.statusCode||0);const id=response.body?.id;\nlet outcome;\nif(status>=200&&status<300&&id)outcome={status:'submitted',external_id:String(id),external_status:String(response.body.status||'api_created')};\nelse if(status>=400&&status<500&&![408,409,429].includes(status))outcome={status:'failed',error:'Chatwoot rejeitou a submissão HTTP '+status,external_status:'rejected'};\nelse outcome={status:'uncertain',error:'Resposta de envio inconclusiva; reconciliar antes de qualquer novo POST',external_status:'response_unknown'};\noutcome.correlation=context.correlation;\nreturn [{json:{task:context.task,outcome}}];\n"
+        "jsCode": "function classifyGroupSubmission(context, response) {\n  const status = Number(response?.statusCode || 0), id = response?.body?.id;\n  // begin_dispatch has already fenced this attempt. Even a rejected response is\n  // reconciled; this path never makes a POST eligible for an automatic replay.\n  const outcome = status >= 200 && status < 300 && id\n    ? {status:'submitted',external_id:String(id),external_status:String(response.body.status || 'api_created')}\n    : {status:'uncertain',error:'Resposta de envio inconclusiva; reconciliar antes de qualquer novo POST',external_status:status >= 400 && status < 500 ? 'rejected' : 'response_unknown'};\n  outcome.correlation = context.correlation;\n  return {task:context.task,outcome};\n}\nreturn [{json:classifyGroupSubmission($('Preparar PDF e correlação').item.json,$json)}];"
       }
     },
     {
@@ -466,7 +466,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({action:\"reconcile\",payload:{} }) }}"
+        "jsonBody": "={{ ({action:'group_reconcile',payload:{worker:$('Configuração').first().json.worker,worker_lease_token:$('Iniciar rodada').first().json.workerToken,limit:4} }) }}"
       },
       "position": [
         900,
@@ -486,7 +486,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "parameters": {
-        "jsCode": "const cfg=$('Configuração').first().json;const expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;const tasks=$json.group_tasks||[];for(const task of tasks){if((task.configured_destination||task.destination_key)!==expected)throw new Error('Conferir o destino original da mensagem antes de continuar');}return tasks.length?tasks.map(json=>({json})):[{json:{empty:true}}];"
+        "jsCode": "const cfg=$('Configuração').first().json;const expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;const tasks=$json.tasks||[];for(const task of tasks){if((task.configured_destination||task.destination_key)!==expected)throw new Error('Conferir o destino original da mensagem antes de continuar');}const state=$('Iniciar rodada').first().json;return tasks.length?tasks.slice(0,4).map((task,index)=>({json:{...task,drain:{...state,count:index}}})):[{json:{empty:true}}];"
       },
       "position": [
         1120,
@@ -550,7 +550,7 @@
         "url": "={{ $('Configuração').first().json.chatwootBaseUrl+'/api/v1/accounts/'+$('Configuração').first().json.accountId+'/conversations/'+$('Configuração').first().json.conversationId+'/messages' }}",
         "authentication": "predefinedCredentialType",
         "options": {
-          "timeout": 30000,
+          "timeout": 10000,
           "redirect": {
             "redirect": {
               "followRedirects": false
@@ -633,7 +633,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({action:\"task_result\",payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token,outcome:$json.outcome} }) }}"
+        "jsonBody": "={{ ({action:'task_result',payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token,outcome:$json.outcome,reconciliation:true} }) }}"
       },
       "position": [
         2220,
@@ -646,6 +646,638 @@
         }
       },
       "retryOnFail": false
+    },
+    {
+      "id": "8724d621-f661-52a0-ae50-0b26d81654ca",
+      "name": "Acordar group",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        800
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pamvet-exam-group-wakeup",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "pamvet-exam-group-wakeup",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "060c3465-cde8-5f0f-a2a7-82f288542201",
+      "name": "Reservar trabalhador exclusivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"worker_acquire\",payload:{stage:$('Configuração').first().json.pipelineStage,worker:$('Configuração').first().json.worker,lease_seconds:660} }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "5bcdb815-bf0a-5674-a88c-507031dc2bf6",
+      "name": "Trabalhador reservado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.claimed === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3d030699-7182-5bf7-a236-f7932eb7f945",
+      "name": "Iniciar rodada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        800
+      ],
+      "parameters": {
+        "jsCode": "function startPipelineDrain(stage, worker, lease, now = Date.now()) {\n  if (!['processing','group','nexus','rename','reconcile'].includes(stage) || typeof worker !== 'string' || !worker ||\n      lease?.claimed !== true || typeof lease.lease_token !== 'string' || !lease.lease_token || !Number.isFinite(now) ||\n      !Number.isFinite(Date.parse(lease.lease_until)) || Date.parse(lease.lease_until) < now + 600000)\n    throw new Error('pipeline_worker_lease_unproven');\n  return {stage,worker,workerToken:lease.lease_token,startedAt:now,count:0,maxTasks:4,maxSeconds:180};\n}\nreturn [{json:startPipelineDrain($('Configuração').first().json.pipelineStage,$('Configuração').first().json.worker,$json)}];"
+      }
+    },
+    {
+      "id": "aa3dd270-a602-5bc4-a288-ea1acc094bbf",
+      "name": "Orçamento disponível",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.count < 4 && Date.now() - $json.startedAt < 180000 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e1b22f5b-c2c3-57a5-a969-0812624463e8",
+      "name": "Liberar trabalhador exclusivo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        1040
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"worker_release\",payload:{stage:$('Iniciar rodada').first().json.stage,lease_token:$('Iniciar rodada').first().json.workerToken} }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "8e3e7035-9b83-50e4-a7d7-32466b27b62c",
+      "name": "Há tarefa reservada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ Array.isArray($json.tasks) && $json.tasks.length === 1 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "17b53ebf-97dc-5041-af56-9f7303c6c9b4",
+      "name": "Preparar próxima tarefa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        800
+      ],
+      "parameters": {
+        "jsCode": "function pipelineDrainAvailable(state, now = Date.now()) {\n  if (!state || !Number.isFinite(state.startedAt) || !Number.isInteger(state.count) || state.count < 0 ||\n      state.maxTasks !== 4 || state.maxSeconds !== 180 || typeof state.workerToken !== 'string' || !state.workerToken ||\n      !Number.isFinite(now) || now < state.startedAt) throw new Error('pipeline_drain_state_invalid');\n  return state.count < state.maxTasks && now - state.startedAt < state.maxSeconds * 1000;\n}\nfunction advancePipelineDrain(state, receipt, taskId) {\n  pipelineDrainAvailable(state);\n  if (!taskId || receipt?.task?.id !== taskId || !['completed','sent','submitted','uncertain','failed'].includes(receipt.task.status))\n    throw new Error('pipeline_task_outcome_unproven');\n  return {...state,count:state.count + 1};\n}\nconst task=$('Tarefa disponível').item.json;return [{json:advancePipelineDrain(task.drain,$json,task.id)}];"
+      }
+    },
+    {
+      "id": "f0c95938-5d7d-59c6-a04c-99154d3e41ac",
+      "name": "Acordar reconcile",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        1040
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pamvet-exam-reconcile-wakeup",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "pamvet-exam-reconcile-wakeup",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      }
+    },
+    {
+      "id": "efcf189c-b227-5027-a61a-e4b4567c7883",
+      "name": "Modo reconcile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        1040
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{__pipelineStage:\"reconcile\"}}];"
+      }
+    },
+    {
+      "id": "99725811-9c13-5878-adb4-1cc08ddde466",
+      "name": "Recuperar reconcile a cada 5 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -720,
+        1040
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bec4ee2e-1953-5ff4-ad1e-9a31113b2e49",
+      "name": "Rodada de confirmação",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.stage === \"reconcile\" }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1d9c362b-504e-52a2-a930-3de5c9dd187e",
+      "name": "Orçamento da confirmação",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        1280
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.drain.count < 4 && Date.now() - $json.drain.startedAt < 180000 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "635d6944-7357-5a6f-a9a2-219051d97508",
+      "name": "Conferir PDF para despacho",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        800
+      ],
+      "parameters": {
+        "jsCode": "const crypto=require('crypto');const task=$('Tarefa disponível').item.json;const bytes=await this.helpers.getBinaryDataBuffer(0,'data');const sha256=crypto.createHash('sha256').update(bytes).digest('hex');if(!bytes.length||bytes.length>$('Configuração').first().json.maxBytes||!bytes.subarray(0,1024).includes(Buffer.from('%PDF-'))||sha256!==task.document.sha256||bytes.length!==Number(task.document.size_bytes))throw new Error('group_pdf_integrity_invalid');return [{json:{task,verified:{documentId:task.document.id,sha256,sizeBytes:bytes.length}},binary:$input.first().binary}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "34e02b68-446c-5ea9-a9e8-dfce5862fb22",
+      "name": "Atualizar autorização de envio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"group_prepare\",payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token} }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "77aa40fa-0e13-55ca-af63-491dff613a24",
+      "name": "Despacho pronto",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.dispatch_ready === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5ea15484-a54a-54cb-aba2-db0cd12ea12b",
+      "name": "Restaurar PDF validado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        800
+      ],
+      "parameters": {
+        "jsCode": "function freshGroupTask(reserved, prepared, verified, config) {\n  const fresh = prepared?.task;\n  const expected = 'chatwoot:'+config.accountId+':'+config.inboxId+':'+config.conversationId+':'+config.groupJid;\n  if (prepared?.dispatch_ready !== true || !fresh || fresh.id !== reserved?.id || fresh.lease_token !== reserved.lease_token ||\n      fresh.document?.id !== reserved.document?.id || fresh.document?.id !== verified?.documentId ||\n      fresh.document?.sha256 !== verified.sha256 || Number(fresh.document?.size_bytes) !== verified.sizeBytes ||\n      fresh.configured_destination !== expected || prepared.presentation_revision === undefined || prepared.presentation_revision === null)\n    throw new Error('group_fresh_dispatch_unproven');\n  return {...fresh,drain:reserved.drain,presentation_revision:prepared.presentation_revision,destinationVerified:true};\n}\nconst checked=$('Conferir PDF para despacho').item;const task=freshGroupTask(checked.json.task,$json,checked.json.verified,$('Configuração').first().json);return [{json:{task},binary:checked.binary}];"
+      }
+    },
+    {
+      "id": "eb9acbba-bfa1-50a7-af89-c9fcfce58d57",
+      "name": "Registrar início do envio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"group_begin\",payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token,presentation_revision:$json.task.presentation_revision,content:$json.content} }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "fa8e7dad-0f9b-56a7-a6fe-c921679ae0d8",
+      "name": "POST autorizado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3120,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.dispatch_allowed === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b6bf5c5b-d422-56fc-a1b2-32ec5e96e78e",
+      "name": "Restaurar conteúdo autorizado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        800
+      ],
+      "parameters": {
+        "jsCode": "if($json.dispatch_allowed!==true)throw new Error('group_post_not_authorized');return [$('Preparar PDF e correlação').item];"
+      }
+    },
+    {
+      "id": "ea3f040e-16f6-59d7-a7eb-503c6cd7625b",
+      "name": "Continuar fila após orçamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        1040
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuração').first().json.serviceUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({action:\"worker_release\",payload:{stage:$('Iniciar rodada').first().json.stage,lease_token:$('Iniciar rodada').first().json.workerToken,continue:$json.count>0} }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SELECT_WORKER_HEADER",
+          "name": "Select exam worker header"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "ca2bdc49-8ebc-5fca-a756-dd7c4c78d5cf",
+      "name": "Continuar confirmação após orçamento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        1440
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$json.drain}];"
+      }
+    },
+    {
+      "id": "613f7545-79e0-5ad3-adad-964a02135d7c",
+      "name": "Concluir rodada de confirmação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1440
+      ],
+      "parameters": {
+        "jsCode": "const count=$('Mensagens aguardando confirmação').all().filter(item=>!item.json.empty).length;return [{json:{...$('Iniciar rodada').first().json,count}}];"
+      }
+    },
+    {
+      "id": "e4300be8-6acb-5a8c-afc5-a5fe09a2610e",
+      "name": "Lote de confirmação completo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        1440
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pipeline-condition",
+              "leftValue": "={{ $json.count >= 4 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
     }
   ],
   "connections": {
@@ -653,7 +1285,7 @@
       "main": [
         [
           {
-            "node": "Chatwoot - conferir conversa destino",
+            "node": "Reservar trabalhador exclusivo",
             "type": "main",
             "index": 0
           }
@@ -664,7 +1296,7 @@
       "main": [
         [
           {
-            "node": "Tarefa disponível",
+            "node": "Há tarefa reservada",
             "type": "main",
             "index": 0
           }
@@ -686,7 +1318,7 @@
       "main": [
         [
           {
-            "node": "Reconciliar reservas e mensagens",
+            "node": "Rodada de confirmação",
             "type": "main",
             "index": 0
           }
@@ -726,7 +1358,7 @@
       "main": [
         [
           {
-            "node": "Preparar PDF e correlação",
+            "node": "Conferir PDF para despacho",
             "type": "main",
             "index": 0
           }
@@ -762,7 +1394,7 @@
       "main": [
         [
           {
-            "node": "Chatwoot - enviar PDF único",
+            "node": "Registrar início do envio",
             "type": "main",
             "index": 0
           }
@@ -846,7 +1478,7 @@
       "main": [
         [
           {
-            "node": "Reservar tarefa",
+            "node": "Concluir rodada de confirmação",
             "type": "main",
             "index": 0
           }
@@ -864,7 +1496,7 @@
       "main": [
         [
           {
-            "node": "Chatwoot - consultar mensagens existentes",
+            "node": "Orçamento da confirmação",
             "type": "main",
             "index": 0
           }
@@ -910,6 +1542,327 @@
           }
         ]
       ]
+    },
+    "Acordar group": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar trabalhador exclusivo": {
+      "main": [
+        [
+          {
+            "node": "Trabalhador reservado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trabalhador reservado": {
+      "main": [
+        [
+          {
+            "node": "Iniciar rodada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Orçamento disponível": {
+      "main": [
+        [
+          {
+            "node": "Reservar tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Continuar fila após orçamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Há tarefa reservada": {
+      "main": [
+        [
+          {
+            "node": "Tarefa disponível",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Liberar trabalhador exclusivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar próxima tarefa": {
+      "main": [
+        [
+          {
+            "node": "Orçamento disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acordar reconcile": {
+      "main": [
+        [
+          {
+            "node": "Modo reconcile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modo reconcile": {
+      "main": [
+        [
+          {
+            "node": "Configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iniciar rodada": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - conferir conversa destino",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rodada de confirmação": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar reservas e mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Orçamento disponível",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orçamento da confirmação": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - consultar mensagens existentes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Continuar confirmação após orçamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conferir PDF para despacho": {
+      "main": [
+        [
+          {
+            "node": "Atualizar autorização de envio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha confirmada antes do POST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar autorização de envio": {
+      "main": [
+        [
+          {
+            "node": "Despacho pronto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Despacho pronto": {
+      "main": [
+        [
+          {
+            "node": "Restaurar PDF validado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Liberar trabalhador exclusivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar PDF validado": {
+      "main": [
+        [
+          {
+            "node": "Preparar PDF e correlação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar início do envio": {
+      "main": [
+        [
+          {
+            "node": "POST autorizado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST autorizado": {
+      "main": [
+        [
+          {
+            "node": "Restaurar conteúdo autorizado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Liberar trabalhador exclusivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar conteúdo autorizado": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot - enviar PDF único",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persistir tentativa de grupo": {
+      "main": [
+        [
+          {
+            "node": "Preparar próxima tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falha confirmada antes do POST": {
+      "main": [
+        [
+          {
+            "node": "Preparar próxima tarefa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recuperar reconcile a cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "Modo reconcile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continuar confirmação após orçamento": {
+      "main": [
+        [
+          {
+            "node": "Continuar fila após orçamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Concluir rodada de confirmação": {
+      "main": [
+        [
+          {
+            "node": "Lote de confirmação completo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lote de confirmação completo": {
+      "main": [
+        [
+          {
+            "node": "Continuar fila após orçamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Liberar trabalhador exclusivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -918,7 +1871,7 @@
     "saveDataErrorExecution": "none",
     "saveManualExecutions": false,
     "saveExecutionProgress": false,
-    "executionTimeout": 900,
+    "executionTimeout": 600,
     "timezone": "America/Sao_Paulo"
   },
   "pinData": {}

@@ -110,11 +110,17 @@ const source=await readFile(new URL('../functions/exam-document-service/index.ts
 const intakeSource=await readFile(new URL('../functions/exam-document-service/intake-service-routes.ts',import.meta.url),'utf8');
 const intakeExports={};
 vm.runInNewContext(ts.transpileModule(intakeSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:intakeExports,TextEncoder});
+const pipelineExports={};
+const pipelineSource=await readFile(new URL('../functions/exam-document-service/pipeline-service-routes.ts',import.meta.url),'utf8');
+vm.runInNewContext(ts.transpileModule(pipelineSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:pipelineExports,TextEncoder,URL,AbortSignal,fetch:async()=>{throw new Error('Unexpected pipeline transport in handler fixture')}});
+const jevObserverExports={};
+const jevObserverSource=await readFile(new URL('../functions/exam-document-service/jev-observer-service.ts',import.meta.url),'utf8');
+vm.runInNewContext(ts.transpileModule(jevObserverSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:jevObserverExports});
 const monitorAuthExports={};
 const monitorAuthSource=await readFile(new URL('../functions/exam-document-service/intake-monitor-auth.ts',import.meta.url),'utf8');
 vm.runInNewContext(ts.transpileModule(monitorAuthSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:monitorAuthExports});
 const script=ts.transpileModule(source.replace(/^import .*;\s*$/gm,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
-vm.runInNewContext(script,{...monitorAuthExports,intakeActions:intakeExports.intakeActions,runIntakeAction:intakeExports.runIntakeAction,selectExamSupabasePrivilegedKey:keyExports.selectExamSupabasePrivilegedKey,createClient:(_url,key)=>{clientKeys.push(key);return client},Deno:{env:{get:k=>env.get(k)},serve(fn){handler=fn}},Request,Response,File,Blob,FormData,URL,URLSearchParams,
+vm.runInNewContext(script,{...pipelineExports,...jevObserverExports,...monitorAuthExports,intakeActions:intakeExports.intakeActions,runIntakeAction:intakeExports.runIntakeAction,selectExamSupabasePrivilegedKey:keyExports.selectExamSupabasePrivilegedKey,createClient:(_url,key)=>{clientKeys.push(key);return client},Deno:{env:{get:k=>env.get(k)},serve(fn){handler=fn}},Request,Response,File,Blob,FormData,URL,URLSearchParams,
   crypto,TextDecoder,TextEncoder,Uint8Array,ArrayBuffer,Date,
   ComposioOriginalError:readerExports.ComposioOriginalError,
   console:{warn:(...args)=>readWarnings.push(args)},
@@ -188,6 +194,55 @@ await check('malformed raw scheme, length and whitespace cannot become worker au
 await check('expired/unknown user tokens are refused',async()=>assert.equal((await request('file',{document_id:documentId},'invalid-user')).status,401));
 await check('authenticated outsider cannot retrieve clinical PDF',async()=>assert.equal((await request('file',{document_id:documentId},'fixture-outsider-token')).status,403));
 await check('member cannot use ingestion/service actions',async()=>assert.equal((await request('reserve_source',{},'fixture-user-token')).status,403));
+await check('pipeline claims, dispatch and rename remain worker-only and outside monitor scope',async()=>{
+  for(const action of pipelineExports.pipelineActions) {
+    assert.equal((await request(action,{},'fixture-user-token')).status,403);
+  }
+  assert.equal(calls.length,0);
+  env.set('EXAM_INTAKE_MONITOR_API_KEY','e'.repeat(64));
+  assert.equal((await monitorRequest('worker_acquire',{stage:'group',worker:'n8n:123'})).status,403);
+  assert.equal(calls.length,0);
+});
+await check('pipeline reserve uses its global fence while the legacy consumer remains compatible',async()=>{
+  assert.equal((await request('reserve_tasks',{destination:'group',worker:'n8n:123',worker_lease_token:token})).status,200);
+  assert.equal(calls[0].name,'reserve_exam_pipeline_tasks');assert.equal(calls[0].args.p_worker_lease_token,token);
+  calls.length=0;
+  assert.equal((await request('reserve_tasks',{destination:'group',worker:'legacy:123'})).status,200);
+  assert.equal(calls[0].name,'reserve_exam_document_delivery');
+});
+await check('actual pipeline handler hashes the caption before obtaining the unique dispatch grant',async()=>{
+  const caption='🧪 Exame sintético';
+  assert.equal((await request('group_begin',{delivery_id:taskId,lease_token:token,presentation_revision:'a'.repeat(32),content:caption})).status,200);
+  assert.equal(calls.length,1);assert.equal(calls[0].name,'begin_exam_group_dispatch');
+  assert.equal(calls[0].args.p_content_sha256,Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(caption))).toString('hex'));
+});
+await check('JEV observer reserve and begin reach only their fenced RPCs with the existing worker credential',async()=>{
+  assert.equal((await request('jev_observe_reserve',{worker:'n8n:observer-fixture',model:'ignored',enabled:true})).status,200);
+  assert.equal((await request('jev_observe_begin',{observation_id:taskId,lease_token:token,document_id:documentId})).status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[
+    {op:'rpc',name:'reserve_exam_jev_observation',args:{p_worker:'n8n:observer-fixture'}},
+    {op:'rpc',name:'begin_exam_jev_observation',args:{p_observation_id:taskId,p_lease_token:token}},
+  ]);
+  assert.equal(authCalls.length,0);
+});
+await check('JEV observer refuses unauthenticated, member and monitor callers before any RPC',async()=>{
+  env.set('EXAM_INTAKE_MONITOR_API_KEY','e'.repeat(64));
+  for(const action of jevObserverExports.jevObserverActions){
+    assert.equal((await request(action,{},null)).status,401);
+    assert.equal((await request(action,{},'invalid-user')).status,401);
+    assert.equal((await request(action,{},'fixture-user-token')).status,403);
+    assert.equal((await monitorRequest(action,{})).status,403);
+  }
+  assert.equal(calls.length,0);
+});
+await check('JEV observer result strips provider bodies, patient fields and credentials before its ledger RPC',async()=>{
+  const safe={status:'completed',route:'general_extraction',confidence:0.9,cost_usd:0.001,duration_ms:12,model:'typesafe/jev-1.14',error_code:null};
+  const outcome={...safe,provider_body:{content:'synthetic PDF text'},patient_name:'synthetic patient',api_key:'synthetic-secret',request_text:'synthetic request'};
+  const result=await request('jev_observe_result',{observation_id:taskId,lease_token:token,outcome});
+  assert.equal(result.status,200);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{op:'rpc',name:'complete_exam_jev_observation',args:{p_observation_id:taskId,p_lease_token:token,p_outcome:safe}}]);
+  const body=await result.json();assert.deepEqual(body.args.p_outcome,safe);
+});
 await check('daily summary preview/reserve/begin/result are worker-only, including active members',async()=>{
   for(const action of ['pending_summary_preview','pending_summary_reserve','pending_summary_begin','pending_summary_result']){
     assert.equal((await request(action,{},'fixture-user-token')).status,403);

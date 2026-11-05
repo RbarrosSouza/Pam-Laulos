@@ -25,9 +25,17 @@ function field(value: unknown): string { if (typeof value !== 'string' || !value
 export function groupTask(row: Json): GroupTask {
   const doc = object(row.document);
   if (!['reserved', 'submitted', 'uncertain', 'sent'].includes(String(row.status))) throw new Error('fallback_group_status_invalid');
+  const fields = (value: unknown): Json | undefined => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).filter(([key]) => ['pet_name', 'client_name', 'tutor_name', 'exam_type', 'exam_date'].includes(key))
+      .map(([key, field]) => [key, typeof field === 'string' ? field : null])) : undefined;
+  const nullableText = (value: unknown): string | null => typeof value === 'string' ? value : null;
+  const revision = typeof row.presentation_revision === 'string' && /^[a-f\d]{32}$/.test(row.presentation_revision) ? row.presentation_revision : undefined;
   return { documentId: uuid(doc.id), deliveryId: uuid(row.id), leaseToken: uuid(row.lease_token), sha256: field(doc.sha256), sizeBytes: Number(doc.size_bytes),
     originalName: field(doc.original_name), receivedAt: field(doc.received_at), createdAt: field(row.created_at),
-    status: row.status as GroupTask['status'], externalId: row.external_id == null ? null : String(row.external_id), configuredDestination: field(row.configured_destination ?? row.destination_key) };
+    status: row.status as GroupTask['status'], externalId: row.external_id == null ? null : String(row.external_id), configuredDestination: field(row.configured_destination ?? row.destination_key),
+    notificationFields: fields(row.notification_fields), extractedData: fields(doc.extracted_data), confirmedData: fields(doc.confirmed_data),
+    responsibleVetId: nullableText(doc.responsible_vet_id), responsibleVetName: nullableText(doc.responsible_vet_name), responsibleVetSource: nullableText(doc.responsible_vet_source),
+    ...(revision ? { presentationRevision: revision } : {}) };
 }
 export async function recordDelivery(ports: FallbackPorts, task: GroupTask, outcome: DeliveryOutcome): Promise<void> {
   await ports.rpc('complete_exam_document_delivery', { p_delivery_id: task.deliveryId, p_lease_token: task.leaseToken, p_outcome: {
@@ -99,11 +107,23 @@ export async function processFallbackOrigin(origin: CollectedOrigin, worker: str
     }
     const claim = await ports.rpc('reserve_exam_fallback_group', { p_document_id: documentId, p_worker: worker, p_min_age_seconds: 120 });
     if (claim.claimed !== true) return { state: 'preserved', durable: true, attempted, documentId, code: typeof claim.reason === 'string' ? claim.reason : 'group_not_claimed' };
-    const task = groupTask(object(claim.task));
-    if (task.documentId !== documentId || task.sha256 !== pdf.sha256 || task.sizeBytes !== pdf.sizeBytes) throw new Error('fallback_group_bytes_mismatch');
+    const claimedTask = groupTask(object(claim.task));
+    if (claimedTask.documentId !== documentId || claimedTask.sha256 !== pdf.sha256 || claimedTask.sizeBytes !== pdf.sizeBytes) throw new Error('fallback_group_bytes_mismatch');
+    // Refresh the presentation only after proving the original. The v2 grant
+    // then detects human edits made during the provider preflight, before POST.
+    const prepared = await ports.rpc('prepare_exam_fallback_group_dispatch', { p_delivery_id: claimedTask.deliveryId, p_lease_token: claimedTask.leaseToken });
+    if (prepared.dispatch_ready !== true) return { state: 'preserved', durable: true, attempted, documentId,
+      code: typeof prepared.reason === 'string' ? prepared.reason : 'group_not_ready' };
+    const task = groupTask({ ...object(prepared.task), presentation_revision: prepared.presentation_revision });
+    if (!task.presentationRevision || task.documentId !== documentId || task.deliveryId !== claimedTask.deliveryId
+      || task.leaseToken !== claimedTask.leaseToken || task.configuredDestination !== claimedTask.configuredDestination
+      || task.sha256 !== pdf.sha256 || task.sizeBytes !== pdf.sizeBytes) throw new Error('fallback_fresh_presentation_unproven');
     const outcome = await transport.sendGroupOnce(task, pdf, { beginDispatch: async input => {
-      const result = await ports.rpc('begin_exam_fallback_group_dispatch', { p_delivery_id: input.deliveryId, p_lease_token: input.leaseToken, p_content_sha256: input.contentSha256 });
-      if (result.dispatch_allowed !== true && typeof result.reason === 'string' && result.reason.startsWith('primary_')) dispatchDeferred = result.reason;
+      if (input.deliveryId !== task.deliveryId || input.leaseToken !== task.leaseToken || input.presentationRevision !== task.presentationRevision) throw new Error('fallback_dispatch_snapshot_mismatch');
+      const result = await ports.rpc('begin_exam_fallback_group_dispatch_v2', { p_delivery_id: input.deliveryId, p_lease_token: input.leaseToken, p_content_sha256: input.contentSha256,
+        p_presentation_revision: task.presentationRevision });
+      if (result.dispatch_allowed === false) dispatchDeferred = typeof result.reason === 'string' && /^[a-z][a-z0-9_]{0,95}$/.test(result.reason)
+        ? result.reason : 'group_dispatch_deferred';
       return { dispatch_allowed: result.dispatch_allowed === true };
     } });
     await recordDelivery(ports, task, outcome);
@@ -119,5 +139,5 @@ export async function processFallbackOrigin(origin: CollectedOrigin, worker: str
 
 /** Waiting for the primary is not a failed attempt and must not grow a 15-minute backoff. */
 export function fallbackRetrySeconds(result: Pick<OriginResult, 'code'>, attempts: number): number {
-  return result.code?.startsWith('primary_') ? 60 : Math.min(900, 30 * 2 ** Math.min(attempts || 1, 5));
+  return result.code?.startsWith('primary_') || result.code === 'presentation_changed' ? 60 : Math.min(900, 30 * 2 ** Math.min(attempts || 1, 5));
 }
