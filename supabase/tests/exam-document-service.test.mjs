@@ -392,6 +392,30 @@ await check('published reaction routes retain worker RPC arguments after intake 
   for(const [action,payload,name,args] of requests){assert.equal((await request(action,payload)).status,200);assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{op:'rpc',name,args});}
   calls.length=0;assert.equal((await request('reaction_begin',{reaction_id:taskId,lease_token:token,actor_id:'7'})).status,400);assert.equal(calls.length,0);
 });
+await check('reaction reconciliation has a separate worker-only token and cannot dispatch',async()=>{
+  reset();
+  const proof={status:'confirmed',own_reaction_verified:true,evidence_complete:true,provider_contract:'pamvet_check_v1'};
+  const cases=[
+    ['reaction_reserve_reconciliations',{worker:'reconcile-worker',limit:3},'reserve_exam_contact_reconciliations',{p_worker:'reconcile-worker',p_limit:3}],
+    ['reaction_reconcile_result',{reaction_id:taskId,reconcile_token:token,outcome:proof},'record_exam_contact_reconciliation_result',{p_reaction_id:taskId,p_reconcile_token:token,p_outcome:proof}],
+  ];
+  for(const [action,payload,name,args] of cases){
+    calls.length=0;
+    assert.equal((await request(action,payload)).status,200);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{op:'rpc',name,args});
+    assert.equal(calls.some(c=>c.name==='begin_exam_contact_reaction'),false);
+    calls.length=0;
+    assert.equal((await request(action,payload,'fixture-user-token')).status,403);
+    assert.equal(calls.some(c=>c.op==='rpc'),false);
+    const monitor='e'.repeat(64);env.set('EXAM_INTAKE_MONITOR_API_KEY',monitor);
+    assert.equal((await monitorRequest(action,payload,monitor)).status,403);
+    assert.equal(calls.some(c=>c.op==='rpc'),false);
+  }
+  calls.length=0;
+  // A dispatch lease cannot substitute for the independent reconciliation claim.
+  assert.equal((await request('reaction_reconcile_result',{reaction_id:taskId,lease_token:token,outcome:{status:'confirmed'}})).status,400);
+  assert.equal(calls.some(c=>c.op==='rpc'),false);
+});
 await check('existing n8n reserve_source and stage_file preserve a v2 wrapper ACK and snapshot result end to end',async()=>{
   const origin={source:{channel:'email',account_id:'gmail:offline@example.invalid',message_id:'1111222233334444',attachment_id:'hopelab-link:'+hash,metadata:{provider:'hopelab_link',hopelab_notice_protocol:'gmail_notice_link_v2',gmail_message_id:'1111222233334444',link_sha256:hash}}};
   const reserve=await request('reserve_source',{source:origin.source});assert.equal(reserve.status,200);const ack=await reserve.json();assert.doesNotThrow(()=>verifyHopelabNoticeV2Reservation(origin,ack));

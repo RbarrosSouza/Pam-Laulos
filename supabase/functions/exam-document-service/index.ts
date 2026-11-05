@@ -175,6 +175,12 @@ Deno.serve(async (req: Request) => {
       case "reaction_reserve_tasks": return response(await rpc("reserve_exam_contact_reactions", {
         p_worker: String(payload.worker || ""), p_limit: Number(payload.limit ?? 1),
       }));
+      case "reaction_reserve_reconciliations": return response(await rpc("reserve_exam_contact_reconciliations", {
+        p_worker: String(payload.worker || ""), p_limit: Number(payload.limit ?? 1),
+      }));
+      case "reaction_reconcile_result": return response(await rpc("record_exam_contact_reconciliation_result", {
+        p_reaction_id: uuid(payload.reaction_id), p_reconcile_token: uuid(payload.reconcile_token), p_outcome: plain(payload.outcome),
+      }));
       case "reaction_begin": {
         if (typeof payload.actor_id !== "number" || !Number.isSafeInteger(payload.actor_id) || payload.actor_id < 1) error("REACTION_ACTOR_INVALID");
         return response(await rpc("begin_exam_contact_reaction", {
