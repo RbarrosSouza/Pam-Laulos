@@ -4,6 +4,9 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { webcrypto, createHash } from 'node:crypto';
 import vm from 'node:vm';
+import { examPresentation as sharedPresentation } from '../../scripts/exames/notification-presentation.mjs';
+import { examPresentation as edgePresentation } from '../functions/exam-whatsapp-fallback/exam-presentation.generated.mjs';
+import { generatedExamPresentationSource } from '../functions/exam-whatsapp-fallback/generate-exam-presentation.mjs';
 
 const ts = createRequire(import.meta.url)('typescript');
 const source = await readFile(new URL('../functions/exam-whatsapp-fallback/chatwoot.ts', import.meta.url), 'utf8');
@@ -11,6 +14,10 @@ const api = {};
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, {
   exports: api, URL, Response, Request, Headers, FormData, Blob, TextEncoder, TextDecoder, Uint8Array,
   crypto: webcrypto, btoa, AbortController, setTimeout, clearTimeout, fetch() { throw new Error('Unexpected real fetch'); },
+  require(specifier) {
+    assert.equal(specifier, './exam-presentation.generated.mjs');
+    return { examPresentation: edgePresentation };
+  },
 });
 const base = 'https://chatwoot.example.com';
 const cfg = { baseUrl: base, apiAccessToken: 'test-private-token', accountId: 1, inboxId: 2,
@@ -149,7 +156,7 @@ test('PDF signature, MIME, expected size and hash must all agree', async () => {
   await assert.rejects(client(async () => new Response(bytes, { headers: { 'content-type': 'text/html' } })).downloadPdf(base + '/x.pdf'), /media_mime_invalid/);
 });
 
-test('single multipart POST follows durable grant, retains original filename and stays submitted after HTTP success', async () => {
+test('single multipart POST follows durable grant, preserves bytes/correlation and stays submitted after HTTP success', async () => {
   let begun = false, posts = 0;
   const c = client(async (url, init) => {
     if (init.method === 'GET') return json(group);
@@ -159,9 +166,10 @@ test('single multipart POST follows durable grant, retains original filename and
     assert.equal(body.get('message_type'), 'outgoing'); assert.equal(body.get('private'), 'false');
     assert.deepEqual(JSON.parse(body.get('content_attributes')), attrs);
     const attachment = body.get('attachments[]');
-    assert.equal(attachment.name, task.originalName); assert.equal(attachment.type, 'application/pdf');
+    assert.equal(attachment.name, 'Exame.pdf'); assert.equal(attachment.type, 'application/pdf');
     assert.equal(createHash('sha256').update(new Uint8Array(await attachment.arrayBuffer())).digest('hex'), sha256);
-    assert.match(body.get('content'), /Laudo ECO Teste.pdf/);
+    assert.match(body.get('content'), /🧪 \*Exame\*/u);
+    assert(body.get('content').includes(task.link));
     assert.match(body.get('content'), /03\/11\/2026 às 09:30/);
     assert(!body.get('content').includes(task.deliveryId));
     return json({ id: 100, status: 'delivered', account_id: 1, inbox_id: 2, conversation_id: 23 });
@@ -201,15 +209,16 @@ test('fence denial or unconfirmed fence sends nothing; corrupt preflight never c
   assert.equal(begins, 0); assert.equal(posts, 0);
 });
 
-test('HTTP ambiguous failures never auto-retry and definitive rejection is distinguished', async () => {
-  for (const [status, expected] of [[401, 'failed'], [422, 'failed'], [408, 'uncertain'], [409, 'uncertain'], [429, 'uncertain'], [500, 'uncertain']]) {
+test('every HTTP failure after the durable grant remains uncertain and never auto-retries', async () => {
+  for (const status of [401, 403, 422, 408, 409, 429, 500]) {
     let posts = 0;
     const c = client(async (_url, init) => {
       if (init.method === 'GET') return json(group);
       posts++; return json({ error: 'private provider body not exposed' }, status);
     });
     const result = await c.sendGroupOnce(task, pdf, grant);
-    assert.equal(result.status, expected, String(status)); assert.equal(posts, 1);
+    assert.equal(result.status, 'uncertain', String(status)); assert.equal(posts, 1);
+    if ([401, 403, 422].includes(status)) assert.equal(result.external_status, 'rejected');
     assert(!JSON.stringify(result).includes('private provider body'));
   }
 });
@@ -275,8 +284,76 @@ test('wrong destination, message scope, redirects and unsafe document links do n
   await assert.rejects(client(async () => new Response(null, { status: 302, headers: { location: 'https://evil.example.com' } })).getConversation(3), /conversation_unavailable/);
   assert.throws(() => api.prepareFallbackCaption({ ...task, link: 'https://pam.example.com/e/wrong' }, cfg.documentBaseUrl), /document_link_invalid/);
   const caption = api.prepareFallbackCaption({ ...task, originalName: '*Laudo* _Teste_\n@nome.pdf' }, cfg.documentBaseUrl);
-  assert(!caption.content.includes('*')); assert(!caption.content.includes('_Teste_'));
-  assert(caption.content.includes('Laudo Teste'));
+  assert(!caption.content.includes('_Teste_')); assert(!caption.content.includes('Laudo'));
+  assert(caption.content.startsWith('🧪 *Exame*'));
+});
+
+test('generated Edge presentation is current and has byte-for-byte parity with the shared n8n source', async () => {
+  const generated = await readFile(new URL('../functions/exam-whatsapp-fallback/exam-presentation.generated.mjs', import.meta.url), 'utf8');
+  assert.equal(generated, generatedExamPresentationSource());
+  for (const document of [
+    { id: task.documentId, received_at: task.receivedAt },
+    { id: task.documentId, received_at: task.receivedAt, extracted_data: { pet_name: 'Luna', client_name: 'Ana Clara', exam_type: 'Hemograma', exam_date: '2026-11-03' } },
+    { id: task.documentId, received_at: task.receivedAt, extracted_data: { pet_name: 'Luna', client_name: 'Ana Clara', exam_type: 'Hemograma', exam_date: '2026-11-03' }, confirmed_data: { pet_name: 'Luna revisada', client_name: null }, responsible_vet_id: 'vet-fixture', responsible_vet_name: 'Dra. Marina Costa Lima', responsible_vet_source: 'confirmed' },
+    { id: '12345678-1234-4234-a234-123456789012', received_at: task.receivedAt, notification_fields: { pet_name: '*Luna*', client_name: 'Ana\nClara', exam_type: 'Hemograma / PCR', exam_date: '2026-02-31' } },
+  ]) assert.deepEqual(edgePresentation(document, cfg.documentBaseUrl), sharedPresentation(document, cfg.documentBaseUrl));
+});
+
+test('fenced fallback fields match normal presentation, including human correction and explicit rejection', () => {
+  const extracted = { pet_name: 'Luna', client_name: 'Ana Clara', exam_type: 'Hemograma', exam_date: '2026-11-03' };
+  const confirmed = { pet_name: 'Luna revisada', client_name: null };
+  const current = { ...task, link: undefined, presentationRevision: 'a'.repeat(32), extractedData: extracted, confirmedData: confirmed,
+    responsibleVetId: 'vet-fixture', responsibleVetName: 'Dra. Marina Costa Lima', responsibleVetSource: 'confirmed' };
+  const expected = sharedPresentation({ id: task.documentId, received_at: task.receivedAt, extracted_data: extracted, confirmed_data: confirmed,
+    responsible_vet_id: current.responsibleVetId, responsible_vet_name: current.responsibleVetName, responsible_vet_source: current.responsibleVetSource }, cfg.documentBaseUrl);
+  const result = api.prepareFallbackCaption(current, cfg.documentBaseUrl);
+  assert.equal(result.content, expected.content);
+  assert.equal(result.fileName, expected.fileName);
+  assert(!result.content.includes('Ana Clara'));
+  assert(result.content.includes('Luna revisada'));
+  assert(result.content.includes('Marina Costa'));
+  assert(result.content.includes(task.link));
+  const supplied = api.prepareFallbackCaption({ ...current, notificationFields: { pet_name: null, client_name: null, exam_type: null, exam_date: null } }, cfg.documentBaseUrl);
+  assert.equal(supplied.fileName, 'Exame.pdf');
+  assert(!supplied.content.includes('Luna'));
+});
+
+test('unfenced fields cannot expose stale identity and raw requester never becomes assigned veterinarian', () => {
+  const fields = { pet_name: 'Luna', client_name: 'Ana Clara', requesting_vet_name: 'Veterinário inferido' };
+  const unfenced = api.prepareFallbackCaption({ ...task, extractedData: fields }, cfg.documentBaseUrl);
+  assert(!unfenced.content.includes('Luna')); assert(!unfenced.content.includes('Ana Clara'));
+  const fenced = api.prepareFallbackCaption({ ...task, extractedData: fields, presentationRevision: 'a'.repeat(32), responsibleVetName: 'Veterinário inferido' }, cfg.documentBaseUrl);
+  assert(fenced.content.includes('Luna')); assert(!fenced.content.includes('Veterinário inferido'));
+});
+
+test('fenced content is hashed before one POST and presentation revision accompanies the grant', async () => {
+  const identified = { ...task, presentationRevision: 'b'.repeat(32), notificationFields: { pet_name: 'Sol', client_name: 'Bruna Lima', exam_type: 'Hemograma', exam_date: '2026-11-03' } };
+  let posted = 0, grantedHash;
+  const c = client(async (_url, init) => {
+    if (init.method === 'GET') return json(group);
+    posted++;
+    assert.equal(createHash('sha256').update(init.body.get('content')).digest('hex'), grantedHash);
+    assert.deepEqual(JSON.parse(init.body.get('content_attributes')), attrs);
+    assert.equal(init.body.get('attachments[]').name, 'Sol - Bruna Lima - Hemograma - 03-11-2026.pdf');
+    return json({ id: 100, status: 'sent', account_id: 1, inbox_id: 2, conversation_id: 23 });
+  });
+  const result = await c.sendGroupOnce(identified, pdf, { beginDispatch: async input => {
+    assert.equal(input.presentationRevision, identified.presentationRevision); grantedHash = input.contentSha256; return { dispatch_allowed: true };
+  } });
+  assert.equal(result.status, 'submitted'); assert.equal(posted, 1);
+});
+
+test('a rejected POST is reconciled without a second grant or second POST', async () => {
+  let posts = 0, grants = 0;
+  const c = client(async (url, init) => {
+    if (init.method === 'POST') { posts++; return json({ error: 'rejected' }, 422); }
+    return json(url.includes('/messages') ? { payload: [] } : group);
+  });
+  const callbacks = { beginDispatch: async () => { grants++; return { dispatch_allowed: true }; } };
+  const first = await c.sendGroupOnce(task, pdf, callbacks);
+  assert.equal(first.status, 'uncertain'); assert.equal(first.external_status, 'rejected');
+  const second = await c.sendGroupOnce({ ...task, status: first.status }, pdf, callbacks);
+  assert.equal(second.status, 'uncertain'); assert.equal(posts, 1); assert.equal(grants, 1);
 });
 
 test('caller cancellation bounds source requests and prevents any new request after abort', async () => {

@@ -1,4 +1,5 @@
 /** Chatwoot transport for the independent fallback. No implicit retries or clinical inference. */
+import { examPresentation } from './exam-presentation.generated.mjs';
 export const MAX_PDF_BYTES = 20 * 1024 * 1024;
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
@@ -36,6 +37,13 @@ export interface GroupTask {
   status: "reserved" | "submitted" | "uncertain" | "sent";
   externalId?: string | null;
   configuredDestination: string;
+  notificationFields?: Json;
+  extractedData?: Json;
+  confirmedData?: Json;
+  responsibleVetId?: string | null;
+  responsibleVetName?: string | null;
+  responsibleVetSource?: string | null;
+  presentationRevision?: string;
 }
 export interface DeliveryOutcome {
   status: "submitted" | "sent" | "uncertain" | "failed";
@@ -44,7 +52,7 @@ export interface DeliveryOutcome {
   error?: string;
   correlation: string;
 }
-export interface BeginDispatchInput { deliveryId: string; leaseToken: string; contentSha256: string }
+export interface BeginDispatchInput { deliveryId: string; leaseToken: string; contentSha256: string; presentationRevision?: string }
 export interface DispatchCallbacks {
   /** Must atomically consume the reservation before returning the explicit grant. */
   beginDispatch(input: BeginDispatchInput): Promise<{ dispatch_allowed: boolean }>;
@@ -88,32 +96,28 @@ function validateTask(task: GroupTask, destination: string, maxBytes: number): v
     || (task.createdAt !== undefined && !Number.isFinite(Date.parse(task.createdAt)))) fail("group_task_invalid");
   if (task.externalId != null) providerId(task.externalId);
 }
-function safeFilename(value: string): string {
-  const clean = String(value || "exame.pdf").normalize("NFC").replace(/[\x00-\x1f\x7f\\/:*?"<>|]/g, " ")
-    .replace(/\s+/g, " ").trim().slice(0, 180);
-  return /\.pdf$/i.test(clean) ? clean : (clean.replace(/\.[^.]*$/, "") || "exame") + ".pdf";
-}
 function uuidShortId(uuid: string): string {
   const bytes = uuid.replace(/-/g, "").match(/../g)!.map(value => parseInt(value, 16));
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 export function prepareFallbackCaption(task: GroupTask, documentBaseUrl?: string): { content: string; fileName: string } {
   if (!UUID.test(task.documentId) || !Number.isFinite(Date.parse(task.receivedAt))) fail("caption_metadata_invalid");
-  const fileName = safeFilename(task.originalName);
-  // Strip WhatsApp formatting characters from the original label; do not infer patient fields.
-  const label = fileName.replace(/[*_`~]/g, " ").replace(/\s+/g, " ").trim();
-  let link: string | undefined;
+  let baseUrl = documentBaseUrl ? publicOrigin(documentBaseUrl) : undefined;
   if (task.link) {
     const url = publicUrl(task.link);
     if (url.search || url.pathname !== "/e/" + uuidShortId(task.documentId)
-      || (documentBaseUrl && url.origin !== publicOrigin(documentBaseUrl))) fail("document_link_invalid");
-    link = url.href;
+      || (baseUrl && url.origin !== baseUrl)) fail("document_link_invalid");
+    baseUrl = url.origin;
   }
-  const received = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).format(new Date(task.receivedAt)).replace(", ", " às ");
-  return { fileName, content: ["🧪 " + label, link ? "🔗 " + link : null, "Recebido em " + received].filter(Boolean).join("\n") };
+  // Old claims have no identity fence. Their original label is never treated as
+  // a patient name; use the shared empty-field presentation until re-reserved.
+  const fenced = typeof task.presentationRevision === 'string' && /^[a-f\d]{32}$/.test(task.presentationRevision);
+  const presentation = examPresentation({ id: task.documentId, received_at: task.receivedAt,
+    ...(fenced ? { notification_fields: task.notificationFields, extracted_data: task.extractedData,
+      confirmed_data: task.confirmedData, responsible_vet_id: task.responsibleVetId,
+      responsible_vet_name: task.responsibleVetName, responsible_vet_source: task.responsibleVetSource } : {}),
+  }, baseUrl);
+  return { fileName: presentation.fileName, content: presentation.content };
 }
 
 async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
@@ -348,14 +352,15 @@ export function createChatwootClient(config: ChatwootConfig, dependencies: Chatw
       return { status: "failed", external_status: "preflight_failed", error: error instanceof ChatwootFallbackError ? error.code : "group_preflight_failed", correlation: correlation(task) };
     }
     const grant = await callbacks.beginDispatch({ deliveryId: task.deliveryId, leaseToken: task.leaseToken,
-      contentSha256: await digest(new TextEncoder().encode(content)) });
+      contentSha256: await digest(new TextEncoder().encode(content)),
+      ...(task.presentationRevision ? { presentationRevision: task.presentationRevision } : {}) });
     if (grant?.dispatch_allowed !== true) fail("dispatch_fence_denied");
     // After the durable grant, every ambiguous result remains uncertain. No POST retry exists here.
     try {
       return await request(apiUrl(group, "/messages"), { method: "POST", headers: { api_access_token: config.apiAccessToken }, body: form }, async response => {
         if (response.status >= 400 && response.status < 500 && ![408, 409, 429].includes(response.status)) {
           void response.body?.cancel().catch(() => {});
-          return { status: "failed", external_status: "rejected", error: "provider_rejected_" + response.status, correlation: correlation(task) };
+          return { status: "uncertain", external_status: "rejected", error: "provider_rejected_" + response.status, correlation: correlation(task) };
         }
         if (response.status < 200 || response.status >= 300) return uncertain(task, "response_unknown");
         const body = await jsonResponse(response);

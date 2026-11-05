@@ -316,4 +316,45 @@ function summarizeIntakeReceipts(receipts, expectedMessages) {
   }
   return {scanFinished:counts.messages_failed+counts.pending+counts.failed+counts.unproven===0,counts,issues,recovery:'fixed_cutoff_idempotent_rescan',checkpointAdvanced:false};
 }
+// A wake-up is only a hint. Every item still comes from a backend lease and its
+// durable outcome must be acknowledged before this execution takes another one.
+export function startPipelineDrain(stage, worker, lease, now = Date.now()) {
+  if (!['processing','group','nexus','rename','reconcile'].includes(stage) || typeof worker !== 'string' || !worker ||
+      lease?.claimed !== true || typeof lease.lease_token !== 'string' || !lease.lease_token || !Number.isFinite(now) ||
+      !Number.isFinite(Date.parse(lease.lease_until)) || Date.parse(lease.lease_until) < now + 600000)
+    throw new Error('pipeline_worker_lease_unproven');
+  return {stage,worker,workerToken:lease.lease_token,startedAt:now,count:0,maxTasks:4,maxSeconds:180};
+}
+export function pipelineDrainAvailable(state, now = Date.now()) {
+  if (!state || !Number.isFinite(state.startedAt) || !Number.isInteger(state.count) || state.count < 0 ||
+      state.maxTasks !== 4 || state.maxSeconds !== 180 || typeof state.workerToken !== 'string' || !state.workerToken ||
+      !Number.isFinite(now) || now < state.startedAt) throw new Error('pipeline_drain_state_invalid');
+  return state.count < state.maxTasks && now - state.startedAt < state.maxSeconds * 1000;
+}
+export function advancePipelineDrain(state, receipt, taskId) {
+  pipelineDrainAvailable(state);
+  if (!taskId || receipt?.task?.id !== taskId || !['completed','sent','submitted','uncertain','failed'].includes(receipt.task.status))
+    throw new Error('pipeline_task_outcome_unproven');
+  return {...state,count:state.count + 1};
+}
+export function freshGroupTask(reserved, prepared, verified, config) {
+  const fresh = prepared?.task;
+  const expected = 'chatwoot:'+config.accountId+':'+config.inboxId+':'+config.conversationId+':'+config.groupJid;
+  if (prepared?.dispatch_ready !== true || !fresh || fresh.id !== reserved?.id || fresh.lease_token !== reserved.lease_token ||
+      fresh.document?.id !== reserved.document?.id || fresh.document?.id !== verified?.documentId ||
+      fresh.document?.sha256 !== verified.sha256 || Number(fresh.document?.size_bytes) !== verified.sizeBytes ||
+      fresh.configured_destination !== expected || prepared.presentation_revision === undefined || prepared.presentation_revision === null)
+    throw new Error('group_fresh_dispatch_unproven');
+  return {...fresh,drain:reserved.drain,presentation_revision:prepared.presentation_revision,destinationVerified:true};
+}
+export function classifyGroupSubmission(context, response) {
+  const status = Number(response?.statusCode || 0), id = response?.body?.id;
+  // begin_dispatch has already fenced this attempt. Even a rejected response is
+  // reconciled; this path never makes a POST eligible for an automatic replay.
+  const outcome = status >= 200 && status < 300 && id
+    ? {status:'submitted',external_id:String(id),external_status:String(response.body.status || 'api_created')}
+    : {status:'uncertain',error:'Resposta de envio inconclusiva; reconciliar antes de qualquer novo POST',external_status:status >= 400 && status < 500 ? 'rejected' : 'response_unknown'};
+  outcome.correlation = context.correlation;
+  return {task:context.task,outcome};
+}
 export {EXPECTED_MAILBOX,MAX_BYTES,MAX_MIME_DEPTH,fail,object,stableId,unwrap,verifyProfile,validateWindow,listQuery,metadataFields,listIds,header,senderAddress,inspectMessage,inspectHopelabNotice,hopelabBodyFields,canonicalHopelabUrl,parseHopelabNotice,decodeHopelabOriginal,decideReservation,decodeOriginal,validateFolder,validateStage,inspectDriveObject,verifySaved,attachmentIntakeReceipt,summarizeIntakeReceipts};

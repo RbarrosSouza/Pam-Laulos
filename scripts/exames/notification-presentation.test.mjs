@@ -113,7 +113,7 @@ test('generated processing and group nodes agree on filename and put correlation
  const outputs={'Tarefa disponível':{json:task},'Configuração':{json:config},'Uma confirmação por vez':{json:task}};
  const run=async(kind,name,input)=>new vm.Script('(async function(){'+node(kind,name).parameters.jsCode+'}).call(this)').runInNewContext({Buffer,require:key=>{assert.equal(key,'crypto');return crypto;},$json:input.json,$input:{first:()=>input,all:()=>[input]},$:name=>({item:outputs[name],first:()=>outputs[name]}),helpers:{getBinaryDataBuffer:async()=>bytes}});
  const process=await run('processing','Resultado para persistir',{json:{task,extraction:{fields}},binary});
- const group=await run('group','Preparar PDF e correlação',{json:{},binary});
+ const group=await run('group','Preparar PDF e correlação',{json:{task},binary});
  assert.equal(process[0].json.driveName,group[0].binary.data.fileName);
  assert(!group[0].json.content.includes(task.id));assert(!group[0].json.content.includes(id));
  assert.equal(group[0].json.contentAttributes.pamvet_exam_delivery_id,task.id);
@@ -127,7 +127,7 @@ test('generated processing and group nodes agree on filename and put correlation
  assert.equal(ambiguous[0].json.outcome.status,'uncertain');
  for(const available of [{...fields,exam_date:null},{pet_name:'Luna'},{}]){
   task.document.extracted_data=available;
-  const partial=await run('group','Preparar PDF e correlação',{json:{},binary});
+  const partial=await run('group','Preparar PDF e correlação',{json:{task},binary});
   assert.equal(partial[0].json.verified,true);
   assert(!partial[0].json.content.includes('Informações incompletas'));
   assert.equal(partial[0].binary.data.fileName,examPresentation(task.document,base).fileName);

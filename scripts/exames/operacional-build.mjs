@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {examPresentation,findExamDelivery} from './notification-presentation.mjs';
 import {validateExamExtraction} from './extraction-validation.mjs';
+import {parseHopeLabFastCandidate,validateFastExamCandidate,inspectFastExtraction} from './fast-extraction.mjs';
 import * as intakeRuntime from './operacional-runtime.mjs';
 
 const ROOT=fileURLToPath(new URL('../../',import.meta.url));
@@ -64,6 +65,7 @@ function applyNotificationPresentation(workflow, kind){
   node('Validar JSON e evidências').parameters.jsCode=validateExamExtraction.toString()+`\nconst context=$('Preparar classificação ou revisão').item.json;\nreturn [{json:{task:context.task,extraction:validateExamExtraction(context,$json)}}];\n`;
   node('Resultado para persistir').parameters.jsCode=examPresentation.toString()+`\nconst input=$input.first().json;\nconst task=input.task;const extraction=input.extraction;\nconst presentation=examPresentation({...task.document,extracted_data:extraction.fields});\nreturn [{json:{task,extraction,driveName:presentation.fileName}}];\n`;
   const request=node('Extrair dados estruturados').parameters;
+  request.jsonBody=request.jsonBody.replace('pdfBase64}}]','pdfBase64} }]');
   const legacyDateInstruction='exam_date é a data explicitamente identificada no documento como realização do exame ou coleta. Nunca use data de recebimento do email, emissão ou assinatura como substituta; se a data de realização/coleta não estiver clara, retorne null.';
   const instruction='exam_date é a data do exame informada no documento. Priorize a data de realização ou coleta quando indicada; na ausência dela, use a Data do Laudo ou data de emissão ou assinatura do laudo. Nunca use data de recebimento do email, nascimento ou rodapé genérico. Retorne null apenas se não houver data documental identificável.';
   request.jsonBody=request.jsonBody.replace(legacyDateInstruction,instruction).replace(' Data do Laudo, emissão e assinatura não comprovam realização/coleta.','');
@@ -111,10 +113,146 @@ function applyIntakeAccounting(workflow){
  connect('Marcar falha da mensagem',[['Uma mensagem por vez']]);connect('Marcar mensagem excluída',[['Uma mensagem por vez']]);connect('Marcar falha da reserva',[['Próximo anexo']]);
  connect('PDF ou aviso disponível',[['Um anexo por vez'],['Marcar mensagem excluída']]);
 }
+function applyPipelineLatency(workflow,kind){
+ if(kind==='intake')return;
+ const node=name=>{const found=workflow.nodes.find(item=>item.name===name);if(!found)throw new Error('Missing pipeline node: '+name);return found;};
+ const connect=(from,outputs)=>{workflow.connections[from]={main:outputs.map(names=>names.map(name=>({node:name,type:'main',index:0})))};};
+ const upsert=(name,type,version,parameters,position,extra={})=>{
+  const existing=workflow.nodes.find(item=>item.name===name);
+  if(existing){Object.assign(existing,{parameters,...extra});return existing;}
+  const hash=crypto.createHash('sha256').update('pamvet-pipeline:'+kind+':'+name).digest('hex');
+  const added={id:hash.slice(0,8)+'-'+hash.slice(8,12)+'-5'+hash.slice(13,16)+'-a'+hash.slice(17,20)+'-'+hash.slice(20,32),name,type:'n8n-nodes-base.'+type,typeVersion:version,position,parameters,...extra};
+  workflow.nodes.push(added);return added;
+ };
+ const code=(name,source,position=[0,800])=>upsert(name,'code',2,{jsCode:source},position);
+ const condition=(name,expression,position=[240,800])=>upsert(name,'if',2.2,{conditions:{options:{caseSensitive:true,leftValue:'',typeValidation:'strict',version:2},conditions:[{id:'pipeline-condition',leftValue:expression,rightValue:true,operator:{type:'boolean',operation:'equals'}}],combinator:'and'},options:{}},position);
+ const service=(name,action,payload,position=[480,800])=>{
+  const base=clone(node('Reservar tarefa'));
+  // n8n's template tokenizer treats adjacent }} as the expression terminator,
+  // even when they close nested JavaScript objects. Keep those tokens apart.
+  return upsert(name,'httpRequest',4.2,{...base.parameters,jsonBody:'={{ ({action:'+JSON.stringify(action)+',payload:'+payload+' }) }}'},position,{credentials:base.credentials,retryOnFail:false});
+ };
+ const runtime=names=>names.map(name=>intakeRuntime[name].toString()).join('\n')+'\n';
+ const trigger=(stage,mode=false)=>{
+  const title='Acordar '+stage;
+  upsert(title,'webhook',2,{httpMethod:'POST',path:'pamvet-exam-'+stage+'-wakeup',authentication:'headerAuth',responseMode:'onReceived',options:{}},mode?[-960,1040]:[-720,800],{webhookId:'pamvet-exam-'+stage+'-wakeup',credentials:{httpHeaderAuth:clone(node('Reservar tarefa').credentials.httpHeaderAuth)}});
+  if(mode){code('Modo '+stage,"return [{json:{__pipelineStage:"+JSON.stringify(stage)+"}}];",[-480,1040]);connect(title,[['Modo '+stage]]);connect('Modo '+stage,[['Configuração']]);}
+  else connect(title,[['Configuração']]);
+ };
+ const alternate=stage=>{
+  trigger(stage,true);
+  const oldName='Recuperar '+stage+' a cada minuto',newName='Recuperar '+stage+' a cada 5 minutos';
+  const old=workflow.nodes.find(item=>item.name===oldName);if(old){old.name=newName;delete workflow.connections[oldName];}
+  upsert(newName,'scheduleTrigger',1.2,{rule:{interval:[{field:'minutes',minutesInterval:5}]}},[-720,1040]);
+  connect(newName,[['Modo '+stage]]);
+ };
+ const cfg=node('Configuração');
+ const allowed=kind==='processing'?['processing','rename']:kind==='group'?['group','reconcile']:['nexus'];
+ cfg.parameters.jsCode=cfg.parameters.jsCode.replace(/\ncfg\.pipelineStage=[\s\S]*?\nreturn \[\{json:cfg\}\];$/,'\nreturn [{json:cfg}];');
+ cfg.parameters.jsCode=cfg.parameters.jsCode.replace('return [{json:cfg}];',`cfg.pipelineStage=$json.__pipelineStage||${JSON.stringify(kind)};\nif(!${JSON.stringify(allowed)}.includes(cfg.pipelineStage))throw new Error('pipeline_stage_invalid');\nreturn [{json:cfg}];`);
+ workflow.settings.executionTimeout=600;
+ const schedule=node('A cada 5 minutos');schedule.parameters.rule={interval:[{field:'minutes',minutesInterval:5}]};
+ // Preserve the existing node identity/layout while its interval becomes recovery-only.
+ trigger(kind);
+ service('Reservar trabalhador exclusivo','worker_acquire',"{stage:$('Configuração').first().json.pipelineStage,worker:$('Configuração').first().json.worker,lease_seconds:660}",[-240,800]);
+ condition('Trabalhador reservado','={{ $json.claimed === true }}',[0,800]);
+ code('Iniciar rodada',runtime(['startPipelineDrain'])+"return [{json:startPipelineDrain($('Configuração').first().json.pipelineStage,$('Configuração').first().json.worker,$json)}];",[240,800]);
+ condition('Orçamento disponível','={{ $json.count < 4 && Date.now() - $json.startedAt < 180000 }}',[720,800]);
+ service('Liberar trabalhador exclusivo','worker_release',"{stage:$('Iniciar rodada').first().json.stage,lease_token:$('Iniciar rodada').first().json.workerToken}",[1680,1040]);
+ service('Continuar fila após orçamento','worker_release',"{stage:$('Iniciar rodada').first().json.stage,lease_token:$('Iniciar rodada').first().json.workerToken,continue:$json.count>0}",[1920,1040]);
+ connect('Configuração',[['Reservar trabalhador exclusivo']]);
+ connect('Reservar trabalhador exclusivo',[['Trabalhador reservado']]);connect('Trabalhador reservado',[['Iniciar rodada'],[]]);
+ connect('Orçamento disponível',[['Reservar tarefa'],['Continuar fila após orçamento']]);
+ node('Reservar tarefa').parameters.jsonBody="={{ ({action:'reserve_tasks',payload:{destination:"+JSON.stringify(kind)+",worker:$('Configuração').first().json.worker,worker_lease_token:$json.workerToken,limit:1} }) }}";
+ condition('Há tarefa reservada','={{ Array.isArray($json.tasks) && $json.tasks.length === 1 }}',[960,800]);
+ connect('Reservar tarefa',[['Há tarefa reservada']]);connect('Há tarefa reservada',[['Tarefa disponível'],['Liberar trabalhador exclusivo']]);
+ node('Tarefa disponível').parameters.jsCode="const state=$('Orçamento disponível').item.json;\nconst task=$json.tasks[0];\nif(!task||task.destination!=="+JSON.stringify(kind)+")throw new Error('pipeline_task_destination_invalid');\nconst cfg=$('Configuração').first().json;\nconst expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;\nreturn [{json:{...task,drain:state,destinationVerified:task.configured_destination===expected}}];";
+ code('Preparar próxima tarefa',runtime(['pipelineDrainAvailable','advancePipelineDrain'])+"const task=$('Tarefa disponível').item.json;return [{json:advancePipelineDrain(task.drain,$json,task.id)}];",[1440,800]);
+ connect('Preparar próxima tarefa',[['Orçamento disponível']]);
+ if(kind==='processing'||kind==='nexus'){
+  connect('Iniciar rodada',[['Reconciliar reservas vencidas']]);
+  code('Restaurar rodada',"return [{json:$('Iniciar rodada').first().json}];",[480,800]);
+  connect('Reconciliar reservas vencidas',[['Restaurar rodada']]);connect('Restaurar rodada',[['Orçamento disponível']]);
+  const finish=kind==='processing'?'Concluir processamento':'Anexar e verificar no backend';
+  const failure=kind==='processing'?'Registrar falha de processamento':'Registrar falha de anexação';
+  connect(finish,[['Preparar próxima tarefa'],...(kind==='nexus'?[[failure]]:[])]);connect(failure,[['Preparar próxima tarefa']]);
+ }
+ if(kind==='processing'){
+  code('Avaliar extração rápida',[validateExamExtraction,parseHopeLabFastCandidate,validateFastExamCandidate,inspectFastExtraction].map(fn=>fn.toString()).join('\n')+"\nconst context=$json;const mode=$('Configuração').first().json.fastExtractionMode||'shadow';return [{json:{...context,fast:inspectFastExtraction(context,{mode})}}];",[1440,560]);
+  condition('Extração rápida validada','={{ $json.fast.accepted === true && $json.fast.route === "fast" && !!$json.fast.extraction }}',[1680,560]);
+  code('Usar extração rápida',"if(!$json.fast?.accepted||!$json.fast.extraction)throw new Error('fast_extraction_unproven');return [{json:{task:$json.task,extraction:$json.fast.extraction}}];",[1920,560]);
+  connect('Preparar classificação ou revisão',[['Avaliar extração rápida']]);connect('Avaliar extração rápida',[['Extração rápida validada']]);connect('Extração rápida validada',[['Usar extração rápida'],['Extrator disponível e texto válido']]);connect('Usar extração rápida',[['Resultado para persistir']]);
+  // The backend persists desired_name in its own queue. A Drive rename can no
+  // longer prevent the document/card transaction from committing.
+  connect('Resultado para persistir',[['Persistir extração e revisão'],['Registrar falha de processamento']]);
+  alternate('rename');
+  condition('Rodada de renomeação','={{ $json.stage === "rename" }}',[480,1040]);
+  connect('Orçamento disponível',[['Rodada de renomeação'],['Continuar fila após orçamento']]);
+  connect('Rodada de renomeação',[['Reservar renomeação'],['Reservar tarefa']]);
+  service('Reservar renomeação','reserve_rename',"{worker:$('Configuração').first().json.worker,worker_lease_token:$json.workerToken}",[720,1040]);
+  condition('Há renomeação reservada','={{ Array.isArray($json.tasks) && $json.tasks.length === 1 }}',[960,1040]);
+  code('Renomeação disponível',examPresentation.toString()+"\nconst task=$json.tasks[0];if(!task?.document||task.document.id!==task.document_id)throw new Error('rename_document_snapshot_missing');return [{json:{...task,desired_name:examPresentation(task.document).fileName,drain:$('Orçamento disponível').item.json}}];",[1200,1040]);
+  connect('Reservar renomeação',[['Há renomeação reservada']]);connect('Há renomeação reservada',[['Renomeação disponível'],['Liberar trabalhador exclusivo']]);
+  service('Autorizar renomeação atual','rename_prepare','{delivery_id:$json.id,lease_token:$json.lease_token,document_version:$json.document_version,name:$json.desired_name}',[1200,1280]);
+  condition('Renomeação autorizada','={{ $json.dispatch_allowed === true }}',[1440,1120]);
+  code('Restaurar renomeação autorizada',"if($json.dispatch_allowed!==true)throw new Error('rename_not_authorized');return [$('Renomeação disponível').item];",[1680,1120]);
+  connect('Renomeação disponível',[['Autorizar renomeação atual']]);connect('Autorizar renomeação atual',[['Renomeação autorizada']]);connect('Renomeação autorizada',[['Restaurar renomeação autorizada'],['Liberar trabalhador exclusivo']]);connect('Restaurar renomeação autorizada',[['Drive - renomear o mesmo arquivo']]);
+  const rename=node('Drive - renomear o mesmo arquivo');rename.parameters.url="={{ 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent($json.drive_file_id)+'?fields=id,name' }}";rename.parameters.jsonBody='={{ ({name:$json.desired_name}) }}';
+  code('Conferir renomeação',"const task=$('Renomeação disponível').item.json;if($json.id!==task.drive_file_id||$json.name!==task.desired_name)throw new Error('drive_rename_unproven');return [{json:{task,outcome:{status:'completed',drive_file_id:$json.id,name:$json.name}}}];",[1440,1280]);
+  code('Falha de renomeação',"return [{json:{task:$('Renomeação disponível').item.json,outcome:{status:'failed',error:'Renomeação pendente; identificação preservada'}}}];",[1440,1440]);
+  node('Conferir renomeação').onError='continueErrorOutput';
+  service('Persistir renomeação','rename_result','{delivery_id:$json.task.id,lease_token:$json.task.lease_token,outcome:$json.outcome}',[1680,1280]);
+  code('Preparar próxima renomeação',runtime(['pipelineDrainAvailable','advancePipelineDrain'])+"const task=$('Renomeação disponível').item.json;const receipt=$json.applied===true&&$json.task?.status==='pending'?{...$json,task:{...$json.task,status:'completed'}}:$json;return [{json:advancePipelineDrain(task.drain,receipt,task.id)}];",[1920,1280]);
+  connect('Drive - renomear o mesmo arquivo',[['Conferir renomeação'],['Falha de renomeação']]);connect('Conferir renomeação',[['Persistir renomeação'],['Falha de renomeação']]);connect('Falha de renomeação',[['Persistir renomeação']]);connect('Persistir renomeação',[['Preparar próxima renomeação']]);connect('Preparar próxima renomeação',[['Orçamento disponível']]);
+ }
+ if(kind==='group'){
+  alternate('reconcile');
+  connect('Iniciar rodada',[['Chatwoot - conferir conversa destino']]);
+  node('Validar grupo e caixa').parameters.jsCode=node('Validar grupo e caixa').parameters.jsCode.replace('return [{json:cfg}];',"return [{json:$('Iniciar rodada').first().json}];");
+  condition('Rodada de confirmação','={{ $json.stage === "reconcile" }}',[480,800]);
+  connect('Validar grupo e caixa',[['Rodada de confirmação']]);connect('Rodada de confirmação',[['Reconciliar reservas e mensagens'],['Orçamento disponível']]);
+  node('Reconciliar reservas e mensagens').parameters.jsonBody="={{ ({action:'group_reconcile',payload:{worker:$('Configuração').first().json.worker,worker_lease_token:$('Iniciar rodada').first().json.workerToken,limit:4} }) }}";
+  node('Registrar confirmação observada').parameters.jsonBody="={{ ({action:'task_result',payload:{delivery_id:$json.task.id,lease_token:$json.task.lease_token,outcome:$json.outcome,reconciliation:true} }) }}";
+  node('Mensagens aguardando confirmação').parameters.jsCode="const cfg=$('Configuração').first().json;const expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;const tasks=$json.tasks||[];for(const task of tasks){if((task.configured_destination||task.destination_key)!==expected)throw new Error('Conferir o destino original da mensagem antes de continuar');}const state=$('Iniciar rodada').first().json;return tasks.length?tasks.slice(0,4).map((task,index)=>({json:{...task,drain:{...state,count:index}}})):[{json:{empty:true}}];";
+  condition('Orçamento da confirmação','={{ $json.drain.count < 4 && Date.now() - $json.drain.startedAt < 180000 }}',[480,1280]);
+  code('Concluir rodada de confirmação',"const count=$('Mensagens aguardando confirmação').all().filter(item=>!item.json.empty).length;return [{json:{...$('Iniciar rodada').first().json,count}}];",[960,1440]);
+  condition('Lote de confirmação completo','={{ $json.count >= 4 }}',[1200,1440]);
+  connect('Uma confirmação por vez',[['Concluir rodada de confirmação'],['Mensagem anterior disponível']]);connect('Concluir rodada de confirmação',[['Lote de confirmação completo']]);connect('Lote de confirmação completo',[['Continuar fila após orçamento'],['Liberar trabalhador exclusivo']]);
+  connect('Mensagem anterior disponível',[['Orçamento da confirmação'],['Uma confirmação por vez']]);
+  code('Continuar confirmação após orçamento',"return [{json:$json.drain}];",[720,1440]);
+  connect('Orçamento da confirmação',[['Chatwoot - consultar mensagens existentes'],['Continuar confirmação após orçamento']]);connect('Continuar confirmação após orçamento',[['Continuar fila após orçamento']]);
+  node('Chatwoot - consultar mensagens existentes').parameters.options.timeout=10000;
+  // Bytes are checked before asking for a fresh snapshot. The immutable file
+  // identity is checked again when that snapshot is restored into the item.
+  code('Conferir PDF para despacho',"const crypto=require('crypto');const task=$('Tarefa disponível').item.json;const bytes=await this.helpers.getBinaryDataBuffer(0,'data');const sha256=crypto.createHash('sha256').update(bytes).digest('hex');if(!bytes.length||bytes.length>$('Configuração').first().json.maxBytes||!bytes.subarray(0,1024).includes(Buffer.from('%PDF-'))||sha256!==task.document.sha256||bytes.length!==Number(task.document.size_bytes))throw new Error('group_pdf_integrity_invalid');return [{json:{task,verified:{documentId:task.document.id,sha256,sizeBytes:bytes.length}},binary:$input.first().binary}];",[1920,800]);
+  node('Conferir PDF para despacho').onError='continueErrorOutput';
+  service('Atualizar autorização de envio','group_prepare','{delivery_id:$json.task.id,lease_token:$json.task.lease_token}',[2160,800]);
+  condition('Despacho pronto','={{ $json.dispatch_ready === true }}',[2400,800]);
+  code('Restaurar PDF validado',runtime(['freshGroupTask'])+"const checked=$('Conferir PDF para despacho').item;const task=freshGroupTask(checked.json.task,$json,checked.json.verified,$('Configuração').first().json);return [{json:{task},binary:checked.binary}];",[2640,800]);
+  node('Preparar PDF e correlação').parameters.jsCode=node('Preparar PDF e correlação').parameters.jsCode.replace("const task=$('Tarefa disponível').item.json;","const task=$json.task;").replace('content:presentation.content,verified:true','content:presentation.content,contentSha256:crypto.createHash(\'sha256\').update(presentation.content).digest(\'hex\'),verified:true');
+  if(!node('Preparar PDF e correlação').parameters.jsCode.includes('const task=$json.task;')||node('Preparar PDF e correlação').parameters.jsCode.includes("$('Tarefa disponível')"))throw new Error('Group preparation must consume the freshly authorized task');
+  service('Registrar início do envio','group_begin','{delivery_id:$json.task.id,lease_token:$json.task.lease_token,presentation_revision:$json.task.presentation_revision,content:$json.content}',[2880,800]);
+  condition('POST autorizado','={{ $json.dispatch_allowed === true }}',[3120,800]);
+  code('Restaurar conteúdo autorizado',"if($json.dispatch_allowed!==true)throw new Error('group_post_not_authorized');return [$('Preparar PDF e correlação').item];",[3360,800]);
+  connect('Drive - baixar PDF para grupo',[['Conferir PDF para despacho'],['Falha confirmada antes do POST']]);
+  connect('Conferir PDF para despacho',[['Atualizar autorização de envio'],['Falha confirmada antes do POST']]);
+  connect('Atualizar autorização de envio',[['Despacho pronto']]);connect('Despacho pronto',[['Restaurar PDF validado'],['Liberar trabalhador exclusivo']]);connect('Restaurar PDF validado',[['Preparar PDF e correlação']]);
+  connect('PDF íntegro para enviar',[['Registrar início do envio'],['Falha confirmada antes do POST']]);connect('Registrar início do envio',[['POST autorizado']]);connect('POST autorizado',[['Restaurar conteúdo autorizado'],['Liberar trabalhador exclusivo']]);connect('Restaurar conteúdo autorizado',[['Chatwoot - enviar PDF único']]);
+  node('Classificar submissão sem reenvio').parameters.jsCode=runtime(['classifyGroupSubmission'])+"return [{json:classifyGroupSubmission($('Preparar PDF e correlação').item.json,$json)}];";
+  connect('Persistir tentativa de grupo',[['Preparar próxima tarefa']]);connect('Falha confirmada antes do POST',[['Preparar próxima tarefa']]);
+ }
+}
+// Also used by the private publication adapter: keeps existing node IDs,
+// positions, prompts, credentials and environment-specific configuration.
+export function upgradePipelineWorkflow(workflow,kind){
+ if(!['processing','group','nexus'].includes(kind))throw new Error('Unsupported pipeline workflow');
+ const upgraded=clone(workflow);applyPipelineLatency(upgraded,kind);return upgraded;
+}
 function validatePrivateSettings(settings){
  if(!settings||typeof settings!=='object'||Array.isArray(settings)||Object.keys(settings).some(k=>!['config','credentials'].includes(k)))throw new Error('Use only {config,credentials}; never put secret values in this file');
  const configuration=settings.config??{};
- if(!configuration||typeof configuration!=='object'||Array.isArray(configuration)||Object.keys(configuration).some(k=>!Object.hasOwn(CONFIG,k)))throw new Error('Unknown operational configuration field');
+ if(!configuration||typeof configuration!=='object'||Array.isArray(configuration)||Object.keys(configuration).some(k=>!Object.hasOwn(CONFIG,k)&&k!=='fastExtractionMode'))throw new Error('Unknown operational configuration field');
+ if(configuration.fastExtractionMode!==undefined&&!['off','shadow','active'].includes(configuration.fastExtractionMode))throw new Error('Invalid fast extraction mode');
  const credentials=settings.credentials??{};
  if(!credentials||typeof credentials!=='object'||Array.isArray(credentials)||Object.keys(credentials).some(k=>!Object.hasOwn(CREDENTIALS,k)))throw new Error('Unknown credential reference');
  for(const reference of Object.values(credentials))if(!reference||typeof reference!=='object'||Array.isArray(reference)||Object.keys(reference).some(k=>!['id','name'].includes(k))||typeof reference.id!=='string'||!reference.id||reference.id.length>200||typeof reference.name!=='string'||!reference.name||reference.name.length>200||/[\x00-\x1f\x7f]/.test(reference.id+reference.name))throw new Error('Credential references accept id/name only, never token/key/value');
@@ -130,6 +268,7 @@ export async function buildWorkflows(settings={}){
   const workflow=clone(templates[i]);
   if(KINDS[i]==='intake'){applyHopelabIntake(workflow);applyIntakeAccounting(workflow);}
   applyNotificationPresentation(workflow,KINDS[i]);
+  applyPipelineLatency(workflow,KINDS[i]);
   for(const node of workflow.nodes){
    if(node.name==='Configuração')node.parameters.jsCode=node.parameters.jsCode.replace(configLiteral(workflow),JSON.stringify(config,null,2));
    if(node.parameters.jsCode)node.parameters.jsCode=node.parameters.jsCode.replace('const EXPECTED_MAILBOX='+JSON.stringify(CONFIG.mailbox), 'const EXPECTED_MAILBOX='+JSON.stringify(config.mailbox));

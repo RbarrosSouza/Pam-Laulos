@@ -58,6 +58,12 @@ vm.runInNewContext(ts.transpileModule(keySource,{compilerOptions:{target:ts.Scri
 const intakeExports={};
 const intakeSource=await readFile(new URL('../functions/exam-document-service/intake-service-routes.ts',import.meta.url),'utf8');
 vm.runInNewContext(ts.transpileModule(intakeSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:intakeExports,TextEncoder});
+const pipelineExports={};
+const pipelineSource=await readFile(new URL('../functions/exam-document-service/pipeline-service-routes.ts',import.meta.url),'utf8');
+vm.runInNewContext(ts.transpileModule(pipelineSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:pipelineExports,TextEncoder,URL,AbortSignal,fetch:async()=>{throw new Error('No pipeline transport in collection fixture')}});
+const jevObserverExports={};
+const jevObserverSource=await readFile(new URL('../functions/exam-document-service/jev-observer-service.ts',import.meta.url),'utf8');
+vm.runInNewContext(ts.transpileModule(jevObserverSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:jevObserverExports});
 const monitorAuthExports={};
 const monitorAuthSource=await readFile(new URL('../functions/exam-document-service/intake-monitor-auth.ts',import.meta.url),'utf8');
 vm.runInNewContext(ts.transpileModule(monitorAuthSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:monitorAuthExports});
@@ -67,6 +73,8 @@ const script = ts.transpileModule(source.replace(/^import .*;\s*$/gm, ''), {
   compilerOptions: {target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None},
 }).outputText;
 vm.runInNewContext(script, {
+  ...pipelineExports,
+  ...jevObserverExports,
   ...monitorAuthExports,
   // Handler imports are stripped above; collection routes never read originals.
   ComposioOriginalError: class ComposioOriginalError extends Error {},

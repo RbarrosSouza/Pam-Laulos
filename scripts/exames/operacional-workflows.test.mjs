@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import {createRequire} from 'node:module';
-import {buildWorkflows,CONFIG,writeWorkflows} from './operacional-build.mjs';
+import {buildWorkflows,CONFIG,writeWorkflows,upgradePipelineWorkflow} from './operacional-build.mjs';
 import * as a from './operacional-runtime.mjs';
 const workflows=await buildWorkflows();
 const docId='11111111-1111-4111-a111-111111111111', canonical='22222222-2222-4222-a222-222222222222';
@@ -25,10 +25,10 @@ function staged(id=docId){return {document_id:id,drive_file_id:'stable-drive-id'
 function metadata(stage,size=0){return {statusCode:200,body:{id:stage.drive_file_id,mimeType:'application/pdf',trashed:false,ownedByMe:true,shared:false,parents:[stage.document.drive_folder_id],size:String(size),appProperties:{exam_document_id:stage.document_id,sha256:digest},name:'original.pdf'}};}
 
 test('four paused operational workflows: only current actions, valid graph, existing refs, manual + schedule, no journal/gates/secrets',async(t)=>{
- const actions=new Set(['reserve_source','stage_file','confirm_file','source_error','extraction','reserve_tasks','task_result','attach_nexus','reconcile']);
+ const actions=new Set(['reserve_source','stage_file','confirm_file','source_error','extraction','reserve_tasks','task_result','attach_nexus','reconcile','worker_acquire','worker_release','group_prepare','group_begin','group_reconcile','reserve_rename','rename_prepare','rename_result']);
  for(const [kind,w]of Object.entries(workflows)){
   assert.equal(w.active,false);assert.deepEqual(w.pinData,{});assert.equal(w.settings.executionOrder,'v1');assert.equal(w.settings.saveDataSuccessExecution,'none');assert.equal(w.settings.saveDataErrorExecution,'none');assert.equal(w.settings.saveManualExecutions,false);assert.equal(w.settings.saveExecutionProgress,false);
-  assert.equal(w.nodes.filter(n=>n.type.endsWith('manualTrigger')).length,1);assert.equal(w.nodes.filter(n=>n.type.endsWith('scheduleTrigger')).length,1);
+  assert.equal(w.nodes.filter(n=>n.type.endsWith('manualTrigger')).length,1);assert.equal(w.nodes.filter(n=>n.type.endsWith('scheduleTrigger')).length,['processing','group'].includes(kind)?2:1);
   const names=new Set(w.nodes.map(n=>n.name));assert.equal(names.size,w.nodes.length);
   for(const [from,c]of Object.entries(w.connections)){assert(names.has(from));for(const out of c.main)for(const e of out)assert(names.has(e.node),e.node);}
   for(const node of w.nodes){
@@ -40,7 +40,9 @@ test('four paused operational workflows: only current actions, valid graph, exis
    function parse(v){if(typeof v==='string'&&v.startsWith('={{')){parser.getExpressionCode(v.slice(1));count++;}else if(Array.isArray(v))v.forEach(parse);else if(v&&typeof v==='object')Object.values(v).forEach(parse);}
    for(const node of w.nodes)parse(node.parameters);t.diagnostic(kind+': '+count+' expressions parsed by local Tournament');
   }
-  const literal=JSON.stringify(w);assert(!/collection_|begin_staging|staging_result|fixture|clinical_pilot|runtimePhase|approvalId|structuredClone/i.test(literal));
+  // Service actions are allowlisted above. The parser's collection_date is a
+  // documentary field, not an obsolete collection_* service action.
+  const literal=JSON.stringify(w);assert(!/begin_staging|staging_result|fixture|clinical_pilot|runtimePhase|approvalId|structuredClone/i.test(literal));
   await assert.rejects(asyncCode(w,'Configuração',{json:{}}),/EXAMES_OPERACIONAL_PAUSADO/);
   const saved=JSON.parse(await fs.readFile(new URL('../../n8n/exames/OPERACIONAL-0'+({intake:1,processing:2,group:3,nexus:4}[kind])+'.json',import.meta.url),'utf8'));assert.deepEqual(saved,w);
  }
@@ -133,9 +135,124 @@ test('group uses only verified original destination, one multipart POST, timeout
 });
 
 test('worker lease recovery and real backend contracts remain available; no dependency on another workflow ID',()=>{
- for(const w of Object.values(workflows)){assert(w.nodes.some(x=>x.parameters.jsonBody?.includes('"reconcile"')));assert(!w.nodes.some(x=>x.type.endsWith('executeWorkflow')));}
+ for(const [kind,w]of Object.entries(workflows)){assert(w.nodes.some(x=>x.parameters.jsonBody?.includes(kind==='group'?"'group_reconcile'":'"reconcile"')));assert(!w.nodes.some(x=>x.type.endsWith('executeWorkflow')));}
  const nexus=workflows.nexus;const payload=expression(n(nexus,'Anexar e verificar no backend').parameters.jsonBody,{id:'delivery',lease_token:'lease'});assert.deepEqual(plain(payload),{action:'attach_nexus',payload:{delivery_id:'delivery',lease_token:'lease'}});
  assert(n(workflows.processing,'Persistir extração e revisão').parameters.jsonBody.includes('delivery_id'));assert(n(workflows.processing,'Persistir extração e revisão').parameters.jsonBody.includes('extraction:'));
+});
+
+test('HTTP JSON expressions cannot terminate early at adjacent object-closing braces',()=>{
+ // n8n Tournament ExpressionSplitter recognizes the first unescaped }} as
+ // the template terminator. A plain JS/VM syntax test does not exercise this.
+ for(const [kind,w]of Object.entries(workflows))for(const node of w.nodes){
+  const body=node.parameters.jsonBody;
+  if(node.parameters.url?.includes('serviceUrl')&&typeof body==='string')
+   assert.equal(body.indexOf('}}'),body.length-2,kind+': '+node.name+' closes its n8n expression before the JavaScript object ends');
+ }
+ if(process.env.OPERACIONAL_PARSER_PACKAGE){
+  const require=createRequire(process.env.OPERACIONAL_PARSER_PACKAGE),{Expression}=require('n8n-workflow');
+  const expression=new Expression('America/Sao_Paulo');
+  const broken='{{ ({action:"worker_acquire",payload:{stage:"processing",worker:"synthetic",lease_seconds:660}}) }}';
+  assert.throws(()=>expression.renderExpression(broken,{}),/invalid syntax/);
+  assert.equal(expression.renderExpression(broken.replace('}})','} })'),{}).action,'worker_acquire');
+  const fixture={id:'synthetic',lease_token:'synthetic',worker:'synthetic',workerToken:'synthetic',count:1,pipelineStage:'group',stage:'group',
+   document:{id:'synthetic'},task:{id:'synthetic',lease_token:'synthetic',document:{id:'synthetic'}},extraction:{fields:{}},outcome:{status:'completed'},content:'Synthetic',presentation_revision:'synthetic'};
+  const data={$json:fixture,$execution:{id:'synthetic'},$:()=>({first:()=>({json:fixture}),item:{json:fixture}})};
+  for(const [kind,w]of Object.entries(workflows))for(const node of w.nodes)if(kind!=='intake'&&node.parameters.url?.includes('serviceUrl')){
+   const result=expression.renderExpression(node.parameters.jsonBody.slice(1),data);
+   assert(result&&typeof result==='object'&&typeof result.action==='string','n8n renderer: '+node.name);
+  }
+ }
+});
+
+test('drain budget needs a global lease and a persisted outcome before taking another task',()=>{
+ const now=Date.now(),lease={claimed:true,lease_token:'worker-token',lease_until:new Date(now+660000).toISOString()};
+ const state=a.startPipelineDrain('processing','worker',lease,now);
+ assert.equal(a.pipelineDrainAvailable(state,now+179999),true);
+ assert.equal(a.pipelineDrainAvailable(state,now+180000),false);
+ assert.equal(a.pipelineDrainAvailable({...state,count:4},now),false);
+ assert.throws(()=>a.startPipelineDrain('processing','worker',{...lease,claimed:false},now),/lease_unproven/);
+ assert.throws(()=>a.startPipelineDrain('processing','worker',{...lease,lease_until:new Date(now+200000).toISOString()},now),/lease_unproven/);
+ assert.throws(()=>a.advancePipelineDrain(state,{task:{id:'another',status:'completed'}},'expected'),/outcome_unproven/);
+ assert.throws(()=>a.advancePipelineDrain(state,{task:{id:'expected',status:'reserved'}},'expected'),/outcome_unproven/);
+ const next=a.advancePipelineDrain(state,{task:{id:'expected',status:'completed'}},'expected');assert.equal(next.count,1);assert.equal(next.workerToken,state.workerToken);
+ for(const kind of ['processing','group','nexus']){
+  const w=workflows[kind];assert.equal(w.settings.executionTimeout,600);
+  assert.equal(w.connections['Configuração'].main[0][0].node,'Reservar trabalhador exclusivo');
+  assert(n(w,'Reservar tarefa').parameters.jsonBody.includes('worker_lease_token'));
+  assert.equal(w.connections['Há tarefa reservada'].main[1][0].node,'Liberar trabalhador exclusivo');
+  assert.equal(w.connections['Orçamento disponível'].main[1][0].node,'Continuar fila após orçamento');
+  assert(!n(w,'Liberar trabalhador exclusivo').parameters.jsonBody.includes('continue:'));
+  assert(n(w,'Continuar fila após orçamento').parameters.jsonBody.includes('continue:$json.count>0'));
+  const wake=n(w,'Acordar '+kind);assert.equal(wake.parameters.authentication,'headerAuth');assert.equal(wake.parameters.responseMode,'onReceived');assert.equal(wake.credentials.httpHeaderAuth.id,'SELECT_WORKER_HEADER');
+ }
+});
+
+test('group snapshot is refreshed after bytes and a durable begin is required immediately before its only POST',async()=>{
+ const w=workflows.group,expected='chatwoot:'+cfg.accountId+':'+cfg.inboxId+':'+cfg.conversationId+':'+cfg.groupJid;
+ const task={id:'group-task',lease_token:'group-lease',destination:'group',configured_destination:expected,document:{id:docId,sha256:digest,size_bytes:bytes.length},drain:{count:0}};
+ const checked={task,verified:{documentId:docId,sha256:digest,sizeBytes:bytes.length}};
+ const prepared={dispatch_ready:true,presentation_revision:'fresh-revision',task:{...task,notification_fields:{pet_name:'Identificação atual',client_name:'Tutor atual',exam_type:'Hemograma',exam_date:'2026-11-05'}}};
+ const fresh=a.freshGroupTask(task,prepared,checked.verified,cfg);assert.equal(fresh.notification_fields.pet_name,'Identificação atual');
+ assert.throws(()=>a.freshGroupTask(task,{...prepared,dispatch_ready:false},checked.verified,cfg),/unproven/);
+ assert.throws(()=>a.freshGroupTask(task,{...prepared,task:{...prepared.task,document:{...task.document,sha256:'0'.repeat(64)}}},checked.verified,cfg),/unproven/);
+ assert.throws(()=>a.freshGroupTask(task,{...prepared,task:{...prepared.task,configured_destination:'other-group'}},checked.verified,cfg),/unproven/);
+ const binary={data:{bytes}};
+ const restored=await asyncCode(w,'Restaurar PDF validado',{json:prepared},{'Conferir PDF para despacho':[{json:checked,binary}]});
+ const presentation=await asyncCode(w,'Preparar PDF e correlação',restored);
+ assert(presentation[0].json.content.includes('Identificação atual'));assert(presentation[0].binary.data.fileName.startsWith('Identificação atual'));
+ assert.equal(presentation[0].json.contentSha256,crypto.createHash('sha256').update(presentation[0].json.content).digest('hex'));
+ await assert.rejects(asyncCode(w,'Restaurar conteúdo autorizado',{json:{dispatch_allowed:false}},{'Preparar PDF e correlação':presentation}),/not_authorized/);
+ const postItem=await asyncCode(w,'Restaurar conteúdo autorizado',{json:{dispatch_allowed:true}},{'Preparar PDF e correlação':presentation});assert.equal(postItem[0].binary,presentation[0].binary);
+ assert.equal(w.connections['PDF íntegro para enviar'].main[0][0].node,'Registrar início do envio');
+ assert.equal(w.connections['POST autorizado'].main[1][0].node,'Liberar trabalhador exclusivo');
+ assert.equal(w.connections['Restaurar conteúdo autorizado'].main[0][0].node,'Chatwoot - enviar PDF único');
+ const rejected=a.classifyGroupSubmission(presentation[0].json,{statusCode:400,body:{}});assert.equal(rejected.outcome.status,'uncertain');
+});
+
+test('old confirmations have their own worker and cannot reserve or post a new group message',()=>{
+ const w=workflows.group;
+ const reachable=new Set(),visit=name=>{if(reachable.has(name))return;reachable.add(name);for(const branch of w.connections[name]?.main||[])for(const edge of branch)visit(edge.node);};
+ visit('Reconciliar reservas e mensagens');
+ assert(!reachable.has('Reservar tarefa'));assert(!reachable.has('Chatwoot - enviar PDF único'));
+ assert(n(w,'Reconciliar reservas e mensagens').parameters.jsonBody.includes('group_reconcile'));
+ assert(n(w,'Registrar confirmação observada').parameters.jsonBody.includes('reconciliation:true'));
+ assert(!n(w,'Persistir tentativa de grupo').parameters.jsonBody.includes('reconciliation:true'));
+ assert.equal(w.connections['Rodada de confirmação'].main[1][0].node,'Orçamento disponível');
+ assert.equal(w.connections['Modo reconcile'].main[0][0].node,'Configuração');
+ assert.equal(n(w,'Chatwoot - consultar mensagens existentes').parameters.options.timeout,10000);
+});
+
+test('rename has a durable fenced lane and does not block extraction, card persistence or group readiness',()=>{
+ const w=workflows.processing;
+ assert.equal(w.connections['Resultado para persistir'].main[0][0].node,'Persistir extração e revisão');
+ assert.equal(w.connections['Persistir extração e revisão'].main[0][0].node,'Concluir processamento');
+ assert.equal(w.connections['Drive - renomear o mesmo arquivo'].main[1][0].node,'Falha de renomeação');
+ assert.equal(w.connections['Renomeação disponível'].main[0][0].node,'Autorizar renomeação atual');
+ assert.equal(w.connections['Renomeação autorizada'].main[1][0].node,'Liberar trabalhador exclusivo');
+ assert(n(w,'Autorizar renomeação atual').parameters.jsonBody.includes('document_version'));
+ assert(n(w,'Persistir renomeação').parameters.jsonBody.includes('rename_result'));
+});
+
+test('private upgrade is idempotent and preserves configuration, credentials and existing layout',()=>{
+ const original=structuredClone(workflows.processing),target=n(original,'Configuração');
+ target.parameters.jsCode=target.parameters.jsCode.replace('SELECT_PRIVATE_DRIVE_FOLDER','private-preserved-folder');
+ n(original,'Reservar tarefa').credentials.httpHeaderAuth={id:'existing-reference',name:'Existing worker'};
+ const changed=upgradePipelineWorkflow(original,'processing');
+ assert(n(changed,'Configuração').parameters.jsCode.includes('private-preserved-folder'));
+ assert.equal(n(changed,'Acordar processing').credentials.httpHeaderAuth.id,'existing-reference');
+ for(const before of original.nodes){const after=n(changed,before.name);assert.equal(after.id,before.id);assert.deepEqual(after.position,before.position);}
+ assert.deepEqual(upgradePipelineWorkflow(changed,'processing'),changed);
+ assert.equal(original.nodes.length,changed.nodes.length);
+});
+
+test('fast extraction is shadow-only by default and unsupported inputs preserve the general extractor',async()=>{
+ const task={id:'processing-task',lease_token:'lease',document:{id:docId}};
+ const context={task,pages:['Texto sem formato conhecido'],totalPages:1,isVision:false,canExtract:true};
+ const out=await asyncCode(workflows.processing,'Avaliar extração rápida',{json:context});
+ assert.equal(out[0].json.fast.route,'general');assert.equal(out[0].json.fast.extraction,null);
+ assert.equal(workflows.processing.connections['Extração rápida validada'].main[1][0].node,'Extrator disponível e texto válido');
+ const bound=await buildWorkflows({config:{fastExtractionMode:'active'}});assert(n(bound.processing,'Configuração').parameters.jsCode.includes('"fastExtractionMode": "active"'));
+ await assert.rejects(buildWorkflows({config:{fastExtractionMode:'unsafe'}}),/Invalid fast/);
 });
 
 test('nested attachment loop resets only on a fresh message and clears the flag on every return',async()=>{
