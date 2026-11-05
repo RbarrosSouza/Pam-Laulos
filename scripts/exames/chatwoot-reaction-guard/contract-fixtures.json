@@ -1,0 +1,301 @@
+{
+  "synthetic_only": true,
+  "contract": "pamvet_check_v1",
+  "generated_by": "actual guard module with the documented FakeController adapter",
+  "guard_sha256": "d99050f1cc8dce923f78ea61f8c0b5d21ca936390e77c351eb37c924e4ffc76f",
+  "fixtures": [
+    {
+      "name": "actor_check",
+      "http_status": 200,
+      "body": {
+        "contract": "pamvet_check_v1",
+        "complete": true,
+        "evidence_complete": true,
+        "actor_id": 1,
+        "scope": {
+          "account_id": 1,
+          "inbox_id": 2,
+          "conversation_id": 3,
+          "message_id": 301,
+          "group_jid": "120000000003@g.us"
+        },
+        "original": {
+          "id": 301,
+          "message_type": "outgoing",
+          "private": false,
+          "status": "delivered",
+          "source_id": "synthetic-original-source",
+          "content_sha256": "d376000c4e284e69c0fb73ae1b88c5a7de32ed2421deae730e42b6d6119a4687",
+          "content_attributes": {
+            "pamvet_exam_document_id": "11111111-1111-4111-8111-111111111111",
+            "pamvet_exam_delivery_id": "22222222-2222-4222-8222-222222222222",
+            "pamvet_exam_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "legacy_reference": null,
+          "attachments": [
+            {
+              "id": 501,
+              "file_type": "file"
+            }
+          ]
+        },
+        "own_reactions": [
+          {
+            "id": 401,
+            "emoji": "✅",
+            "content": "✅",
+            "private": false,
+            "content_attributes": {
+              "is_reaction": true,
+              "deleted": false,
+              "in_reply_to": 301,
+              "in_reply_to_external_id": null
+            },
+            "invalid_emoji": false,
+            "parent_identity_valid": true,
+            "deleted": false,
+            "status": "sent",
+            "source_id": "synthetic-reaction-source",
+            "message_type": "outgoing",
+            "sender": {
+              "id": 1,
+              "type": "user"
+            },
+            "same_account_echo": false,
+            "own_scope": "actor",
+            "in_reply_to": 301,
+            "in_reply_to_external_id": null
+          }
+        ],
+        "current_own_reaction_id": 401
+      },
+      "expected_consumer": "own_check_proven",
+      "context": {
+        "document_id": "11111111-1111-4111-8111-111111111111",
+        "delivery_id": "22222222-2222-4222-8222-222222222222",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "external_message_id": "301",
+        "actor_id": 1
+      }
+    },
+    {
+      "name": "same_account_echo_check",
+      "http_status": 200,
+      "body": {
+        "contract": "pamvet_check_v1",
+        "complete": true,
+        "evidence_complete": true,
+        "actor_id": 1,
+        "scope": {
+          "account_id": 1,
+          "inbox_id": 2,
+          "conversation_id": 3,
+          "message_id": 301,
+          "group_jid": "120000000003@g.us"
+        },
+        "original": {
+          "id": 301,
+          "message_type": "outgoing",
+          "private": false,
+          "status": "delivered",
+          "source_id": "synthetic-original-source",
+          "content_sha256": "d376000c4e284e69c0fb73ae1b88c5a7de32ed2421deae730e42b6d6119a4687",
+          "content_attributes": {
+            "pamvet_exam_document_id": "11111111-1111-4111-8111-111111111111",
+            "pamvet_exam_delivery_id": "22222222-2222-4222-8222-222222222222",
+            "pamvet_exam_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "legacy_reference": null,
+          "attachments": [
+            {
+              "id": 501,
+              "file_type": "file"
+            }
+          ]
+        },
+        "own_reactions": [
+          {
+            "id": 401,
+            "emoji": "✅",
+            "content": "✅",
+            "private": false,
+            "content_attributes": {
+              "is_reaction": true,
+              "deleted": false,
+              "in_reply_to": 301,
+              "in_reply_to_external_id": null
+            },
+            "invalid_emoji": false,
+            "parent_identity_valid": true,
+            "deleted": false,
+            "status": "sent",
+            "source_id": "synthetic-reaction-source",
+            "message_type": "outgoing",
+            "sender": null,
+            "same_account_echo": true,
+            "own_scope": "same_account_echo",
+            "in_reply_to": 301,
+            "in_reply_to_external_id": null
+          }
+        ],
+        "current_own_reaction_id": 401
+      },
+      "expected_consumer": "own_check_proven",
+      "context": {
+        "document_id": "11111111-1111-4111-8111-111111111111",
+        "delivery_id": "22222222-2222-4222-8222-222222222222",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "external_message_id": "301",
+        "actor_id": 1
+      }
+    },
+    {
+      "name": "other_support_choice",
+      "http_status": 200,
+      "body": {
+        "contract": "pamvet_check_v1",
+        "complete": true,
+        "evidence_complete": true,
+        "actor_id": 1,
+        "scope": {
+          "account_id": 1,
+          "inbox_id": 2,
+          "conversation_id": 3,
+          "message_id": 301,
+          "group_jid": "120000000003@g.us"
+        },
+        "original": {
+          "id": 301,
+          "message_type": "outgoing",
+          "private": false,
+          "status": "delivered",
+          "source_id": "synthetic-original-source",
+          "content_sha256": "d376000c4e284e69c0fb73ae1b88c5a7de32ed2421deae730e42b6d6119a4687",
+          "content_attributes": {
+            "pamvet_exam_document_id": "11111111-1111-4111-8111-111111111111",
+            "pamvet_exam_delivery_id": "22222222-2222-4222-8222-222222222222",
+            "pamvet_exam_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "legacy_reference": null,
+          "attachments": [
+            {
+              "id": 501,
+              "file_type": "file"
+            }
+          ]
+        },
+        "own_reactions": [
+          {
+            "id": 401,
+            "emoji": "👍",
+            "content": "👍",
+            "private": false,
+            "content_attributes": {
+              "is_reaction": true,
+              "deleted": false,
+              "in_reply_to": 301,
+              "in_reply_to_external_id": null
+            },
+            "invalid_emoji": false,
+            "parent_identity_valid": true,
+            "deleted": false,
+            "status": "sent",
+            "source_id": "synthetic-reaction-source",
+            "message_type": "outgoing",
+            "sender": {
+              "id": 2,
+              "type": "user"
+            },
+            "same_account_echo": false,
+            "own_scope": "other_support",
+            "in_reply_to": 301,
+            "in_reply_to_external_id": null
+          }
+        ],
+        "current_own_reaction_id": null
+      },
+      "expected_consumer": "hold_no_dispatch",
+      "context": {
+        "document_id": "11111111-1111-4111-8111-111111111111",
+        "delivery_id": "22222222-2222-4222-8222-222222222222",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "external_message_id": "301",
+        "actor_id": 1
+      }
+    },
+    {
+      "name": "removed_check",
+      "http_status": 200,
+      "body": {
+        "contract": "pamvet_check_v1",
+        "complete": true,
+        "evidence_complete": true,
+        "actor_id": 1,
+        "scope": {
+          "account_id": 1,
+          "inbox_id": 2,
+          "conversation_id": 3,
+          "message_id": 301,
+          "group_jid": "120000000003@g.us"
+        },
+        "original": {
+          "id": 301,
+          "message_type": "outgoing",
+          "private": false,
+          "status": "delivered",
+          "source_id": "synthetic-original-source",
+          "content_sha256": "d376000c4e284e69c0fb73ae1b88c5a7de32ed2421deae730e42b6d6119a4687",
+          "content_attributes": {
+            "pamvet_exam_document_id": "11111111-1111-4111-8111-111111111111",
+            "pamvet_exam_delivery_id": "22222222-2222-4222-8222-222222222222",
+            "pamvet_exam_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "legacy_reference": null,
+          "attachments": [
+            {
+              "id": 501,
+              "file_type": "file"
+            }
+          ]
+        },
+        "own_reactions": [
+          {
+            "id": 401,
+            "emoji": "",
+            "content": "",
+            "private": false,
+            "content_attributes": {
+              "is_reaction": true,
+              "deleted": true,
+              "in_reply_to": 301,
+              "in_reply_to_external_id": null
+            },
+            "invalid_emoji": false,
+            "parent_identity_valid": true,
+            "deleted": true,
+            "status": "sent",
+            "source_id": "synthetic-reaction-source",
+            "message_type": "outgoing",
+            "sender": {
+              "id": 1,
+              "type": "user"
+            },
+            "same_account_echo": false,
+            "own_scope": "actor",
+            "in_reply_to": 301,
+            "in_reply_to_external_id": null
+          }
+        ],
+        "current_own_reaction_id": 401
+      },
+      "expected_consumer": "hold_no_dispatch",
+      "context": {
+        "document_id": "11111111-1111-4111-8111-111111111111",
+        "delivery_id": "22222222-2222-4222-8222-222222222222",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "external_message_id": "301",
+        "actor_id": 1
+      }
+    }
+  ]
+}
