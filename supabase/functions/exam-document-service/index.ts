@@ -1,4 +1,6 @@
 import { intakeActions, runIntakeAction } from "./intake-service-routes.ts";
+import { pipelineActions, runPipelineAction, examPipelineWakeupStages, dispatchExamPipelineWakeups } from "./pipeline-service-routes.ts";
+import { jevObserverActions, runJevObserverAction } from "./jev-observer-service.ts";
 import { authenticateExamIntakeMonitor, authorizeExamIntakeMonitorAction, filterExamIntakeMonitorResult } from "./intake-monitor-auth.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.99.3";
 import { ComposioOriginalError, composioReaderConfig, readComposioDriveOriginal, oauthDriveReaderConfig, readOAuthDriveOriginal } from "./composio-original-reader.ts";
@@ -125,6 +127,20 @@ Deno.serve(async (req: Request) => {
       }
       return data;
     }
+    async function committed(actionName: string, result: unknown) {
+      const targets = examPipelineWakeupStages(actionName, payload, result);
+      if (targets.length) {
+        const wakeup = dispatchExamPipelineWakeups(targets, workerKey, rpc).then(summary => {
+          if (summary.attempted && summary.accepted < summary.attempted) console.warn('EXAM_PIPELINE_WAKEUP_DEFERRED', { stages: targets, ...summary });
+        }).catch(() => { /* A wakeup never changes the outcome of a committed RPC. */ });
+        const runtime = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (task: Promise<unknown>) => void } }).EdgeRuntime;
+        if (runtime?.waitUntil) runtime.waitUntil(wakeup);
+        else await wakeup;
+      }
+      return response(result);
+    }
+    if (pipelineActions.has(action)) return committed(action, await runPipelineAction(action, payload, rpc, { uuid, hash: sha256 }));
+    if (jevObserverActions.has(action)) return response(await runJevObserverAction(action, payload, rpc, uuid));
     async function document(id: unknown): Promise<Json> {
       const { data, error: docError } = await service.from("exam_document").select("*").eq("id", uuid(id)).maybeSingle();
       if (docError) error("Banco de exames indisponível", 503);
@@ -239,7 +255,7 @@ Deno.serve(async (req: Request) => {
         delete file.staging_bucket; delete file.staging_path;
         return response(await rpc("stage_exam_intake_file", { p_document_id: uuid(payload.document_id), p_file: file, p_worker: String(payload.worker || "ingestion") }));
       }
-      case "confirm_file": return response(await rpc("confirm_exam_document_file", { p_document_id: uuid(payload.document_id), p_file: plain(payload.file), p_lease_token: uuid(payload.lease_token) }));
+      case "confirm_file": return committed(action, await rpc("confirm_exam_document_file", { p_document_id: uuid(payload.document_id), p_file: plain(payload.file), p_lease_token: uuid(payload.lease_token) }));
       case "extraction": {
         const extraction = plain(payload.extraction);
         const fields = plain(extraction.fields);
@@ -249,10 +265,12 @@ Deno.serve(async (req: Request) => {
         if (payload.drive_name) extraction.drive_name = String(payload.drive_name);
         extraction.delivery_id = uuid(payload.delivery_id);
         extraction.lease_token = uuid(payload.lease_token);
-        return response(await rpc("update_exam_document_extraction", { p_document_id: uuid(payload.document_id), p_extraction: extraction }));
+        return committed(action, await rpc("update_exam_document_extraction", { p_document_id: uuid(payload.document_id), p_extraction: extraction }));
       }
-      case "reserve_tasks": return response(await rpc("reserve_exam_document_delivery", { p_destination: String(payload.destination), p_worker: String(payload.worker), p_limit: Number(payload.limit ?? 1) }));
-      case "task_result": return response(await rpc("complete_exam_document_delivery", { p_delivery_id: uuid(payload.delivery_id), p_lease_token: uuid(payload.lease_token), p_outcome: plain(payload.outcome) }));
+      case "reserve_tasks": return response(payload.worker_lease_token === undefined
+        ? await rpc("reserve_exam_document_delivery", { p_destination: String(payload.destination), p_worker: String(payload.worker), p_limit: Number(payload.limit ?? 1) })
+        : await rpc("reserve_exam_pipeline_tasks", { p_destination: String(payload.destination), p_worker: String(payload.worker), p_worker_lease_token: uuid(payload.worker_lease_token), p_limit: Number(payload.limit ?? 1) }));
+      case "task_result": return committed(action, await rpc("complete_exam_document_delivery", { p_delivery_id: uuid(payload.delivery_id), p_lease_token: uuid(payload.lease_token), p_outcome: plain(payload.outcome) }));
       case "reconcile": return response(await rpc("reconcile_exam_document_tasks", {}));
       case "source_error": return response(await rpc("record_exam_document_source_error", {
         p_document_id: uuid(payload.document_id), p_error: String(payload.error || "Falha na obtenção do arquivo"),
