@@ -1,6 +1,6 @@
-import { useDeferredValue, useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { RefreshCw, Search, Check } from 'lucide-react'
+import { RefreshCw, Search, Check, LoaderCircle } from 'lucide-react'
 import { WhatsappLogo } from '@phosphor-icons/react/dist/csr/WhatsappLogo'
 import { toast } from 'sonner'
 import { useExamDocuments, useDocumentAction } from '@/hooks/useExamDocuments'
@@ -43,6 +43,8 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
   const [search, setSearch] = useState('')
   const [urgentOnly, setUrgentOnly] = useState(false)
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set())
+  const [savingContactIds, setSavingContactIds] = useState<Set<string>>(new Set())
+  const contactLocks = useRef(new Set<string>())
 
   const deferredSearch = useDeferredValue(search)
   const action = useDocumentAction()
@@ -95,43 +97,55 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
     toast.success('Fila atualizada!')
   }
 
-  // Ação de Check com micro-fogos e mensagem festiva
   const handleCheckDone = async (doc: ExamDocument, event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    if (completingIds.has(doc.id)) return
+    // A ref covers two clicks before the disabled state has rendered. Keep a
+    // successful contact locked while the invalidated query removes/updates it.
+    if (contactLocks.current.has(doc.id) || doc.contact_status === 'completed') return
 
-    // 1. Pega coordenadas do botão para os fogos
+    const itemIds = doc.items.map(item => item.exam_item_id || item.item_id)
+    if (!doc.pet_id || itemIds.length === 0 || itemIds.some(id => !id)) {
+      toast.error('Confira o cadastro e os itens do exame antes de concluir o contato.')
+      return
+    }
+
     const rect = event.currentTarget.getBoundingClientRect()
     const x = rect.left + rect.width / 2
     const y = rect.top + rect.height / 2
-    triggerFireworksAt(x, y)
+    contactLocks.current.add(doc.id)
+    setSavingContactIds(prev => new Set(prev).add(doc.id))
 
-    // 2. Marca na UI para saída suave
-    setCompletingIds(prev => new Set(prev).add(doc.id))
-
-    const remaining = Math.max(0, counts[activeSquare] - 1)
-    toast.success(`🎉 Parabéns! Menos um exame na fila · Faltam ${remaining}`)
-
-    // 3. Executa persistência no banco
+    let saved = false
     try {
-      const itemIds = doc.items
-        .map(item => item.item_id || item.exam_item_id)
-        .filter((id): id is string => Boolean(id))
+      await action.mutateAsync({
+        name: 'record_exam_document_contact',
+        args: {
+          p_document_id: doc.id,
+          p_item_ids: [...new Set(itemIds)],
+          p_channel: 'whatsapp',
+          p_note: null,
+          p_contacted_at: new Date().toISOString(),
+        },
+      })
+      saved = true
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível salvar o contato. Tente novamente.')
+    } finally {
+      if (!saved) contactLocks.current.delete(doc.id)
+      setSavingContactIds(prev => {
+        const next = new Set(prev)
+        next.delete(doc.id)
+        return next
+      })
+    }
+    if (!saved) return
 
-      if (doc.pet_id && itemIds.length > 0) {
-        await action.mutateAsync({
-          name: 'record_exam_document_contact',
-          args: {
-            p_document_id: doc.id,
-            p_item_ids: itemIds,
-            p_channel: 'whatsapp',
-            p_note: null,
-            p_contacted_at: new Date().toISOString(),
-          },
-        })
-      }
+    setCompletingIds(prev => new Set(prev).add(doc.id))
+    toast.success('🎉 Contato registrado com sucesso.')
+    try {
+      triggerFireworksAt(x, y)
     } catch {
-      // Se houver pendência de vínculo prévio, não bloqueia o feedback visual
+      // Animation failure must not undo or retry an acknowledged contact write.
     }
   }
 
@@ -272,7 +286,9 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
                 const date = examDate(doc)
                 const responsible = doc.responsible_vet_name || doc.assigned_name || 'Sem responsável'
                 const days = parseDaysInGroup(doc)
-                const isExiting = completingIds.has(doc.id)
+                const contactDone = completingIds.has(doc.id) || doc.contact_status === 'completed'
+                const isSavingContact = savingContactIds.has(doc.id)
+                const isExiting = activeSquare === 'contact' && completingIds.has(doc.id)
 
                 return (
                   <div
@@ -330,11 +346,13 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
                         type="button"
                         onClick={e => void handleCheckDone(doc, e)}
                         className="inline-flex items-center gap-2 text-xs font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] py-1 px-2 rounded-lg hover:bg-[hsl(var(--muted))] transition cursor-pointer"
-                        title="Marcar contato concluído"
+                        title={isSavingContact ? 'Salvando contato' : contactDone ? 'Contato concluído' : 'Marcar contato concluído'}
+                        disabled={isSavingContact || contactDone}
+                        aria-busy={isSavingContact}
                       >
-                        <span>Concluir</span>
-                        <span className={`cockpit-check-btn ${isExiting ? 'is-checked' : ''}`}>
-                          <Check size={12} className="ghost-check" />
+                        <span>{isSavingContact ? 'Salvando...' : contactDone ? 'Concluído' : 'Concluir'}</span>
+                        <span className={`cockpit-check-btn ${contactDone ? 'is-checked' : ''}`}>
+                          {isSavingContact ? <LoaderCircle size={12} className="animate-spin" /> : <Check size={12} className="ghost-check" />}
                         </span>
                       </button>
                     </div>
@@ -369,7 +387,9 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
                     const date = examDate(doc)
                     const responsible = doc.responsible_vet_name || doc.assigned_name || 'Sem responsável'
                     const days = parseDaysInGroup(doc)
-                    const isExiting = completingIds.has(doc.id)
+                    const contactDone = completingIds.has(doc.id) || doc.contact_status === 'completed'
+                    const isSavingContact = savingContactIds.has(doc.id)
+                    const isExiting = activeSquare === 'contact' && completingIds.has(doc.id)
 
                     return (
                       <tr
@@ -429,10 +449,12 @@ export function CockpitDashboard({ onOpenCard }: CockpitDashboardProps) {
                             <button
                               type="button"
                               onClick={e => void handleCheckDone(doc, e)}
-                              className={`cockpit-check-btn ${isExiting ? 'is-checked' : ''}`}
-                              title="Marcar contato concluído"
+                              className={`cockpit-check-btn ${contactDone ? 'is-checked' : ''}`}
+                              title={isSavingContact ? 'Salvando contato' : contactDone ? 'Contato concluído' : 'Marcar contato concluído'}
+                              disabled={isSavingContact || contactDone}
+                              aria-busy={isSavingContact}
                             >
-                              <Check size={12} className="ghost-check" />
+                              {isSavingContact ? <LoaderCircle size={12} className="animate-spin" /> : <Check size={12} className="ghost-check" />}
                             </button>
                           </div>
                         </td>
