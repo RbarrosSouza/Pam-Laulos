@@ -27,6 +27,13 @@ export function validateAuditConfig(cfg, executionMode) {
     || typeof cfg.bridgeWorkflowId !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(cfg.bridgeWorkflowId))) throw new Error('INTAKE_AUDIT_BRIDGE_POLICY_INVALID');
   if (cfg.canary === true && (cfg.bridgeEnabled !== true || cfg.allowScheduled !== false || typeof cfg.canaryMessageId!=='string'
     || !/^[a-f\d]{8,64}$/i.test(cfg.canaryMessageId))) throw new Error('INTAKE_AUDIT_CANARY_POLICY_INVALID');
+  if (cfg.historicalThrough !== undefined && (cfg.prospective!==true || cfg.provider!=='gmail'
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(cfg.historicalThrough)
+    || !Number.isFinite(Date.parse(cfg.historicalThrough)) || new Date(cfg.historicalThrough).toISOString()!==cfg.historicalThrough
+    || Date.parse(cfg.historicalThrough)<=Date.parse(cfg.intakeCutoff))) throw new Error('INTAKE_AUDIT_HISTORY_BOUND_INVALID');
+  if (cfg.recheckAfterEnumeration!==undefined && (cfg.provider!=='gmail' || cfg.prospective!==true || cfg.recheckPending!==true || typeof cfg.recheckAfterEnumeration!=='boolean')) throw new Error('INTAKE_AUDIT_RECHECK_ORDER_INVALID');
+  if (cfg.recheckPageSize!==undefined && (!Number.isSafeInteger(cfg.recheckPageSize)||cfg.recheckPageSize<1||cfg.recheckPageSize>50)) throw new Error('INTAKE_AUDIT_RECHECK_SIZE_INVALID');
+  if (cfg.executionBudgetMillis!==undefined && (cfg.executionBudgetMillis!==300000 || cfg.bridgeBudgetMillis!==180000 || cfg.bridgeCheckpointMarginMillis!==30000)) throw new Error('INTAKE_AUDIT_EXECUTION_BUDGET_INVALID');
   if (cfg.canaryRecheckOnly === true && cfg.canary !== true) throw new Error('INTAKE_AUDIT_CANARY_RECHECK_POLICY_INVALID');
   return cfg;
 }
@@ -37,22 +44,47 @@ export function auditManifest(cfg) {
     include_spam_trash: cfg.includeSpamTrash === true, include_deleted: false, initial_received_from: cfg.intakeCutoff, lookback_seconds: cfg.auditLookbackSeconds };
 }
 
+function auditStartTick(state, actual, cfg, executionId, now) {
+  state.tick = { executionId: String(executionId), actions: 0, startedAt: now };
+  state.rowId = actual[0]?.id ?? null;
+  state.lease = { owner: String(executionId), until: now + (cfg.leaseMillis || 900000) };
+  state.busy = false; state.releaseLease = false; delete state.finalResult; state.halt = false;
+  return state;
+}
+
 export function loadAuditState(rows, cfg, executionId, now) {
   const actual = rows.filter(row => row && row.collector_key !== undefined);
   if (actual.length > 1) throw new Error('INTAKE_AUDIT_DUPLICATE_STATE_ROWS');
   if (actual.length && actual[0].collector_key !== cfg.collectorId) throw new Error('INTAKE_AUDIT_STATE_COLLECTOR_MISMATCH');
   let state = actual.length ? JSON.parse(actual[0].state_json) : null;
+  if(actual.length&&state===null&&actual[0].revision!==0)throw new Error('INTAKE_AUDIT_BOOTSTRAP_STATE_INVALID');
   const identityParts=[auditManifest(cfg), cfg.chatwootBaseUrl || null, cfg.serviceUrl];
   // A paused canary and its precise fixture must never become an operational
   // bridge by changing configuration while retaining the same durable state.
   if(cfg.prospective===true) identityParts.push({prospective:true,bridgeEnabled:cfg.bridgeEnabled===true,
     bridgeWorkflowId:cfg.bridgeWorkflowId || null,canary:cfg.canary===true,canaryMessageId:cfg.canaryMessageId || null,canaryRecheckOnly:cfg.canaryRecheckOnly===true});
+  if(cfg.historicalThrough!==undefined)identityParts.push({historicalThrough:cfg.historicalThrough});
+  if(cfg.recheckAfterEnumeration!==undefined)identityParts.push({recheckAfterEnumeration:cfg.recheckAfterEnumeration,recheckPageSize:cfg.recheckPageSize??50});
   const identityHash = auditHash(identityParts);
   if (state && (state.version !== 2 || state.identityHash !== identityHash || !Number.isSafeInteger(actual[0].revision)
     || state.revision !== actual[0].revision)) throw new Error('INTAKE_AUDIT_STATE_IDENTITY_INVALID');
   if (state?.canaryPaused === true) throw new Error('INTAKE_AUDIT_CANARY_PAUSED_AFTER_FAILURE');
   if (actual.length && !auditNumericId(actual[0].id)) throw new Error('INTAKE_AUDIT_STATE_ROW_ID_INVALID');
   if (state && state.phase !== 'done' && state.lease?.owner && state.lease.owner !== String(executionId) && state.lease.until > now) return { ...state, busy: true };
+  if(state?.historicalComplete===true){
+    if(!cfg.historicalThrough||state.phase!=='done'||!Array.isArray(state.coverageGaps)||state.coverageGaps.length
+      ||Date.parse(state.progressThrough)<Date.parse(cfg.historicalThrough)||state.finishResult?.coverageComplete!==true)throw new Error('INTAKE_AUDIT_HISTORY_COMPLETION_UNPROVEN');
+    return auditStartTick(state,actual,cfg,executionId,now);
+  }
+  if(state?.historicalEnumerationComplete===true){
+    if(!cfg.historicalThrough||!Array.isArray(state.coverageGaps)||state.coverageGaps.length
+      ||Date.parse(state.progressThrough)<Date.parse(cfg.historicalThrough))throw new Error('INTAKE_AUDIT_HISTORY_ENUMERATION_UNPROVEN');
+    if(state.phase==='done')state.phase='recheck_list';
+    // The enumeration sweep is already finished. Recovery RPCs are independently
+    // fenced and do not reopen or write new events to that old sweep.
+    delete state.resumeRequest;
+    return auditStartTick(state,actual,cfg,executionId,now);
+  }
   if (!state || state.phase === 'done') {
     const previous = state;
     // A prospective collector must start at its activation boundary even if its
@@ -81,7 +113,11 @@ export function loadAuditState(rows, cfg, executionId, now) {
       if(hadGap)proof=null;
       // Retry one outstanding interval only after a current interval; a
       // permanently broken old page cannot prevent new messages being scanned.
-      if(previous.windowKind==='current'&&previous.finishResult?.coverageComplete===true&&gaps.length&&cfg.canary!==true){windowKind='retry';from=Date.parse(gaps[0].from);through=Date.parse(gaps[0].through);}
+      const historyReached=cfg.historicalThrough!==undefined&&Date.parse(progressThrough)>=Date.parse(cfg.historicalThrough);
+      if(historyReached&&!gaps.length&&previous.finishResult?.coverageComplete===true){
+        return auditStartTick({...previous,coverageGaps:[],progressThrough,coverageHadGap:hadGap,historicalEnumerationComplete:true,historicalComplete:false,phase:'recheck_list'},actual,cfg,executionId,now);
+      }
+      if(historyReached&&gaps.length || previous.windowKind==='current'&&previous.finishResult?.coverageComplete===true&&gaps.length&&cfg.canary!==true){windowKind='retry';from=Date.parse(gaps[0].from);through=Date.parse(gaps[0].through);}
       else from=Math.max(Date.parse(cfg.intakeCutoff),Date.parse(progressThrough)-cfg.overlapSeconds*1000);
     } else if (cfg.continuous === true && previous) {
       if (proof) {
@@ -89,7 +125,7 @@ export function loadAuditState(rows, cfg, executionId, now) {
         from = Math.max(Date.parse(cfg.intakeCutoff), Date.parse(proof.receivedThrough) - cfg.overlapSeconds * 1000);
       } else from = Math.max(Date.parse(cfg.intakeCutoff), Date.parse(previous.receivedFrom));
     }
-    if(cfg.prospective===true&&windowKind==='current')through=Math.min(through,from+cfg.auditLookbackSeconds*1000);
+    if(cfg.prospective===true&&windowKind==='current')through=Math.min(through,from+cfg.auditLookbackSeconds*1000,cfg.historicalThrough===undefined?Infinity:Date.parse(cfg.historicalThrough));
     state = { version: 2, identityHash, revision: actual[0]?.revision || 0, requestId: crypto.randomUUID(),
       receivedFrom: new Date(from).toISOString(), receivedThrough: new Date(through).toISOString(), phase: 'begin', pageCount: 0, messageCount: 0,
       messageKeys: [], conversationIds: [], conversationIndex: 0, cursor: cfg.provider === 'gmail' ? null : 1,
@@ -109,14 +145,7 @@ export function loadAuditState(rows, cfg, executionId, now) {
     if (!state.resumeRequest) state.resumeRequest = { resumeRequestId: crypto.randomUUID(), runToken: state.runToken };
     if (!auditUuid(state.resumeRequest.resumeRequestId) || !auditUuid(state.resumeRequest.runToken)) throw new Error('INTAKE_AUDIT_RESUME_STATE_INVALID');
   }
-  state.tick = { executionId: String(executionId), actions: 0, startedAt: now };
-  state.rowId = actual[0]?.id ?? null;
-  state.lease = { owner: String(executionId), until: now + (cfg.leaseMillis || 900000) };
-  state.busy = false;
-  state.releaseLease = false;
-  delete state.finalResult;
-  state.halt = false;
-  return state;
+  return auditStartTick(state,actual,cfg,executionId,now);
 }
 
 function auditEvents(state, events, afterPhase, haltAfter = false) {
@@ -166,7 +195,9 @@ export function nextAuditOperation(input, cfg, now) {
   if (state.phase === 'done') return { target: 'stop', state, result: { ...state.finishResult, continuationRequired: false, auditOnly: true, monitoring: false,
     receivedFrom: state.receivedFrom, receivedThrough: state.receivedThrough, messagesAudited: state.messagesAudited, originsPending: state.originsPending, originsSaved: state.originsSaved,
     notificationMode: cfg.notificationMode || 'home_only', auditCoverageThrough: state.coverageProof?.receivedThrough || null,
-    incompleteAttemptClosed: state.abortIncomplete === true, lastError: state.lastError || null } };
+    incompleteAttemptClosed: state.abortIncomplete === true, lastError: state.lastError || null,
+    ...(cfg.historicalThrough!==undefined?{historicalEnumerationComplete:state.historicalEnumerationComplete===true,historicalComplete:state.historicalComplete===true,
+      historicalThrough:cfg.historicalThrough,continuationRequired:state.historicalEnumerationComplete===true&&state.historicalComplete!==true}: {}) } };
   if (state.halt || state.tick.actions >= cfg.maxActions || now - state.tick.startedAt > cfg.maxMillis) return { target: 'stop', state,
     result: { coverageComplete: false, scanFinished: false, checkpointAdvanced: false, continuationRequired: true,
       auditOnly: true, monitoring: false, receivedFrom: state.receivedFrom, receivedThrough: state.receivedThrough,
@@ -175,11 +206,19 @@ export function nextAuditOperation(input, cfg, now) {
   if (state.resumeRequest) return { target: 'backend', state, action: 'intake_resume', payload: { collector_id: cfg.collectorId, scope_key: auditHash(auditManifest(cfg)),
     request_id: state.requestId, sweep_id: state.sweepId, run_token: state.resumeRequest.runToken, resume_request_id: state.resumeRequest.resumeRequestId, ttl_seconds: 3600 } };
   if (state.phase === 'recheck_list') return { target: 'backend', state, action: 'intake_list_pending_sources', payload: {
-    collector_id: cfg.collectorId, after_receipt_id: state.recheckCursor ?? null, limit: 50 } };
+    collector_id: cfg.collectorId, after_receipt_id: state.recheckCursor ?? null, limit: cfg.recheckPageSize ?? 50 } };
   if (state.phase === 'recheck_lookup') return { target: 'backend', state, action: 'intake_lookup_source', payload: {
     collector_id: cfg.collectorId, identities: state.recheckItems.map(item => ({ account_id: item.account_id,
       partition_key: item.partition_key, message_id: item.message_id, attachment_id: item.attachment_id })) } };
   if (state.phase === 'bridge') {
+    if(cfg.executionBudgetMillis!==undefined){
+      const started=Number.isFinite(cfg.executionStartedAt)?cfg.executionStartedAt:state.tick.startedAt;
+      if(now-started+cfg.bridgeBudgetMillis+cfg.bridgeCheckpointMarginMillis>cfg.executionBudgetMillis){
+        return {target:'stop',state,result:{coverageComplete:false,scanFinished:false,checkpointAdvanced:false,continuationRequired:true,
+          auditOnly:true,monitoring:false,code:'INTAKE_AUDIT_BRIDGE_YIELD',receivedFrom:state.receivedFrom,receivedThrough:state.receivedThrough}};
+      }
+    }
+
     // In-flight older recheck state has only message IDs, not a proven per-part
     // selection. Re-run lookup instead of dispatching all attachments.
     if(state.bridgeMode==='recheck' && typeof state.recheckBridgeQueue?.[0]==='string'){
@@ -195,7 +234,7 @@ export function nextAuditOperation(input, cfg, now) {
   if (state.phase === 'recheck_resolve') {
     if (!state.recheckResolutions.length) {
       state.recheckCursor = state.recheckNextCursor; delete state.recheckItems; delete state.recheckResolutions; delete state.recheckNextCursor;
-      state.phase = 'gmail_list'; return nextAuditOperation(state, cfg, now);
+      state.phase = state.historicalEnumerationComplete===true?'done':cfg.recheckAfterEnumeration===true&&state.enumerationDone?'finish':'gmail_list'; return nextAuditOperation(state, cfg, now);
     }
     const item = state.recheckResolutions[0];
     return { target: 'backend', state, action: 'intake_resolve_receipt_saved', payload: {
@@ -438,11 +477,11 @@ export function applyAuditResponse(context, response, cfg, now) {
     } else if (context.action === 'intake_begin') {
       if (!auditUuid(body.sweep_id) || !auditUuid(body.run_token) || body.mode !== 'audit') throw new Error('INTAKE_AUDIT_BEGIN_ACK_INVALID');
       state.sweepId = body.sweep_id; state.runToken = body.run_token;
-      state.phase = cfg.provider === 'gmail' ? cfg.recheckPending === true ? 'recheck_list' : 'gmail_list' : 'chatwoot_conversations';
+      state.phase = cfg.provider === 'gmail' ? cfg.recheckPending === true && cfg.recheckAfterEnumeration!==true ? 'recheck_list' : 'gmail_list' : 'chatwoot_conversations';
       if (cfg.resumeFence === true && body.replayed === true) state.resumeRequest = { resumeRequestId: crypto.randomUUID(), runToken: state.runToken };
     } else if (context.action === 'intake_event') {
       if (body.recorded !== true || body.sweep_id !== state.sweepId) throw new Error('INTAKE_AUDIT_EVENT_ACK_INVALID');
-      if (state.phase === 'enumeration') { state.enumerationDone = true; state.phase = 'finish'; }
+      if (state.phase === 'enumeration') { state.enumerationDone = true; state.phase = cfg.recheckAfterEnumeration===true&&cfg.recheckPending===true?'recheck_list':'finish'; }
       else state.pendingEvents.shift();
     } else if (context.action === 'intake_finish') {
       if (typeof body.coverageComplete !== 'boolean' || typeof body.scanFinished !== 'boolean' || body.checkpointAdvanced !== false) throw new Error('INTAKE_AUDIT_FINISH_ACK_INVALID');
@@ -461,7 +500,14 @@ export function applyAuditResponse(context, response, cfg, now) {
       if (body.next_cursor !== null && (body.items.length === 0 || body.next_cursor !== last)) throw new Error('INTAKE_AUDIT_RECHECK_CURSOR_INVALID');
       state.recheckItems = body.items; state.recheckNextCursor = body.next_cursor;
       if (body.items.length) state.phase = 'recheck_lookup';
-      else { state.recheckCursor = null; delete state.recheckItems; delete state.recheckNextCursor; state.phase = 'gmail_list'; }
+      else {
+        if(state.historicalEnumerationComplete===true){
+          // Only an empty first page proves that no original remains pending.
+          // Empty after a round-robin tail merely wraps for the next tick.
+          state.historicalComplete=state.recheckCursor===null;state.phase='done';
+        }else state.phase=cfg.recheckAfterEnumeration===true&&state.enumerationDone?'finish':'gmail_list';
+        state.recheckCursor=null;delete state.recheckItems;delete state.recheckNextCursor;
+      }
     } else if (context.action === 'intake_resolve_receipt_saved') {
       const expected = state.recheckResolutions[0];
       if (!expected || body.contract !== 'exam_intake_receipt_resolution_v1' || body.disposition !== 'saved'
@@ -491,7 +537,10 @@ export function applyAuditResponse(context, response, cfg, now) {
         return issue?[{kind:'attachment_retry_failed',partition_key:receipt.partition_key,message_id:receipt.message_id,attachment_id:receipt.attachment_id,code:issue.code}]:[];
       });
       delete state.recheckIssues;
-      if(failures.length)return auditEvents(state,failures,'recheck_resolve');
+      if(failures.length&&state.historicalEnumerationComplete===true){
+        state.lastError={stage:'historical_recheck',code:'historical_original_still_pending',at:new Date(now).toISOString()};
+        state.historicalRecheckFailures=failures.map(item=>({message_id:item.message_id,attachment_id:item.attachment_id,code:item.code}));
+      }else if(failures.length)return auditEvents(state,failures,'recheck_resolve');
       state.phase = 'recheck_resolve';
     } else if (context.action === 'intake_lookup_source') {
       const items = validateAuditLookup(body, context.payload.identities), job = state.lookupJobs[0];
