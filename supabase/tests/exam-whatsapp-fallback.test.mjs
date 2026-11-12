@@ -22,7 +22,7 @@ before(async()=>{
  ({db,role,rpc}=await collectionFixtureDB());await db.exec('RESET ROLE');
  for(const name of ['20261016000006_exam_operational_flow.sql','20261016000007_exam_clinical_group_eligibility.sql','20261016000008_exam_gmail_origin_identity.sql','20261016000009_exam_group_after_processing.sql','20261016000010_exam_group_without_identification.sql','20261027000023_exam_intake_receipts_incidents.sql','20261027000024_exam_hopelab_notice_snapshots.sql','20261027000025_exam_intake_panel_coverage.sql','20261027000026_exam_intake_source_lookup.sql','20261027000027_exam_intake_version_review.sql'])await db.exec(await readFile(new URL(name,migrations),'utf8'));
  await db.exec('CREATE TABLE public.exam_document_responsibility(document_id uuid PRIMARY KEY REFERENCES public.exam_document(id)); CREATE TABLE public.exam_document_reaction(document_id uuid REFERENCES public.exam_document(id)); GRANT ALL ON public.exam_document_reaction TO service_role');
- for(const name of ['20261028000040_exam_document_deletion.sql','20261028000041_exam_delete_after_group.sql','20261028000042_exam_delete_empty_aliases.sql','20261028000043_exam_versions_group_independent.sql','20261103000044_exam_whatsapp_fallback.sql','20261104000046_exam_fallback_primary_priority.sql','20261104000047_exam_gmail_drive_retry_policy.sql'])await db.exec(await readFile(new URL(name,migrations),'utf8'));
+ for(const name of ['20261028000040_exam_document_deletion.sql','20261028000041_exam_delete_after_group.sql','20261028000042_exam_delete_empty_aliases.sql','20261028000043_exam_versions_group_independent.sql','20261103000044_exam_whatsapp_fallback.sql','20261104000046_exam_fallback_primary_priority.sql','20261104000047_exam_gmail_drive_retry_policy.sql','20261112020843_exam_fallback_discovery_dedupe.sql'])await db.exec(await readFile(new URL(name,migrations),'utf8'));
  await db.query('INSERT INTO auth.users(id) VALUES($1)',[actor]);await db.query("INSERT INTO exam_document_member(user_id,role) VALUES($1,'admin')",[actor]);
  await role('service_role');await db.query("UPDATE exam_document_configuration SET ingestion_enabled=true,enabled_destinations=ARRAY['drive','processing','group','nexus'],notification_cutoff=now()-interval '2 days',group_destination_key='chatwoot:1:inbox:2:conversation:23'");
 });
@@ -340,4 +340,93 @@ test('typed Gmail failure and retry cooldown preserve fallback eligibility and i
  assert.equal(after.last_progress_at,before.last_progress_at);assert.equal(after.reason,'primary_failed');
  assert.equal((await one('SELECT sha256 FROM exam_document WHERE id=$1',[r.document_id])).sha256,r.document.sha256);
  const claim=await group(r.document_id);assert.equal(claim.claimed,true);assert.equal(claim.reason,'primary_failed');
+});
+
+function discoveredSource(extra={}) {
+ const id=String(++seq);
+ return {channel:'whatsapp',account_id:'chatwoot:1:inbox:2',message_id:id,attachment_id:'chatwoot-attachment:'+id,original_name:'fixture.pdf',mime_type:'application/pdf',received_at:new Date(Date.now()-600000).toISOString(),
+  metadata:{provider:'chatwoot',chatwoot_account_id:'1',chatwoot_inbox_id:'2',chatwoot_conversation_id:'3',chatwoot_message_id:id,chatwoot_attachment_id:id,sender_phone:'5511999998888',sender_allowlisted:true,unknown_sender:false,exam_candidate:true,missing_attachment:false,unsupported_attachment:false,pending_reason:null},...extra};
+}
+const discover=items=>rpc('enqueue_exam_fallback_sources',[JSON.stringify(items)]);
+const lookupSource=item=>one('SELECT * FROM exam_document_source WHERE channel=$1 AND account_id=$2 AND message_id=$3 AND attachment_id=$4',[item.channel,item.account_id,item.message_id,item.attachment_id]);
+
+test('durable discovery replay and URL rotation perform no repeated reservation/event or queue writes',async()=>{
+ const item=discoveredSource();item.metadata.attachment_url_sha256='a'.repeat(64);
+ assert.deepEqual(await discover([item]),{acknowledged:1,enqueued:1,unchanged:0});
+ const s=await lookupSource(item);
+ await db.query("UPDATE exam_fallback_source_queue SET attempts=4,next_attempt_at=now()+interval '15 minutes',last_error_code='fixture_pending' WHERE source_id=$1",[s.id]);
+ const queue=await one('SELECT * FROM exam_fallback_source_queue WHERE source_id=$1',[s.id]);
+ const events=await one('SELECT count(*) n FROM exam_document_event WHERE document_id=$1',[s.document_id]);
+ const ack=await one('SELECT xmin::text version FROM exam_fallback_discovery_ack WHERE source_id=$1',[s.id]);
+ for(let i=0;i<3;i++) {
+  item.metadata.attachment_url_sha256=String(i+1).repeat(64);
+  assert.deepEqual(await discover([item]),{acknowledged:1,enqueued:0,unchanged:1});
+ }
+ assert.deepEqual(await one('SELECT * FROM exam_fallback_source_queue WHERE source_id=$1',[s.id]),queue);
+ assert.deepEqual(await one('SELECT count(*) n FROM exam_document_event WHERE document_id=$1',[s.document_id]),events);
+ assert.deepEqual(await one('SELECT xmin::text version FROM exam_fallback_discovery_ack WHERE source_id=$1',[s.id]),ack);
+});
+
+test('late attachment and missing media recovery are acknowledged without resetting an existing pending retry',async()=>{
+ const item=discoveredSource();item.metadata.missing_attachment=true;item.metadata.pending_reason='pdf_url_missing_or_untrusted';
+ await discover([item]);const s=await lookupSource(item);
+ await db.query("UPDATE exam_fallback_source_queue SET attempts=3,next_attempt_at=now()+interval '5 minutes' WHERE source_id=$1",[s.id]);
+ const queue=await one('SELECT * FROM exam_fallback_source_queue WHERE source_id=$1',[s.id]);
+ item.metadata.missing_attachment=false;item.metadata.pending_reason=null;
+ assert.deepEqual(await discover([item]),{acknowledged:1,enqueued:1,unchanged:0});
+ assert.equal((await lookupSource(item)).metadata.missing_attachment,false);
+ assert.deepEqual(await one('SELECT * FROM exam_fallback_source_queue WHERE source_id=$1',[s.id]),queue);
+ const late=structuredClone(item);late.attachment_id='chatwoot-attachment:'+String(++seq);late.metadata.chatwoot_attachment_id=String(seq);
+ assert.deepEqual(await discover([item,late]),{acknowledged:2,enqueued:1,unchanged:1});
+ assert.notEqual((await lookupSource(late)).id,s.id);
+ for(const field of ['original_name','mime_type','received_at']) {
+  const changed=structuredClone(item);
+  if(field==='mime_type'){changed.mime_type='text/plain';await assert.rejects(discover([changed]),{code:'42501'});}
+  else {changed[field]=field==='received_at'?new Date(Date.now()-500000).toISOString():'renamed.pdf';assert.equal((await discover([changed])).unchanged,0);}
+ }
+});
+
+test('a rejected member rolls the entire batch back; malformed and changed scope cannot hit the cache',async()=>{
+ const first=discoveredSource(),bad=discoveredSource();bad.metadata.sender_allowlisted=false;
+ await assert.rejects(discover([first,bad]),{code:'42501'});assert.equal(await lookupSource(first),undefined);
+ await discover([first]);
+ for(const changes of [{sender_allowlisted:false},{unknown_sender:true},{chatwoot_conversation_id:'99'},{chatwoot_account_id:'99'},{chatwoot_message_id:'99'},{url:'https://secret.invalid'}]) {
+  const changed=structuredClone(first);Object.assign(changed.metadata,changes);await assert.rejects(discover([changed]),{code:'42501'});
+ }
+ await db.query("UPDATE exam_fallback_configuration SET source_conversation_id='9'");
+ await assert.rejects(discover([first]),{code:'42501'});
+ await db.query("UPDATE exam_fallback_configuration SET source_conversation_id='3'");
+ await assert.rejects(discover(Array.from({length:101},()=>first)),/Invalid fallback discovery batch/);
+ for(const browser of ['anon','authenticated']){
+  await role(browser);await assert.rejects(discover([first]),{code:'42501'});await assert.rejects(db.query('SELECT * FROM exam_fallback_discovery_ack'),{code:'42501'});
+ }
+ await role('service_role');
+});
+
+test('unsupported sources stay visible, recover when metadata changes, and terminal queue removal never resurrects delivery',async()=>{
+ const review=discoveredSource();review.metadata.unsupported_attachment=true;review.metadata.pending_reason='pdf_metadata_mismatch';
+ assert.deepEqual(await discover([review]),{acknowledged:1,enqueued:0,unchanged:0});
+ const s=await lookupSource(review);
+ assert.equal((await discover([review])).unchanged,1);
+ assert.equal(Number((await one("SELECT count(*) n FROM exam_intake_incident WHERE document_id=$1 AND code='unsupported_attachment_requires_review'",[s.document_id])).n),1);
+ review.metadata.unsupported_attachment=false;review.metadata.pending_reason=null;
+ assert.equal((await discover([review])).enqueued,1);
+ await db.query("INSERT INTO exam_document_delivery(document_id,destination,status,destination_key,external_id) VALUES($1,'group','submitted','chatwoot:1:inbox:2:conversation:23','fixture')",[s.document_id]);
+ await db.query('DELETE FROM exam_fallback_source_queue WHERE source_id=$1',[s.id]);
+ assert.equal((await discover([review])).unchanged,1);
+ review.original_name='changed.pdf';assert.equal((await discover([review])).enqueued,0);
+ assert.equal(await one('SELECT * FROM exam_fallback_source_queue WHERE source_id=$1',[s.id]),undefined);
+ assert.equal((await one("SELECT status FROM exam_document_delivery WHERE document_id=$1 AND destination='group'",[s.document_id])).status,'submitted');
+});
+
+test('a corrected exclusion and a receipt for another destination cannot permanently suppress discovery',async()=>{
+ const corrected=discoveredSource();const initial=await rpc('reserve_exam_intake_source',[JSON.stringify(corrected)]);
+ await db.query("UPDATE exam_document SET identification_status='not_exam' WHERE id=$1",[initial.document_id]);
+ assert.equal((await discover([corrected])).enqueued,0);
+ await db.query("UPDATE exam_document SET identification_status='review' WHERE id=$1",[initial.document_id]);
+ assert.equal((await discover([corrected])).enqueued,1);
+ const historical=discoveredSource();const prior=await rpc('reserve_exam_intake_source',[JSON.stringify(historical)]);
+ await db.query("INSERT INTO exam_document_delivery(document_id,destination,status,destination_key,external_id) VALUES($1,'group','submitted','another-destination','fixture')",[prior.document_id]);
+ assert.equal((await discover([historical])).enqueued,1);
+ const src=await lookupSource(historical);assert(await one('SELECT * FROM exam_fallback_source_queue WHERE source_id=$1',[src.id]));
 });

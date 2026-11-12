@@ -145,6 +145,16 @@ test('source error is sanitized and leaves remaining work resumable', async () =
   assert(!JSON.stringify(result).includes('Authorization'));
 });
 
+test('typed provider authorization and scope failures remain distinct from transient availability', async () => {
+  for (const code of ['conversation_unavailable', 'provider_scope_mismatch', 'provider_json_invalid', 'source_request_failed', 'request_timeout']) {
+    const p = provider([]);
+    p.io.getMessages = async () => { const error = new Error(code); error.name = 'ChatwootFallbackError'; throw error; };
+    const result = await collectWhatsappOrigins(cfg(), p.io, window());
+    assert.equal(result.reason, 'source_error'); assert.equal(result.errorCode, 'whatsapp_' + code);
+    assert.equal(result.cursor.beforeMessageId, null);
+  }
+});
+
 test('time budget aborts an unresponsive provider read and does not discard cursor', async () => {
   let aborted = false;
   const result = await collectWhatsappOrigins(cfg(), {

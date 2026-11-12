@@ -233,6 +233,7 @@ export function createChatwootClient(config: ChatwootConfig, dependencies: Chatw
   async function getConversation(conversationId: string | number, signal?: AbortSignal): Promise<Json> {
     const id = providerId(conversationId);
     const body = await request(apiUrl(id), { method: "GET", headers: { api_access_token: config.apiAccessToken } }, async response => {
+      if (response.status === 408 || response.status === 429 || response.status >= 500) fail("source_request_failed");
       if (response.status !== 200) fail("conversation_unavailable");
       return jsonResponse(response);
     }, signal);
@@ -254,6 +255,7 @@ export function createChatwootClient(config: ChatwootConfig, dependencies: Chatw
     const id = providerId(conversationId), cursor = before == null ? null : providerId(before);
     const body = await request(apiUrl(id, "/messages" + (cursor ? "?before=" + cursor : "")),
       { method: "GET", headers: { api_access_token: config.apiAccessToken } }, async response => {
+        if (response.status === 408 || response.status === 429 || response.status >= 500) fail("source_request_failed");
         if (response.status !== 200) fail("messages_unavailable");
         return jsonResponse(response);
       }, signal);

@@ -309,7 +309,9 @@ export async function collectWhatsappOrigins(config: CollectorConfig, io: Collec
     }
     return result("complete");
   } catch (error) {
-    const code = error instanceof Error && /^whatsapp_[a-z0-9_]+$/.test(error.message) ? error.message : "whatsapp_source_request_failed";
+    const code = error instanceof Error && /^whatsapp_[a-z0-9_]+$/.test(error.message) ? error.message
+      : error instanceof Error && error.name === 'ChatwootFallbackError' && /^[a-z][a-z0-9_]{0,80}$/.test(error.message)
+        ? 'whatsapp_' + error.message : "whatsapp_source_request_failed";
     return result(code === "whatsapp_time_budget" ? "time_budget" : "source_error", code);
   }
 }
