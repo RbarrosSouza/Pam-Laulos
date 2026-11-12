@@ -21,6 +21,21 @@ function object(value: unknown): Json { if (!value || typeof value !== 'object' 
 function uuid(value: unknown): string { if (typeof value !== 'string' || !/^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(value)) throw new Error('fallback_identity_invalid'); return value; }
 export async function sha256(bytes: Uint8Array): Promise<string> { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.slice().buffer)), b => b.toString(16).padStart(2, '0')).join(''); }
 export function safeError(error: unknown): string { const code = error instanceof Error ? error.message : ''; return /^[a-z][a-z0-9_]{0,95}$/.test(code) ? code : 'fallback_operation_failed'; }
+export function isFallbackTransient(code: string): boolean {
+  return ['fallback_backend_unavailable', 'fallback_backend_timeout', 'whatsapp_source_request_failed', 'whatsapp_request_timeout'].includes(code);
+}
+/** Keep deterministic business fences separate from native serialization/availability failures. */
+export function fallbackBackendError(error: unknown, status?: number): Error {
+  const value = error && typeof error === 'object' ? error as { code?: string; message?: string; name?: string } : {};
+  const code = String(value.code || '');
+  if (code === 'PT409') return new Error('fallback_fence_conflict');
+  if (code === '42501') return new Error('fallback_scope_denied');
+  if (value.message?.includes('fallback_run_deadline')) return new Error('fallback_run_deadline');
+  if (value.name === 'TimeoutError' || code === '57014' || value.message?.includes('fallback_backend_timeout')) return new Error('fallback_backend_timeout');
+  if (status === 429 || (status != null && status >= 500) || code === '40001' || /^08|^53|^57P0|^PGRST00[0-3]$/.test(code)
+    || value.name === 'TypeError' || value.name === 'AbortError' || value.message?.includes('fallback_backend_unavailable')) return new Error('fallback_backend_unavailable');
+  return new Error('fallback_rpc_failed');
+}
 function field(value: unknown): string { if (typeof value !== 'string' || !value) throw new Error('fallback_response_invalid'); return value; }
 export function groupTask(row: Json): GroupTask {
   const doc = object(row.document);
@@ -64,7 +79,10 @@ export async function processFallbackOrigin(origin: CollectedOrigin, worker: str
     if (typeof document.sha256 === 'string' && Number(document.size_bytes) > 0) {
       let stored: Uint8Array | null = null;
       if (document.staging_bucket === 'exam_documents_staging' && document.staging_path === documentId + '/original.pdf') {
-        try { stored = await ports.download('exam_documents_staging', documentId + '/original.pdf'); } catch { /* source may still recover a temporarily unreadable object */ }
+        try { stored = await ports.download('exam_documents_staging', documentId + '/original.pdf'); } catch (error) {
+          if (isFallbackTransient(safeError(error)) || safeError(error) === 'fallback_run_deadline') throw error;
+          /* source may still recover an individually unreadable object */
+        }
       }
       if (!stored && document.file_status === 'saved' && ports.readSavedOriginal) {
         try { stored = await ports.readSavedOriginal(document); } catch { /* Drive may be the unavailable dependency */ }
@@ -131,6 +149,9 @@ export async function processFallbackOrigin(origin: CollectedOrigin, worker: str
   } catch (error) {
     if (dispatchDeferred) return { state: 'preserved', durable: true, attempted, ...(documentId ? { documentId } : {}), code: dispatchDeferred };
     const code = safeError(error);
+    // A shared backend failure ends this run. Do not multiply the outage with a
+    // per-item event, finish RPC and the next queue item; the run checkpoint owns it.
+    if (isFallbackTransient(code) || code === 'fallback_run_deadline') throw error;
     // Keep the source in the window for a later attempt. Never repeat a POST here.
     await ports.failure(documentId, code);
     return { state: 'failed', durable: false, attempted, ...(documentId ? { documentId } : {}), code };

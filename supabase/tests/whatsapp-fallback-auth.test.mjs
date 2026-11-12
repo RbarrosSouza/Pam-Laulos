@@ -41,22 +41,22 @@ test('dedicated Bearer remains exact and constant-time compared, with no HMAC do
  assert.equal(await auth(request({headers:{Authorization:'Bearer '+key}}),key,'x'.repeat(1025),now),false);
 });
 
-test('actual handler preserves legacy and PT409 fence failures without reaching collection or dispatch',async()=>{
+test('actual handler separates native transient failures from business fences before collection or dispatch',async()=>{
  const handlerSource=await readFile(new URL('../functions/exam-whatsapp-fallback/index.ts',import.meta.url),'utf8');
  const script=ts.transpileModule(handlerSource.replace(/^import .*;\s*$/gm,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
  const runnerSource=await readFile(new URL('../functions/exam-whatsapp-fallback/runner.ts',import.meta.url),'utf8');
  const runnerScript=ts.transpileModule(runnerSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
- const {safeError}=await import('data:text/javascript;base64,'+Buffer.from(runnerScript).toString('base64'));
- for(const [code,expected] of [['40001','fallback_fence_conflict'],['PT409','fallback_fence_conflict'],['42501','fallback_scope_denied'],['22023','fallback_rpc_failed']]) {
+ const {safeError,fallbackBackendError,isFallbackTransient}=await import('data:text/javascript;base64,'+Buffer.from(runnerScript).toString('base64'));
+ for(const [code,expected,status] of [['40001','fallback_backend_unavailable',503],['PT409','fallback_fence_conflict',409],['42501','fallback_scope_denied',403],['22023','fallback_rpc_failed',422]]) {
   let handler;const calls=[];
-  vm.runInNewContext(script,{Request,Response,TextDecoder,TextEncoder,Uint8Array,AbortSignal,Error,safeError,
+  vm.runInNewContext(script,{Request,Response,TextDecoder,TextEncoder,Uint8Array,AbortSignal,Error,safeError,fallbackBackendError,isFallbackTransient,
    authenticateFallbackRequest:(req,secret,text)=>auth(req,secret,text,now),
    selectExamSupabasePrivilegedKey:()=> 'synthetic-service-key',
    createClient:()=>({rpc:async name=>{calls.push(name);return {data:null,error:{code,message:'Provider detail must not leave handler'}};},from:()=>{throw new Error('unexpected_collection');}}),
    Deno:{env:{get:name=>name==='EXAM_FALLBACK_TRIGGER_KEY'?key:name==='SUPABASE_URL'?'https://backend.example.invalid':undefined},serve:fn=>{handler=fn;}},
   });
   const response=await handler(new Request(request(),{body}));
-  assert.equal(response.status,503);
+  assert.equal(response.status,status);
   assert.deepEqual(await response.json(),{error:expected,partial:false,nextAction:'reconcile_before_retry'});
   assert.deepEqual(calls,['consume_exam_fallback_scheduler_trigger']);
  }

@@ -77,6 +77,19 @@ test('activation preflight proves source and group message read access without a
   ]);
 });
 
+test('provider reads distinguish temporary unavailability from authorization and permanent response failures', async () => {
+  for (const status of [408, 429, 500, 503]) {
+    const c = client(async () => new Response(null, { status }));
+    await assert.rejects(c.getConversation(3), /source_request_failed/);
+    await assert.rejects(c.listMessages(3), /source_request_failed/);
+  }
+  for (const status of [401, 403, 404]) {
+    const c = client(async () => new Response(null, { status }));
+    await assert.rejects(c.getConversation(3), /conversation_unavailable/);
+    await assert.rejects(c.listMessages(3), /messages_unavailable/);
+  }
+});
+
 test('preflight rejects bot-style partial permission, wrong group JID, and message scope mismatch', async () => {
   for (const deniedConversation of ['3', '23']) {
     const c = client(async (url, init) => {
